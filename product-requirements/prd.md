@@ -9,10 +9,12 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
 2. Ideally uses web-based UI languages (React, CSS, etc) so that I can inspect and adjust the code manually
 3. Must be able to read, write, modify files from disk
 4. Must write meta-data in an industry standard (EXIF, XMP, IPTC, etc) that can be interpreted by tools like Apple Photos, Lightroom, etc
-5. The software runs in sessions and a session persists across opening and closing the app, including all imported photos, GPX files, pending changes, and rollback history. I can clear a session at any time to start a new session. A confirmation dialog is shown before the session is cleared.
-6. Only one session can exist at a time. The app cannot be opened in multiple windows or instances simultaneously.
-7. Clearing a session discards all imported photos, GPX files, un-applied pending changes, and the full change history. Metadata that was already written to disk via a prior Apply is unaffected.
-8. Video files are out of scope.
+5. The visual design follows the macOS 26 design language: liquid glass controls, the macOS 26 system font stack (SF Pro), standard macOS 26 system button and text colors, and border radii using multiples of a 4px base unit.
+6. The app must support dark mode. Dark mode is enabled automatically when the system is set to dark mode (`prefers-color-scheme: dark`). There is no in-app toggle; the app always follows the system setting. All UI elements — photo grid, inspector panel, map overlay, top bar, floating controls, and modals — must render correctly in both light and dark mode.
+7. The software runs in sessions and a session persists across opening and closing the app, including all imported photos, GPX files, pending changes, and rollback history. I can clear a session at any time to start a new session. A confirmation dialog is shown before the session is cleared.
+8. Only one session can exist at a time. The app cannot be opened in multiple windows or instances simultaneously.
+9. Clearing a session discards all imported photos, GPX files, un-applied pending changes, and the full change history. Metadata that was already written to disk via a prior Apply is unaffected.
+10. Video files are out of scope.
 
 ### Metadata standards & write behavior
 
@@ -54,8 +56,9 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
 
 ### Photo Management
 
+0. Photo Management is handled in the Photo Manager panel, which displays thumbnails of imported photos and is controlled using floating controls.
 1. Photos can be loaded into the software either through file browsing or through drag and drop
-    1. Clicking "Select Photos" in the Photo Manager panel sub-bar opens a multi-select file picker for browsing and selecting files.
+    1. Clicking "Import Photos" in the Photo Manager panel floating controls opens a multi-select file picker for browsing and selecting files.
     2. Directories can be dragged and dropped in as well. Only compatible files within those directories and sub-directories will be imported.
 2. Photo thumbnails are shown in a grid inside the Photo Manager panel
     1. If photo thumbnails need to be generated, display an Import modal that shows the progress for importing including generating and storing thumbnail files.
@@ -70,7 +73,7 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
 9. I can select one or more photos at a time in the grid.
     1. Multi-select follows standard practice for multi-select (hold shift to select multiple, hold command to unselect a specific photo, etc)
 10. I can add or remove files from the active selection using the same multi-select keyboard shortcuts at any time, even after making changes in the Inspector Panel.
-11. I can remove one or more photos from the session by selecting them and clicking a "Remove Selected Photos" button in the Photo Manager panel sub-bar. This does not delete the file from disk; it only removes the photo from the current session.
+11. I can remove one or more photos from the session by selecting them and clicking a "Remove Selected Photos" button in the Photo Manager panel floating controls. This does not delete the file from disk; it only removes the photo from the current session.
 12. I can drag and drop selected photo(s) within the grid to re-order them.
 13. If I drop one or more photos on top of another in the grid, the dropped photos inherit all of the properties from the photo that they were dropped on.
     1. When dragging photos around the grid, a photo in the grid turns dark to indicate you can drop there when hovering over a photo in the grid.
@@ -81,21 +84,24 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
     2. Camera Details
     3. Location
     4. Vibe Tag
-16. The Photo Manager panel has its own sub-bar (distinct from the global Top Bar) containing: a “Select Photos” button, a “Remove Selected Photos” button, a Grid Size slider, and a Working Time Zone dropdown. The Top Bar contains only the global Apply, Roll Back, and Reset controls.
-    1. The Grid Size slider increases or decreases the size of photo thumbnails in the grid.
-    2. The Working Time Zone dropdown is an IANA timezone selector. It controls only how photos are grouped into day blocks and how capture times are displayed in the Photo Manager panel. It does not write any data to photos and does not queue any pending changes. The default is US Pacific Time.
-    3. The "Select Photos" button opens a multi-select file picker.
+16. The photo grid fills the full content area of the window and scrolls vertically. UI controls for managing photos float as overlays above it — there is no opaque sub-bar separating controls from photos.
+    1. In the top-left corner of the photo grid, floating liquid glass controls include: an **Import Photos** button and a **Remove Selected Photos** button.
+    2. In the top-right corner of the photo grid (to the left of the Inspector Panel), a floating **Working Time Zone** dropdown and a **Grid Size** +/- control float above the photos.
+    4. The Working Time Zone dropdown is an IANA timezone selector. It controls only how photos are grouped into day blocks and how capture times are displayed. It does not write any data to photos and does not queue any pending changes. The default is US Pacific Time.
+    5. The Grid Size control increases or decreases the size of photo thumbnails in the grid.
 18. As a general principle, if a photo has meta-data set, it is never over-written to being “unset” (such as through drag and dropping) unless done-so explicitly in the right-hand Inspector panel.
 19. If I select multiple photos that have different values for any meta-data, that section of the Inspector Panel says “Multiple Values” where there are multiple values. Where values match, those values are rendered.
     1. If I change the value for something that says “Multiple Values” that overwrites all of the unique values with the new single value. A confirmation dialog asks “Are you sure you want to change X values with this new value?”
-20. Whenever I set new data for selected photos in the right-hand Inspector Panel, the photo thumbnail receives a blue dot in the top right to indicate a pending change. In a separate bar above the Photo Manager panel, an Apply button becomes active when at least one photo has changes to be written. I must click the “Apply” button to write pending changes to the files.
+20. Whenever I set new data for selected photos in the right-hand Inspector Panel, the photo thumbnail receives a blue dot in the top right to indicate a pending change. In a separate control group (The Control Bar) above the Inspector panel, an Apply button becomes active when at least one photo has changes to be written. I must click the “Apply” button to write pending changes to the files.
+    0. The Control Bar (with Apply, Roll Back, Reset All/Selected) sits above the Inspector panel as a separate UI element.
     1. When changes are Applied a modal pops up with a progress bar. The bar shows what percent of photos have been successfully updated. Interaction with the software is not allowed. The user can cancel progress at any time. This will undo the edits that were made so far. It may take time to undo the edits. A progress bar for this may show as well. It cannot be cancelled.
-    2. After photos have been modified in an Apply, there is a Roll Back button available in the top bar. The app retains rollback history back to the start of the session, so multiple sequential Roll Back operations are possible. Each Roll Back undoes the most recent Apply, restoring all affected files to their state before that Apply. Roll Back itself cannot be undone — once rolled back, that Apply is gone from history.
-    3. When no photos are selected, a “Reset All Photos” button in the Top Bar resets the metadata of every photo in the session to the values present when each photo was first imported. When one or more photos are selected, the button changes to “Reset Selected Photos” and resets only the selected photos.
+    2. After photos have been modified in an Apply, there is a Roll Back button available in the Control Bar. The app retains rollback history back to the start of the session, so multiple sequential Roll Back operations are possible. Each Roll Back undoes the most recent Apply, restoring all affected files to their state before that Apply. Roll Back itself cannot be undone — once rolled back, that Apply is gone from history.
+    3. When no photos are selected, a “Reset All" button in the Control Bar resets the metadata of every photo in the session to the values present when each photo was first imported.
+    4. When one or more photos are selected, the button changes to “Reset Selected” and resets only the selected photos.
 
 ### Date & Time
 
-1. The Working Time Zone dropdown in the Photo Manager panel sub-bar is for display and organization only. It sets how capture times are shown and how photos are grouped into day blocks. Changing it does not queue any metadata changes and does not affect what is written to disk.
+1. The Working Time Zone dropdown in the Photo Manager panel floating controls is for display and organization only. It sets how capture times are shown and how photos are grouped into day blocks. Changing it does not queue any metadata changes and does not affect what is written to disk.
     1. Capture Date and Time are displayed in the Photo Manager panel as wall-clock time interpreted relative to the Working Time Zone.
     2. The default Working Time Zone is US Pacific Time.
 2. The Date & Time section of the Inspector Panel includes a Time Zone dropdown (IANA timezone selector) alongside the date and time inputs. This is the control that determines the timezone offset written to files.
@@ -132,7 +138,7 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
     1. I can drag and pan the map to update where the pin is.
     2. I can type a location into a search field above the map. The field performs a live type-ahead search, showing a dropdown of suggestions as I type. I can select a result from the dropdown, or press enter to accept the top result. The map updates to the selected location.
     3. The location value and the Time Zone value in the Inspector Panel must be consistent. If the IANA timezone implied by the set location does not match the Time Zone set in the Inspector Panel, an alert is shown inline in the Inspector Panel indicating the mismatch. No action is forced on the user; it is advisory only.
-4. Across the bottom of the user interface there is a horizontal Map panel that I can drag up or down to make smaller or larger. Making it taller (larger) takes away space from the Photo Manager panel.
+4. Across the bottom of the Photo Manager area there is a horizontal Map panel that floats as an overlay above the photo grid. I can drag its top edge up or down to make it taller or shorter. Making it taller reveals more map and covers more of the photo grid below, but does not reduce the total scroll height of the grid.
     1. The Map Panel shows pins for where all photos are that are tagged with a location.
     2. When more than one photo is at a location, a bubble appears instead of a pin with a number inside indicating the count of photos at that location.
     3. At various zoom levels if many pins are near each other they are grouped together into a single cluster.
@@ -190,7 +196,7 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
         2. “These photos were taken in Golden Gate Park” → GPP Coordinates
         3. “These photos were taken on Christmas last year” → 12/25/2025
 3. After hitting enter, a preview set of suggested meta-data updates is displayed. The user can select “Accept” or “Follow Up”
-    1. Accept queues the suggested metadata as pending changes on the selected photos, exactly as if the values had been set manually in the Inspector Panel. Changes are not written to disk until the user clicks Apply in the Top Bar.
+    1. Accept queues the suggested metadata as pending changes on the selected photos, exactly as if the values had been set manually in the Inspector Panel. Changes are not written to disk until the user clicks Apply in the Control Bar.
     2. Follow Up brings the prior suggestion into the chat context, and allows the user to provide feedback e.g. “I meant Portland, Maine, not Portland, Oregon”
 4. Vibe Tag EXIF compatibility constraints:
     1. The Vibe Tag can only set metadata values within the following whitelist. It will not set or adjust any other metadata values:

@@ -1,5 +1,17 @@
 # Technical Architecture
 
+## 0. Platform Support
+
+**Target platform:** macOS only.
+
+**Minimum macOS version:** macOS 14 (Sonoma). The app targets the macOS 26 design language (liquid glass, SF Pro) and is developed and tested on macOS 26 (Darwin 25). macOS 14 is the practical minimum given Tauri v2's WKWebView requirements and the system Perl dependency.
+
+**Architecture:** Apple Silicon (arm64) is the primary target. Intel (x86_64) Macs are supported — ExifTool's library files are pure Perl and architecture-neutral; the Tauri build system handles the binary side.
+
+**System Perl dependency:** ExifTool is a Perl script that requires `/usr/bin/perl`. System Perl ships with all macOS versions 12–16 (current). Apple deprecated it in macOS 12.3 with a warning that it may be removed in a future release, but has not removed it as of macOS 26. This is a known risk with no fixed mitigation timeline. A future hardening option is to use `pp` (PAR::Packer) to compile ExifTool + its library + a minimal Perl runtime into a single self-contained Mach-O binary, eliminating the system Perl dependency entirely.
+
+---
+
 ## 1. Platform & Framework
 
 ### Recommendation: Tauri + React + TypeScript
@@ -42,16 +54,17 @@ photo-manager/
 ├── src/                          # React/TypeScript frontend
 │   ├── components/
 │   │   ├── TopBar/               # Apply, Roll Back, Reset
+│   │   ├── ImportModal/          # Import progress overlay (progress bar, error list)
 │   │   ├── PhotoManager/
-│   │   │   ├── SubBar/           # Select Photos, Remove, Grid slider, Working TZ
-│   │   │   ├── PhotoGrid/        # Day blocks, No Date block, drag-and-drop
-│   │   │   └── PhotoTile/        # Thumbnail, pending-change dot, missing-file state
+│   │   │   ├── FloatingControls/ # Import Photos, Remove, Grid Size +/-, Working TZ
+│   │   │   └── PhotoGrid/        # Tile grid; PhotoTile per photo
+│   │   │       └── PhotoTile/    # Thumbnail img, pending-change dot, missing-file state
 │   │   ├── InspectorPanel/
 │   │   │   ├── DateTimeSection/
 │   │   │   ├── LocationSection/  # Mini-map + search
 │   │   │   ├── CameraSection/
 │   │   │   └── VibeTagSection/
-│   │   └── MapPanel/             # Full-width bottom map
+│   │   └── MapPanel/             # Full-width bottom map overlay
 │   ├── state/
 │   │   ├── SessionContext.tsx     # useReducer + Context: photos, selection, pending changes
 │   │   ├── CorpusContext.tsx      # useReducer + Context: camera/lens/film options
@@ -70,15 +83,19 @@ photo-manager/
 │       └── vibeTag.ts            # Claude API client + prompt builder
 │
 └── src-tauri/
+    ├── resources/                # Bundled assets (not committed to git)
+    │   ├── exiftool              # ExifTool CLI script (from official macOS .pkg)
+    │   └── lib/                  # ExifTool Perl library (Image/ and File/ subdirectories)
     ├── src/
+    │   ├── lib.rs                # AppState, plugin wiring, command registration
     │   ├── commands/             # Tauri IPC commands (called from frontend)
     │   │   ├── session.rs        # Load/save/clear session
-    │   │   ├── photos.rs         # Import, remove, get metadata
+    │   │   ├── photos.rs         # Import pipeline: thumbnails + metadata + SQLite + events
     │   │   ├── metadata.rs       # Apply changes, rollback
-    │   │   └── thumbnails.rs     # Generate and fetch thumbnails
-    │   ├── exiftool.rs           # ExifTool subprocess pool (-stay_open mode)
-    │   ├── thumbnail.rs          # Extract embedded previews, resize
-    │   ├── session.rs            # SQLite schema and queries
+    │   │   └── thumbnails.rs     # get_thumbnail command stub
+    │   ├── exiftool.rs           # ExiftoolProcess: -stay_open mode, run_command, extract_preview, read_metadata
+    │   ├── thumbnail.rs          # generate_thumbnails: SHA-256 key, image crate resize, ExifTool RAW preview
+    │   ├── session.rs            # SQLite schema and init (returns Connection)
     │   ├── gpx.rs                # GPX file parsing and time matching
     │   └── corpus.rs             # Camera/lens/film option management
     └── Cargo.toml
@@ -94,7 +111,7 @@ interface Photo {
   id: string;
   filePath: string;
   fileStatus: 'ok' | 'missing';
-  thumbnail: string;           // object URL
+  thumbnail: { small: string; large: string };  // asset:// URLs via convertFileSrc
   originalMetadata: Metadata;  // snapshot at import, never mutated
   currentMetadata: Metadata;   // includes applied + pending changes
   pendingChanges: Partial<Metadata> | null;
@@ -135,7 +152,7 @@ type SessionAction =
 interface UIState {
   workingTimezone: string;     // IANA name, display-only
   gridTileSize: number;        // 0–1, fraction of Photo Manager panel width per tile including padding
-  mapPanelHeight: number;      // 0–1, fraction of window height
+  mapPanelHeight: number;      // px height of the floating map overlay
 }
 ```
 
@@ -183,44 +200,117 @@ This is zero-dependency, runs entirely in the browser engine, and correctly reso
 
 ## 2a. Design System
 
-No CSS framework or utility library is used. Styling is handled through a small set of plain CSS files loaded globally, plus per-component CSS Modules for component-specific styles.
+No CSS framework or utility library is used. Styling is handled through a small set of plain CSS files loaded globally, plus per-component CSS Modules for component-specific styles. The visual language follows **macOS 26**: SF Pro typography, system semantic colors, liquid glass controls, and a consistent border-radius scale.
 
 ### File structure
 
 ```
 src/styles/
 ├── tokens.css        # All design tokens as CSS custom properties on :root
-├── layout.css        # Grid and flex helpers for the three structural patterns
-├── typography.css    # Type scale and font-family definitions
-└── components.css    # Base styles for shared elements: button, input, dropdown, divider
+├── layout.css        # Layered layout: photo grid base + floating overlay positioning
+├── typography.css    # SF Pro font stack and type scale
+└── components.css    # Base styles: liquid glass button, input, dropdown, divider
 ```
 
 Each component directory contains a `ComponentName.module.css` for styles specific to that component. Only tokens and layout helpers cross module boundaries — no global class soup.
 
 ### tokens.css
 
-All values — color, spacing, typography, radius, shadow, transition — are defined as CSS custom properties on `:root`. Components reference tokens directly; no magic numbers in component stylesheets. The color palette is dark-mode-first, matching the app's intended aesthetic. Spacing follows a 4px base unit.
+All values are defined as CSS custom properties on `:root`. Components reference tokens directly; no magic numbers in component stylesheets.
+
+**Color** — macOS 26 system semantic colors via CSS `color-mix` and `-apple-system` keywords where supported, with explicit fallbacks for WKWebView. All color tokens are defined for both light and dark mode. Dark mode activates automatically via `@media (prefers-color-scheme: dark)` — there is no in-app toggle.
+
+Light mode defaults (on `:root`):
+- `--color-bg`: primary window background
+- `--color-surface`: secondary fill (inspector panel cards)
+- `--color-border`: separator / divider
+- `--color-text`: primary label
+- `--color-text-secondary`: secondary label
+- `--color-accent`: tint color (system blue)
+- `--color-danger`: destructive action (system red)
+- `--color-glass-bg`: `rgba(255,255,255,0.08)` — liquid glass fill
+- `--color-glass-border`: `rgba(255,255,255,0.14)` — liquid glass stroke
+
+Dark mode overrides (inside `@media (prefers-color-scheme: dark)` on `:root`): all of the above tokens are re-declared with darker values. `--color-glass-bg` and `--color-glass-border` use a white-tinted alpha fill in both modes because liquid glass relies on the content behind it; only the alpha values shift slightly darker.
+
+**Spacing** — 4px base unit: `--space-1` (4px) through `--space-8` (32px).
+
+**Border radius** — multiples of the 4px base unit:
+- `--radius-sm`: 4px
+- `--radius-md`: 8px
+- `--radius-lg`: 12px
+- `--radius-xl`: 16px
+- `--radius-2xl`: 24px
+
+**Typography** — see `typography.css`.
+
+**Blur** — `--blur-glass: 20px` — used for all liquid glass backdrop filters.
+
+**Z-index layers** — explicit layer tokens keep overlay stacking deterministic:
+- `--z-photos`: 0 — photo grid base
+- `--z-map`: 10 — map overlay
+- `--z-inspector`: 20 — inspector panel
+- `--z-floating-controls`: 30 — import/timezone/grid-size controls floating over grid
+- `--z-topbar`: 40 — top bar
 
 ### layout.css
 
-Covers the three structural patterns the app uses:
-- **App shell** — CSS Grid `grid-template-rows: auto 1fr auto` for top bar / content / map panel
-- **Content area** — CSS Grid horizontal split between photo manager and inspector panel
-- **Photo grid** — `auto-fill` grid with `minmax(var(--tile-size), 1fr)` so the grid tile size slider drives column count without JavaScript
+The app uses a **layered overlay** model rather than a strict CSS Grid with fixed rows. The photo grid fills the entire content area and scrolls; all other UI elements float above it at defined z-index levels.
 
-A small set of flex row/column helpers and gap utilities round this out.
+```
+┌─────────────────────────────────────────────┐  ← TopBar (z:40, backdrop-blur, position:sticky)
+│  [Import Photos]          [US Pacific] [⊞]  │  ← floating controls (z:30, absolute)
+│  ┌──────────────────────┐ ┌────────────────┐ │
+│  │                      │ │ Inspector      │ │  ← Inspector (z:20, absolute right, backdrop-blur)
+│  │   photo grid         │ │ Panel          │ │
+│  │   (scrolls behind    │ │                │ │
+│  │   all overlays)      │ │                │ │
+│  │                      │ └────────────────┘ │
+│  │  ┌────────────────┐  │                    │
+│  │  │   Map overlay  │  │                    │  ← Map (z:10, absolute bottom, backdrop-blur)
+│  │  └────────────────┘  │                    │
+│  └──────────────────────┘                    │
+└─────────────────────────────────────────────┘
+```
+
+- **App shell** — `position: relative; overflow: hidden` container filling the viewport.
+- **Photo grid** — `position: absolute; inset: 0; overflow-y: auto; z-index: var(--z-photos)`. Scrolls independently.
+- **TopBar** — `position: sticky; top: 0; z-index: var(--z-topbar)` with `backdrop-filter: blur(var(--blur-glass))`.
+- **Floating controls** — `position: absolute; top: ...; left: ...; z-index: var(--z-floating-controls)`.
+- **Inspector panel** — `position: absolute; top: 0; right: 0; bottom: 0; z-index: var(--z-inspector)` with `backdrop-filter: blur(var(--blur-glass))`.
+- **Map panel** — `position: absolute; bottom: 0; left: 0; right: var(--inspector-width); z-index: var(--z-map)` with `backdrop-filter: blur(var(--blur-glass))`. Height is controlled by a CSS variable updated on drag.
 
 ### typography.css
 
-Defines the system font stack, a four-step type scale (xs / sm / base / lg), weight utilities, and line-height variants. Applied to `body`; component stylesheets compose from these.
+macOS 26 SF Pro font stack applied to `body`:
+
+```css
+font-family: -apple-system, "SF Pro Display", "SF Pro Text",
+             BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+```
+
+Four-step type scale (xs / sm / base / lg), weight utilities, and line-height variants. Applied to `body`; component stylesheets compose from these.
 
 ### components.css
 
-Base styles for shared interactive primitives: primary button, ghost button, text input, section label, and divider. Components extend these via CSS Modules rather than re-implementing them.
+Base styles for shared interactive primitives. The primary button style is **liquid glass**:
+
+```css
+.btn-glass {
+  background: var(--color-glass-bg);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  color: var(--color-text);
+}
+```
+
+Standard system-tinted buttons (Apply, Roll Back) use macOS 26 system button colors via `-apple-system-*` color keywords with explicit hex fallbacks. Inspector panel section cards use `--color-surface` with `--radius-xl` and a 1px `--color-border` stroke.
 
 ### CSS Modules
 
-Each component imports its own `.module.css`. Component styles use tokens directly (e.g. `color: var(--color-accent)`) and do not hardcode values. This keeps component styles self-contained and avoids specificity conflicts.
+Each component imports its own `.module.css`. Component styles use tokens directly (e.g. `border-radius: var(--radius-lg)`) and do not hardcode values. This keeps component styles self-contained and avoids specificity conflicts.
 
 ---
 
@@ -230,7 +320,26 @@ Each component imports its own `.module.css`. Component styles use tokens direct
 
 **ExifTool** is the only library that reliably handles all of the PRD's target file formats (CR3, NEF, ARW, RAF, etc.) and all three metadata standards (EXIF, XMP, IPTC). No pure-Rust or pure-JS alternative comes close in format coverage.
 
-ExifTool is distributed as a standalone macOS executable (no Perl installation required). It will be bundled inside the Tauri app's resources directory and invoked as a subprocess.
+ExifTool is a Perl script (`#!/usr/bin/env perl`) distributed with a companion Perl library. The official macOS `.pkg` installer places the script at `/usr/local/bin/exiftool` and its library tree (`Image/` and `File/` subdirectories) at `/usr/local/bin/lib/`. The script's own `BEGIN` block adds `lib/` relative to its own location to `@INC`, so script and library just need to be siblings — no hardcoded system paths.
+
+Both are bundled inside the Tauri app's resources directory (`src-tauri/resources/`) and invoked as a subprocess. The only remaining runtime dependency is system Perl at `/usr/bin/perl` — see §0 for the status and risk assessment of that dependency.
+
+**Setup (developer):** Install the ExifTool `.pkg` from exiftool.org, then:
+```sh
+cp /usr/local/bin/exiftool src-tauri/resources/exiftool
+cp -r /usr/local/bin/lib/ src-tauri/resources/lib/
+```
+These files are excluded from git (`.gitignore`). The `tauri.conf.json` `bundle.resources` field includes them in production builds.
+
+**Runtime state:** The Rust backend holds a single `AppState` managed by Tauri:
+```rust
+pub struct AppState {
+    pub db: Arc<Mutex<rusqlite::Connection>>,
+    pub exiftool: Arc<Mutex<ExiftoolProcess>>,
+    pub thumbnails_dir: PathBuf,
+}
+```
+`ExiftoolProcess` is started once at app launch and shared across all commands via `Arc<Mutex<...>>`. SQLite operations and ExifTool commands are serialised through their respective mutexes. Background import threads clone the `Arc` handles rather than holding `State<'_>` references across thread boundaries.
 
 **Performance: `-stay_open` batch mode.** ExifTool has a mode where it starts once and accepts multiple commands over stdin without the per-invocation startup cost (~200ms). On import and Apply, all files are processed through a single persistent ExifTool process.
 
@@ -265,8 +374,10 @@ Both are stored as JPEG at 85% quality. The grid loads the small version by defa
 
 **Source by file type:**
 
-- **JPEG / HEIC / TIFF** — decoded and resized directly using the Rust `image` crate.
-- **RAW formats** — modern cameras embed JPEG previews at multiple sizes inside the RAW file. ExifTool extracts the largest available preview (`-b -PreviewImage`), which is then used as the source image. The extracted preview is copied into the app data thumbnails directory and resized to the two target sizes using the `image` crate — no full RAW decode is required. If the embedded preview is smaller than a target size, it is used as-is for that size without upscaling.
+- **JPEG / TIFF** — decoded and resized directly using the Rust `image` crate.
+- **HEIC and all RAW formats** — the `image` crate does not support HEIC or proprietary RAW formats natively. ExifTool extracts the largest available embedded JPEG preview (`-b -PreviewImage`; fallback: `-b -JpgFromRaw`) to a tempfile, which is then decoded and resized by the `image` crate. No full RAW decode is required. If no embedded preview is available, the file is reported as a failed import for that step.
+
+Thumbnails are keyed by SHA-256 of the source file's absolute path. If both sizes already exist on disk when `import_photos` is called (e.g. re-importing after a restart), generation is skipped — the existing files are returned immediately.
 
 Thumbnails are stored in the session's app data directory (see §5) keyed by a hash of the absolute file path. They survive app restarts (they are part of the session) and are discarded when the session is cleared.
 
@@ -277,16 +388,20 @@ Import is asynchronous. When files are added (via file picker, Finder drop, or d
 ```
 Frontend                          Rust backend
    │                                   │
-   │── invoke('import_photos', paths) ──►│
+   │── invoke('import_photos', paths) ──►│  (returns Ok immediately)
+   │                                   │  spawns background thread
+   │◄── emit('import:start', {total})──│
    │                                   │  for each file:
-   │◄── emit('import:progress', {      │    read metadata (ExifTool)
-   │      done: N, total: M,           │    generate thumbnail
-   │      photo: PhotoData | null,     │    emit progress event
-   │      error: string | null         │
+   │◄── emit('import:progress', {      │    generate thumbnails (image crate / ExifTool)
+   │      done: N, total: M,           │    read metadata (ExifTool -json)
+   │      photo: PhotoData | null,     │    insert to SQLite
+   │      error: string | null         │    emit progress event
    │    }) ────────────────────────────│
    │                                   │
    │◄── emit('import:complete') ───────│
 ```
+
+`PhotoData` in the progress payload carries `thumbnailSmall` and `thumbnailLarge` as absolute file paths. The frontend converts them to `asset://localhost/...` URLs via `convertFileSrc` from `@tauri-apps/api/core` before storing them in `SessionContext`. The asset protocol is enabled in `tauri.conf.json` with `security.assetProtocol.enable = true` and scoped to the app data directory.
 
 The frontend listens for `import:progress` events and dispatches `IMPORT_PHOTO_PROGRESS` actions to `SessionContext` as each photo arrives, so thumbnails appear in the grid progressively rather than all at once. A photo that fails (unreadable file, unsupported format that slipped past the extension filter) emits a progress event with `error` set and `photo: null`; it is shown as a failed import entry in the modal and skipped. The modal is dismissed automatically when `import:complete` fires, or manually by the user after reviewing errors.
 

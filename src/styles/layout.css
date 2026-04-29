@@ -1,0 +1,75 @@
+/* App shell: full viewport, positioning context for all overlay children */
+.app-shell {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Photo grid base layer: fills the content area, scrolls independently */
+.photo-grid-layer {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  z-index: var(--z-photos);
+}
+
+/* Photo grid: tile size driven by --tile-size CSS var */
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile-size, 160px), 1fr));
+}
+
+/* Map overlay: glass panel anchored to bottom, leaves room for inspector */
+.map-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: var(--inspector-width);
+  z-index: var(--z-map);
+  height: var(--map-panel-height);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+}
+
+/* Inspector overlay: glass panel anchored to the right edge */
+.inspector-overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--inspector-width);
+  z-index: var(--z-inspector);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+}
+
+/* Floating controls: absolute within their container */
+.floating-controls {
+  position: absolute;
+  z-index: var(--z-floating-controls);
+}
+
+/* Flex utilities */
+.row {
+  display: flex;
+  flex-direction: row;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+}
+
+.row-center {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.gap-1 { gap: var(--space-1); }
+.gap-2 { gap: var(--space-2); }
+.gap-3 { gap: var(--space-3); }
+.gap-4 { gap: var(--space-4); }
+
+.flex-1 { flex: 1; }

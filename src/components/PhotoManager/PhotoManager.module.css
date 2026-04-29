@@ -1,0 +1,7 @@
+.photoManager {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  z-index: var(--z-photos);
+  background: var(--color-bg);
+}

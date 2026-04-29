@@ -1,0 +1,29 @@
+body {
+  font-family: -apple-system, "SF Pro Display", "SF Pro Text", BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.text-xs   { font-size: 11px; }
+.text-sm   { font-size: 12px; }
+.text-base { font-size: 14px; }
+.text-lg   { font-size: 16px; }
+
+.font-medium { font-weight: 500; }
+.font-bold   { font-weight: 600; }
+
+.text-secondary { color: var(--color-text-secondary); }
+.text-accent    { color: var(--color-accent); }
+.text-danger    { color: var(--color-danger); }
+
+.line-tight  { line-height: 1.25; }
+.line-normal { line-height: 1.5; }
+
+.truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

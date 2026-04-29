@@ -1,0 +1,59 @@
+:root {
+  /* Color — light mode defaults */
+  --color-bg: #f5f5f7;
+  --color-surface: #ffffff;
+  --color-border: rgba(0, 0, 0, 0.12);
+  --color-text: #1d1d1f;
+  --color-text-secondary: rgba(29, 29, 31, 0.55);
+  --color-accent: #007aff;
+  --color-danger: #ff3b30;
+  --color-glass-bg: rgba(255, 255, 255, 0.72);
+  --color-glass-border: rgba(0, 0, 0, 0.08);
+
+  /* Spacing (4px base unit) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+
+  /* Radius (4px base unit) */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+
+  /* Blur */
+  --blur-glass: 20px;
+
+  /* Z-index layers */
+  --z-photos: 0;
+  --z-map: 10;
+  --z-inspector: 20;
+  --z-floating-controls: 30;
+  --z-topbar: 40;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+
+  /* Layout */
+  --topbar-height: 48px;
+  --inspector-width: 320px;
+  --map-panel-height: 220px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #1c1c1e;
+    --color-surface: #2c2c2e;
+    --color-border: rgba(255, 255, 255, 0.12);
+    --color-text: #f5f5f7;
+    --color-text-secondary: rgba(245, 245, 247, 0.55);
+    --color-glass-bg: rgba(255, 255, 255, 0.14);
+    --color-glass-border: rgba(255, 255, 255, 0.18);
+  }
+}
