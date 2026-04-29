@@ -112,3 +112,91 @@ fn save_thumbnail(
         .map_err(|e| format!("jpeg encode: {}", e))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn make_image(width: u32, height: u32) -> image::DynamicImage {
+        image::DynamicImage::ImageRgb8(image::RgbImage::new(width, height))
+    }
+
+    #[test]
+    fn path_key_is_deterministic() {
+        let k1 = path_key(Path::new("/some/path/photo.jpg"));
+        let k2 = path_key(Path::new("/some/path/photo.jpg"));
+        assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn path_key_differs_for_different_paths() {
+        let k1 = path_key(Path::new("/photos/a.jpg"));
+        let k2 = path_key(Path::new("/photos/b.jpg"));
+        assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn path_key_is_64_char_hex() {
+        let key = path_key(Path::new("/test.jpg"));
+        assert_eq!(key.len(), 64);
+        assert!(key.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn no_upscale_when_image_smaller_than_target() {
+        let dir = TempDir::new().unwrap();
+        let img = make_image(200, 150);
+        let out = dir.path().join("out.jpg");
+        save_thumbnail(&img, &out, 400).unwrap();
+        let result = image::open(&out).unwrap();
+        assert_eq!(result.width(), 200);
+        assert_eq!(result.height(), 150);
+    }
+
+    #[test]
+    fn no_upscale_when_image_exactly_at_target() {
+        let dir = TempDir::new().unwrap();
+        let img = make_image(400, 300);
+        let out = dir.path().join("out.jpg");
+        save_thumbnail(&img, &out, 400).unwrap();
+        let result = image::open(&out).unwrap();
+        assert_eq!(result.width(), 400);
+        assert_eq!(result.height(), 300);
+    }
+
+    #[test]
+    fn resize_landscape_preserves_aspect_ratio() {
+        let dir = TempDir::new().unwrap();
+        let img = make_image(1200, 800);
+        let out = dir.path().join("out.jpg");
+        save_thumbnail(&img, &out, 400).unwrap();
+        let result = image::open(&out).unwrap();
+        assert_eq!(result.width(), 400);
+        // 800 * (400/1200) ≈ 267
+        assert!(result.height() >= 265 && result.height() <= 268,
+            "expected ~267, got {}", result.height());
+    }
+
+    #[test]
+    fn resize_portrait_uses_height_as_longest_edge() {
+        let dir = TempDir::new().unwrap();
+        let img = make_image(800, 1200);
+        let out = dir.path().join("out.jpg");
+        save_thumbnail(&img, &out, 400).unwrap();
+        let result = image::open(&out).unwrap();
+        assert_eq!(result.height(), 400);
+        assert!(result.width() >= 265 && result.width() <= 268,
+            "expected ~267, got {}", result.width());
+    }
+
+    #[test]
+    fn output_file_is_created() {
+        let dir = TempDir::new().unwrap();
+        let img = make_image(100, 100);
+        let out = dir.path().join("thumb.jpg");
+        assert!(!out.exists());
+        save_thumbnail(&img, &out, 400).unwrap();
+        assert!(out.exists());
+    }
+}

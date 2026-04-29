@@ -187,6 +187,18 @@ fn parse_gps_coord(value: Option<&str>, reference: Option<&str>) -> Option<f64> 
     }
 }
 
+/// Parse the raw JSON string returned by ExifTool (an array with one object per file).
+#[allow(dead_code)]
+pub(crate) fn parse_exiftool_output(json: &str) -> Result<Metadata, String> {
+    let arr: Vec<serde_json::Value> =
+        serde_json::from_str(json).map_err(|e| format!("parse JSON: {}", e))?;
+    let first = arr
+        .into_iter()
+        .next()
+        .ok_or_else(|| "empty ExifTool output".to_string())?;
+    Ok(parse_metadata(&first))
+}
+
 fn insert_photo(
     db: &Arc<Mutex<rusqlite::Connection>>,
     id: &str,
@@ -347,4 +359,107 @@ pub async fn remove_photos(
         .map_err(|e| format!("delete metadata: {}", e))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE_JSON: &str = r#"[{
+        "SourceFile": "/photos/test.jpg",
+        "DateTimeOriginal": "2024:03:15 14:30:00",
+        "GPSLatitude": "37.774929",
+        "GPSLatitudeRef": "N",
+        "GPSLongitude": "122.419416",
+        "GPSLongitudeRef": "W",
+        "Make": "Canon",
+        "Model": "EOS R5",
+        "LensModel": "RF 50mm F1.2 L USM"
+    }]"#;
+
+    #[test]
+    fn parses_date_and_time() {
+        let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
+        assert_eq!(m.capture_date.as_deref(), Some("2024-03-15"));
+        assert_eq!(m.capture_time.as_deref(), Some("14:30:00"));
+    }
+
+    #[test]
+    fn joins_make_and_model() {
+        let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
+        assert_eq!(m.camera_body.as_deref(), Some("Canon EOS R5"));
+    }
+
+    #[test]
+    fn parses_lens() {
+        let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
+        assert_eq!(m.lens.as_deref(), Some("RF 50mm F1.2 L USM"));
+    }
+
+    #[test]
+    fn parses_gps_lat_positive_for_north() {
+        let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
+        let lat = m.gps_lat.unwrap();
+        assert!((lat - 37.774929).abs() < 1e-5, "lat was {}", lat);
+    }
+
+    #[test]
+    fn parses_gps_lng_negative_for_west() {
+        let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
+        let lng = m.gps_lng.unwrap();
+        assert!((lng - (-122.419416)).abs() < 1e-5, "lng was {}", lng);
+    }
+
+    #[test]
+    fn returns_none_for_missing_fields() {
+        let m = parse_exiftool_output(r#"[{}]"#).unwrap();
+        assert!(m.capture_date.is_none());
+        assert!(m.capture_time.is_none());
+        assert!(m.camera_body.is_none());
+        assert!(m.lens.is_none());
+        assert!(m.gps_lat.is_none());
+        assert!(m.gps_lng.is_none());
+    }
+
+    #[test]
+    fn film_is_always_none() {
+        let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
+        assert!(m.film.is_none());
+    }
+
+    #[test]
+    fn timezone_is_none_in_phase_1() {
+        let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
+        assert!(m.timezone.is_none());
+    }
+
+    #[test]
+    fn prefers_xmp_datetime_over_exif() {
+        let json = r#"[{
+            "DateTimeOriginal": "2020:01:01 00:00:00",
+            "XMP:DateTimeOriginal": "2024-06-15T09:45:30+02:00"
+        }]"#;
+        let m = parse_exiftool_output(json).unwrap();
+        assert_eq!(m.capture_date.as_deref(), Some("2024-06-15"));
+        assert_eq!(m.capture_time.as_deref(), Some("09:45:30"));
+    }
+
+    #[test]
+    fn camera_body_is_none_when_both_make_and_model_missing() {
+        let json = r#"[{"LensModel": "some lens"}]"#;
+        let m = parse_exiftool_output(json).unwrap();
+        assert!(m.camera_body.is_none());
+    }
+
+    #[test]
+    fn returns_error_on_empty_array() {
+        let result = parse_exiftool_output(r#"[]"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn returns_error_on_invalid_json() {
+        let result = parse_exiftool_output("not json");
+        assert!(result.is_err());
+    }
 }

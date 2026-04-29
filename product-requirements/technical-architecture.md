@@ -754,6 +754,58 @@ interface MetadataProposal {
 
 The frontend validates this schema on receipt. If validation fails or the response is the error string, it shows the error message. If valid, it renders a preview of the proposed changes in the Vibe Tag section before the user accepts.
 
+---
+
+## 9. Testing
+
+### Strategy
+
+Two independent test suites run without a live Tauri process or ExifTool binary. The split follows the language boundary: TypeScript tests use Vitest, Rust tests use Cargo's built-in harness.
+
+**What is deliberately excluded from CI:**
+- E2E / Tauri driver tests — require a compiled `.app` bundle and a display server. Deferred until the feature surface stabilizes (Phase 8+).
+- Visual regression — screenshot diffing is not worth the maintenance cost while the design is actively evolving.
+- Benchmark tests — Rust's `criterion` crate can be added later if thumbnail throughput becomes a concern.
+
+### Frontend: Vitest + React Testing Library
+
+**Config:** `vite.config.ts` (shared with the build, no separate Vitest config file). `jsdom` is the test environment. `globals: true` injects `describe`/`it`/`expect`/`vi` without explicit imports. `src/test/setup.ts` imports `@testing-library/jest-dom` and stubs `ResizeObserver` (not implemented in jsdom).
+
+**Tauri IPC mock:** Tests that import `src/lib/tauri.ts` mock `@tauri-apps/api/core` via `vi.mock()`. This verifies the argument shapes passed to `invoke` without requiring a running Tauri backend.
+
+**Context hook mock:** Component tests that render components using `useSession` or `useUI` mock those hooks directly via `vi.mock()` and `vi.mocked(...).mockReturnValue(...)`, injecting arbitrary state without mounting providers.
+
+**Coverage:**
+
+| File | What is tested |
+|---|---|
+| `state/SessionContext.tsx` | All reducer actions: `CLEAR_SESSION`, `IMPORT_PHOTO_PROGRESS`, `IMPORT_PHOTOS`, `SELECT` (single/cmd), `REMOVE_PHOTOS`, `MARK_MISSING` |
+| `state/UIContext.tsx` | `SET_WORKING_TIMEZONE`, `SET_GRID_TILE_SIZE` (including bounds clamping), `SET_MAP_PANEL_HEIGHT` |
+| `state/CorpusContext.tsx` | `LOAD_CORPUS`, `ADD_ENTRY` (deduplication, trimming), `REMOVE_ENTRY` (case-insensitive), `RECORD_USE` |
+| `lib/tauri.ts` | All 7 command wrappers — correct `invoke` command string and argument shape |
+| `components/.../PhotoTile` | `ok` / `missing` file states, small vs. large thumbnail threshold (400px), pending dot visibility |
+| `components/.../PhotoGrid` | Empty state, photo count, `ResizeObserver` integration |
+| `components/.../ImportModal` | Progress rendering, error list, Done button visibility, auto-dismiss timer (fake timers) |
+
+### Rust: Cargo
+
+**Unit tests** live in `#[cfg(test)]` modules at the bottom of each source file. They have access to private functions within the same module.
+
+**Integration tests** live in `src-tauri/tests/`. They compile the library crate as a normal dependency (without `#[cfg(test)]` on the lib side) and only access `pub` items. `session` and `thumbnail` are declared `pub mod` in `lib.rs` for this reason.
+
+**In-memory database:** `session::apply_schema(&conn)` is extracted from `init_db` as a `pub fn` so tests can call it on a `rusqlite::Connection::open_in_memory()` without touching the filesystem.
+
+**Coverage:**
+
+| File | What is tested |
+|---|---|
+| `session.rs` | Schema creates all tables; round-trip insert/select for `photos`, `metadata_original`, `metadata_current`; `apply_schema` idempotency |
+| `thumbnail.rs` | `path_key` determinism, hex format, uniqueness; `save_thumbnail` no-upscale (source ≤ target), landscape resize, portrait resize |
+| `commands/photos.rs` | `parse_exiftool_output`: date/time parsing, Make+Model join, GPS sign (N/S/W/E), XMP preference over EXIF, missing-field `None`, film always `None`, error on empty/invalid JSON |
+| `tests/import_integration.rs` | DB schema round-trips for all three relevant tables; thumbnail path key stability (pre-existing stubs trigger early return) |
+
+**Tests requiring ExifTool** are gated with `#[ignore]` and excluded from the default `cargo test` run. Run them with `cargo test -- --ignored` in an environment where `src-tauri/resources/exiftool` is present.
+
 ### Conversation continuity (Follow Up)
 
 The `messages` array is maintained in `SessionContext` state and scoped to the current photo selection. When the selected photo set changes, the conversation history is cleared — it is stale and irrelevant to a different set of photos. The history is also cleared when the Vibe Tag panel is closed or the session is cleared. It is never persisted to SQLite.

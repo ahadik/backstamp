@@ -205,4 +205,4 @@ export function useSession(): SessionContextValue {
   return ctx;
 }
 
-export { initialMetadata };
+export { initialMetadata, initialState, sessionReducer };

@@ -52,6 +52,29 @@ Starts the Vite dev server and the Tauri window together. Hot-module reload is a
 
 If ExifTool is not found in `src-tauri/resources/`, the Rust backend falls back to `/opt/homebrew/bin/exiftool` and `/usr/local/bin/exiftool` for development convenience. The bundled copy is required for a production build.
 
+## Testing
+
+Two independent test suites cover the frontend and Rust backend.
+
+**Frontend (Vitest + React Testing Library):**
+
+```sh
+npm test                # run once
+npm run test:watch      # watch mode
+npm run test:coverage   # coverage report
+```
+
+Tests live alongside the source they cover (e.g. `SessionContext.test.ts` next to `SessionContext.tsx`). The suite covers state reducers, Tauri IPC argument shapes, and component rendering for `PhotoTile`, `PhotoGrid`, and `ImportModal`. Tauri IPC calls are mocked — no running desktop app is required.
+
+**Rust (Cargo):**
+
+```sh
+cd src-tauri
+cargo test
+```
+
+Unit tests live in `#[cfg(test)]` modules inside each source file. Integration tests live in `src-tauri/tests/`. The suite covers thumbnail resize logic, path key derivation, SQLite schema correctness, and metadata parsing from ExifTool JSON output. All tests run without a live ExifTool process — tests that require it are gated with `#[ignore]` and can be run with `cargo test -- --ignored`.
+
 ## Build
 
 ```sh
@@ -68,28 +91,41 @@ photo-manager/
 │   ├── components/
 │   │   ├── TopBar/                 # Apply, Roll Back, Reset buttons
 │   │   ├── ImportModal/            # Import progress overlay
+│   │   │   └── ImportModal.test.tsx
 │   │   ├── PhotoManager/
 │   │   │   ├── FloatingControls/   # Import Photos, Remove, Grid Size, Working TZ
 │   │   │   └── PhotoGrid/          # Thumbnail grid (PhotoTile per photo)
+│   │   │       ├── PhotoGrid.test.tsx
+│   │   │       └── PhotoTile.test.tsx
 │   │   ├── InspectorPanel/         # Date & Time, Camera, Location, Vibe Tag sections
 │   │   └── MapPanel/               # Full-width bottom map overlay
 │   ├── state/
 │   │   ├── SessionContext.tsx      # Photos, selection, pending changes
+│   │   ├── SessionContext.test.ts
 │   │   ├── CorpusContext.tsx       # Camera / lens / film option lists
-│   │   └── UIContext.tsx           # Working timezone, grid size, map height
+│   │   ├── CorpusContext.test.ts
+│   │   ├── UIContext.tsx           # Working timezone, grid size, map height
+│   │   └── UIContext.test.ts
 │   ├── lib/
-│   │   └── tauri.ts                # Typed wrappers for all Tauri IPC commands
+│   │   ├── tauri.ts                # Typed wrappers for all Tauri IPC commands
+│   │   └── tauri.test.ts
+│   ├── test/                       # Test harness setup
+│   │   ├── setup.ts                # jest-dom + ResizeObserver mock
+│   │   └── smoke.test.ts
 │   └── styles/                     # Global CSS design system (tokens, layout, typography, components)
 │
 └── src-tauri/                      # Rust backend
     ├── resources/
     │   ├── exiftool                # ExifTool CLI script (not committed — see setup)
     │   └── lib/                    # ExifTool Perl library (not committed — see setup)
+    ├── tests/
+    │   └── import_integration.rs   # Integration tests (DB schema, path key stability)
     └── src/
         ├── commands/               # Tauri IPC handlers (session, photos, metadata, thumbnails)
+        │   └── photos.rs           # includes metadata parsing tests
         ├── exiftool.rs             # ExifTool subprocess (-stay_open mode)
-        ├── thumbnail.rs            # Thumbnail generation (image crate + ExifTool for RAW/HEIC)
-        ├── session.rs              # SQLite schema + init
+        ├── thumbnail.rs            # Thumbnail generation + unit tests
+        ├── session.rs              # SQLite schema + init + unit tests
         ├── lib.rs                  # AppState, plugin wiring, command registration
         ├── gpx.rs                  # GPX parsing (stub)
         └── corpus.rs               # Camera/lens/film corpus (stub)
@@ -118,12 +154,13 @@ Phased plans live in [`product-requirements/planning/`](product-requirements/pla
 |---|---|---|
 | 0 — Scaffold | [00-scaffold.md](product-requirements/planning/00-scaffold.md) | Complete |
 | 1 — Thumbnail generation & display | [01-thumbnails.md](product-requirements/planning/01-thumbnails.md) | Complete |
-| 2 — Full import pipeline + metadata reading | — | Planned |
-| 3 — Photo grid: day blocks, selection, drag-and-drop | — | Planned |
-| 4 — Inspector Panel fields with live editing | — | Planned |
-| 5 — Apply / Rollback / Reset pipeline | — | Planned |
-| 6 — Map Panel (Mapbox) + Location section | — | Planned |
-| 7 — GPX import and auto-tagging | — | Planned |
-| 8 — Camera/Lens/Film corpus UI | — | Planned |
-| 9 — Vibe Tag / Claude integration | — | Planned |
-| 10 — Session persistence and restore | — | Planned |
+| 2 — Testing infrastructure | [02-testing.md](product-requirements/planning/02-testing.md) | Complete |
+| 3 — Full import pipeline + metadata reading | — | Planned |
+| 4 — Photo grid: day blocks, selection, drag-and-drop | — | Planned |
+| 5 — Inspector Panel fields with live editing | — | Planned |
+| 6 — Apply / Rollback / Reset pipeline | — | Planned |
+| 7 — Map Panel (Mapbox) + Location section | — | Planned |
+| 8 — GPX import and auto-tagging | — | Planned |
+| 9 — Camera/Lens/Film corpus UI | — | Planned |
+| 10 — Vibe Tag / Claude integration | — | Planned |
+| 11 — Session persistence and restore | — | Planned |

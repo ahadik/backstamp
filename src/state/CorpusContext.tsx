@@ -109,3 +109,5 @@ export function useCorpus(): CorpusContextValue {
   if (!ctx) throw new Error("useCorpus must be used within CorpusProvider");
   return ctx;
 }
+
+export { initialState as corpusInitialState, corpusReducer };

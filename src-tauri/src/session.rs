@@ -7,8 +7,12 @@ pub fn init_db(app_data_dir: &std::path::Path) -> Result<Connection> {
 
     let db_path = app_data_dir.join("session.db");
     let conn = Connection::open(db_path)?;
-    conn.execute_batch(SCHEMA)?;
+    apply_schema(&conn)?;
     Ok(conn)
+}
+
+pub fn apply_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(SCHEMA)
 }
 
 const SCHEMA: &str = "
@@ -67,3 +71,78 @@ CREATE TABLE IF NOT EXISTS corpus (
     PRIMARY KEY (category, value)
 );
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn in_memory_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn schema_creates_photos_table() {
+        let conn = in_memory_db();
+        conn.execute(
+            "INSERT INTO photos (id, file_path, added_at) VALUES (?1, ?2, ?3)",
+            ("test-id", "/tmp/a.jpg", 1_700_000_000i64),
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM photos", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn schema_creates_metadata_original_table() {
+        let conn = in_memory_db();
+        conn.execute(
+            "INSERT INTO photos (id, file_path, added_at) VALUES (?1, ?2, ?3)",
+            ("p1", "/tmp/b.jpg", 1_700_000_000i64),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO metadata_original (photo_id, field, value) VALUES (?1, ?2, ?3)",
+            ("p1", "capture_date", "2024-03-15"),
+        )
+        .unwrap();
+        let val: String = conn
+            .query_row(
+                "SELECT value FROM metadata_original WHERE photo_id = ?1 AND field = ?2",
+                ("p1", "capture_date"),
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(val, "2024-03-15");
+    }
+
+    #[test]
+    fn schema_creates_metadata_current_table() {
+        let conn = in_memory_db();
+        conn.execute(
+            "INSERT INTO photos (id, file_path, added_at) VALUES (?1, ?2, ?3)",
+            ("p2", "/tmp/c.jpg", 1_700_000_000i64),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO metadata_current (photo_id, field, value, is_pending) VALUES (?1, ?2, ?3, 0)",
+            ("p2", "lens", "RF 50mm"),
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM metadata_current", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn apply_schema_is_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        // Running it a second time must not fail (CREATE TABLE IF NOT EXISTS)
+        apply_schema(&conn).unwrap();
+    }
+}

@@ -2,8 +2,8 @@ mod commands;
 mod corpus;
 mod exiftool;
 mod gpx;
-mod session;
-mod thumbnail;
+pub mod session;
+pub mod thumbnail;
 
 use commands::{metadata, photos, session as session_commands, thumbnails};
 use exiftool::ExiftoolProcess;
