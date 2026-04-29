@@ -1,35 +1,22 @@
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
+# dependencies
+node_modules
 
-# Node / frontend
-node_modules/
-dist/
-.vite/
+# build artifacts
+dist
+dist-ssr
 
-# Rust / Tauri backend
-src-tauri/target/
+# Tauri
+src-tauri/target
 
-# Tauri build output
-src-tauri/gen/
+# ExifTool bundled resources (install manually — see README)
+src-tauri/resources/exiftool
+src-tauri/resources/lib/
 
-# Environment / secrets
+# env
 .env
 .env.local
 .env.*.local
 
-# Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Test coverage
-coverage/
+# editor
+.DS_Store
+*.sw?
