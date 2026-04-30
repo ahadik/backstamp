@@ -70,6 +70,13 @@ CREATE TABLE IF NOT EXISTS corpus (
     use_count   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (category, value)
 );
+
+CREATE TABLE IF NOT EXISTS photo_keywords (
+    photo_id TEXT NOT NULL,
+    keyword  TEXT NOT NULL,
+    PRIMARY KEY (photo_id, keyword),
+    FOREIGN KEY (photo_id) REFERENCES photos(id)
+);
 ";
 
 #[cfg(test)]

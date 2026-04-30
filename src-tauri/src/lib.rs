@@ -41,6 +41,8 @@ pub fn run() {
                 .expect("failed to start exiftool");
 
             let thumbnails_dir = app_data_dir.join("thumbnails");
+            std::fs::create_dir_all(&thumbnails_dir)
+                .expect("failed to create thumbnails directory");
 
             app.manage(AppState {
                 db: Arc::new(Mutex::new(db)),

@@ -74,6 +74,7 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
     1. Multi-select follows standard practice for multi-select (hold shift to select multiple, hold command to unselect a specific photo, etc)
 10. I can add or remove files from the active selection using the same multi-select keyboard shortcuts at any time, even after making changes in the Inspector Panel.
 11. I can remove one or more photos from the session by selecting them and clicking a "Remove Selected Photos" button in the Photo Manager panel floating controls. This does not delete the file from disk; it only removes the photo from the current session.
+    1. When no photos are selected, the button says "Remove All Photos" which removes all photos from the session.
 12. I can drag and drop selected photo(s) within the grid to re-order them.
 13. If I drop one or more photos on top of another in the grid, the dropped photos inherit all of the properties from the photo that they were dropped on.
     1. When dragging photos around the grid, a photo in the grid turns dark to indicate you can drop there when hovering over a photo in the grid.

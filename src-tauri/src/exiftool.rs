@@ -56,9 +56,13 @@ impl ExiftoolProcess {
         let mut line = String::new();
         loop {
             line.clear();
-            self.stdout
+            let n = self
+                .stdout
                 .read_line(&mut line)
                 .map_err(|e| format!("exiftool stdout read: {}", e))?;
+            if n == 0 {
+                return Err("exiftool exited unexpectedly".to_string());
+            }
             if line.trim_end() == "{ready}" {
                 break;
             }
@@ -127,6 +131,10 @@ impl ExiftoolProcess {
             "-Model",
             "-LensModel",
             "-XMP:DateTimeOriginal",
+            "-XMP:FilmStock",
+            "-XMP:Film",
+            "-IPTC:Keywords",
+            "-XMP:Subject",
             &file_str,
         ])?;
 

@@ -11,30 +11,32 @@ describe("uiReducer", () => {
     });
   });
 
-  describe("SET_GRID_TILE_SIZE", () => {
-    it("sets gridTileSize to the given value", () => {
-      const next = uiReducer(uiInitialState, { type: "SET_GRID_TILE_SIZE", size: 0.3 });
-      expect(next.gridTileSize).toBe(0.3);
+  describe("SET_GRID_COLUMNS", () => {
+    it("sets gridColumns to the given value", () => {
+      const next = uiReducer(uiInitialState, { type: "SET_GRID_COLUMNS", columns: 3 });
+      expect(next.gridColumns).toBe(3);
     });
 
-    it("clamps values below 0 to 0", () => {
-      const next = uiReducer(uiInitialState, { type: "SET_GRID_TILE_SIZE", size: -0.5 });
-      expect(next.gridTileSize).toBe(0);
+    it("clamps values below 1 to 1", () => {
+      const next = uiReducer(uiInitialState, { type: "SET_GRID_COLUMNS", columns: 0 });
+      expect(next.gridColumns).toBe(1);
     });
 
-    it("clamps values above 1 to 1", () => {
-      const next = uiReducer(uiInitialState, { type: "SET_GRID_TILE_SIZE", size: 1.5 });
-      expect(next.gridTileSize).toBe(1);
-    });
-
-    it("accepts boundary value 0", () => {
-      const next = uiReducer(uiInitialState, { type: "SET_GRID_TILE_SIZE", size: 0 });
-      expect(next.gridTileSize).toBe(0);
+    it("clamps negative values to 1", () => {
+      const next = uiReducer(uiInitialState, { type: "SET_GRID_COLUMNS", columns: -2 });
+      expect(next.gridColumns).toBe(1);
     });
 
     it("accepts boundary value 1", () => {
-      const next = uiReducer(uiInitialState, { type: "SET_GRID_TILE_SIZE", size: 1 });
-      expect(next.gridTileSize).toBe(1);
+      const next = uiReducer(uiInitialState, { type: "SET_GRID_COLUMNS", columns: 1 });
+      expect(next.gridColumns).toBe(1);
+    });
+  });
+
+  describe("SET_PANEL_WIDTH", () => {
+    it("sets panelWidth to the given value", () => {
+      const next = uiReducer(uiInitialState, { type: "SET_PANEL_WIDTH", width: 1200 });
+      expect(next.panelWidth).toBe(1200);
     });
   });
 

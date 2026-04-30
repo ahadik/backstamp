@@ -3,7 +3,8 @@ import React, { createContext, useContext, useReducer } from "react";
 export interface Metadata {
   captureDate: string | null;   // "YYYY-MM-DD"
   captureTime: string | null;   // "HH:MM:SS"
-  timezone: string | null;      // IANA name
+  utcOffset: string | null;     // e.g. "+09:00" from EXIF OffsetTimeOriginal
+  timezone: string | null;      // IANA name — resolved from GPS in Phase 6
   gpsLat: number | null;
   gpsLng: number | null;
   cameraBody: string | null;
@@ -55,6 +56,7 @@ type SessionAction =
 const initialMetadata: Metadata = {
   captureDate: null,
   captureTime: null,
+  utcOffset: null,
   timezone: null,
   gpsLat: null,
   gpsLng: null,
@@ -73,7 +75,7 @@ const initialState: SessionState = {
 function sessionReducer(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
     case "IMPORT_PHOTOS":
-      return { ...state, photos: [...state.photos, ...action.photos] };
+      return { ...state, photos: action.photos };
 
     case "IMPORT_PHOTO_PROGRESS":
       return { ...state, photos: [...state.photos, action.photo] };

@@ -5,13 +5,24 @@ interface Props {
   isOpen: boolean;
   done: number;
   total: number;
+  skipped?: number;
+  isComplete?: boolean;
   errors: string[];
   onDismiss: () => void;
 }
 
-export function ImportModal({ isOpen, done, total, errors, onDismiss }: Props) {
+export function ImportModal({
+  isOpen,
+  done,
+  total,
+  skipped = 0,
+  isComplete,
+  errors,
+  onDismiss,
+}: Props) {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  const complete = done >= total && total > 0;
+  // When isComplete is not provided, fall back to done >= total (keeps existing tests passing)
+  const complete = isComplete ?? (total > 0 && done >= total);
 
   useEffect(() => {
     if (complete && errors.length === 0) {
@@ -36,6 +47,12 @@ export function ImportModal({ isOpen, done, total, errors, onDismiss }: Props) {
         <p className="text-sm" style={{ color: "var(--color-text-secondary)", marginTop: "var(--space-2)" }}>
           {done} of {total}
         </p>
+
+        {complete && skipped > 0 && (
+          <p className="text-sm" style={{ color: "var(--color-text-secondary)", marginTop: "var(--space-1)" }}>
+            {skipped} duplicate{skipped !== 1 ? "s" : ""} skipped
+          </p>
+        )}
 
         {errors.length > 0 && (
           <ul className={styles.errors}>

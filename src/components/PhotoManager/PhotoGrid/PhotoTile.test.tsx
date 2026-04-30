@@ -3,7 +3,7 @@ import { PhotoTile } from "./PhotoTile";
 import type { Photo, Metadata } from "../../../state/SessionContext";
 
 const nullMeta: Metadata = {
-  captureDate: null, captureTime: null, timezone: null,
+  captureDate: null, captureTime: null, utcOffset: null, timezone: null,
   gpsLat: null, gpsLng: null, cameraBody: null, lens: null, film: null,
 };
 

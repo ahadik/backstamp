@@ -6,6 +6,7 @@ import { PhotoGrid } from "./PhotoGrid/PhotoGrid";
 import { ImportModal } from "../ImportModal/ImportModal";
 import { useSession } from "../../state/SessionContext";
 import type { Photo, Metadata } from "../../state/SessionContext";
+import { tauriCommands } from "../../lib/tauri";
 import styles from "./PhotoManager.module.css";
 
 interface RawPhotoData {
@@ -17,6 +18,7 @@ interface RawPhotoData {
   metadata: {
     captureDate: string | null;
     captureTime: string | null;
+    utcOffset: string | null;
     timezone: string | null;
     gpsLat: number | null;
     gpsLng: number | null;
@@ -37,6 +39,7 @@ function mapRawPhoto(raw: RawPhotoData): Photo {
   const meta: Metadata = {
     captureDate: raw.metadata.captureDate,
     captureTime: raw.metadata.captureTime,
+    utcOffset: raw.metadata.utcOffset,
     timezone: raw.metadata.timezone,
     gpsLat: raw.metadata.gpsLat,
     gpsLng: raw.metadata.gpsLng,
@@ -64,17 +67,47 @@ export function PhotoManager() {
     isOpen: boolean;
     done: number;
     total: number;
+    skipped: number;
+    isComplete: boolean;
     errors: string[];
-  }>({ isOpen: false, done: 0, total: 0, errors: [] });
+  }>({ isOpen: false, done: 0, total: 0, skipped: 0, isComplete: false, errors: [] });
 
   const handleDismiss = useCallback(() => {
-    setImportState({ isOpen: false, done: 0, total: 0, errors: [] });
+    setImportState({ isOpen: false, done: 0, total: 0, skipped: 0, isComplete: false, errors: [] });
   }, []);
+
+  // Restore existing session from SQLite on startup
+  useEffect(() => {
+    async function restoreSession() {
+      try {
+        const result = await tauriCommands.loadSession();
+        if (result.photos.length > 0) {
+          const photos: Photo[] = result.photos.map((p) => ({
+            id: p.id,
+            filePath: p.filePath,
+            fileStatus: p.fileStatus,
+            thumbnail: {
+              small: convertFileSrc(p.thumbnailSmall),
+              large: convertFileSrc(p.thumbnailLarge),
+            },
+            originalMetadata: p.originalMetadata,
+            currentMetadata: p.currentMetadata,
+            pendingChanges: null,
+          }));
+          dispatch({ type: "IMPORT_PHOTOS", photos });
+        }
+      } catch (err) {
+        console.error("[restoreSession] failed:", err);
+      }
+    }
+    restoreSession();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const unlisteners = [
       listen<{ total: number }>("import:start", (e) => {
-        setImportState({ isOpen: true, done: 0, total: e.payload.total, errors: [] });
+        if (e.payload.total === 0) return;
+        setImportState({ isOpen: true, done: 0, total: e.payload.total, skipped: 0, isComplete: false, errors: [] });
       }),
 
       listen<ImportProgressEvent>("import:progress", (e) => {
@@ -90,8 +123,12 @@ export function PhotoManager() {
         }));
       }),
 
-      listen("import:complete", () => {
-        setImportState((prev) => ({ ...prev }));
+      listen<{ total: number; skipped: number }>("import:complete", (e) => {
+        setImportState((prev) => ({
+          ...prev,
+          isComplete: true,
+          skipped: e.payload.skipped ?? 0,
+        }));
       }),
     ];
 
@@ -108,6 +145,8 @@ export function PhotoManager() {
         isOpen={importState.isOpen}
         done={importState.done}
         total={importState.total}
+        skipped={importState.skipped}
+        isComplete={importState.isComplete}
         errors={importState.errors}
         onDismiss={handleDismiss}
       />

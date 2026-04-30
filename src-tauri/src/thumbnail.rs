@@ -29,13 +29,16 @@ pub fn generate_thumbnails(
 
     let img = load_source_image(file_path, exiftool)?;
 
-    save_thumbnail(&img, &small_path, SMALL_PX)?;
-    save_thumbnail(&img, &large_path, LARGE_PX)?;
+    let large_img = resize_to(&img, LARGE_PX, FilterType::Lanczos3);
+    save_jpeg(&large_img, &large_path)?;
+
+    let small_img = resize_to(&large_img, SMALL_PX, FilterType::Triangle);
+    save_jpeg(&small_img, &small_path)?;
 
     Ok(ThumbnailPaths { small: small_path, large: large_path })
 }
 
-fn path_key(file_path: &Path) -> String {
+pub(crate) fn path_key(file_path: &Path) -> String {
     let mut hasher = Sha256::new();
     hasher.update(file_path.to_string_lossy().as_bytes());
     hex::encode(hasher.finalize())
@@ -52,63 +55,76 @@ fn load_source_image(
         .unwrap_or_default();
 
     match ext.as_str() {
-        "jpg" | "jpeg" | "tif" | "tiff" => {
-            ImageReader::open(file_path)
-                .map_err(|e| format!("open {}: {}", file_path.display(), e))?
-                .with_guessed_format()
-                .map_err(|e| format!("guess format: {}", e))?
-                .decode()
-                .map_err(|e| format!("decode {}: {}", file_path.display(), e))
+        "jpg" | "jpeg" => {
+            decode_file(file_path)
+        }
+        "tif" | "tiff" => {
+            // Try the embedded preview first — scanner TIFFs typically include
+            // a JPEG preview and extracting it is orders of magnitude faster
+            // than decoding the full multi-hundred-megapixel file.
+            if let Some(img) = try_extract_preview(file_path, exiftool)? {
+                return Ok(img);
+            }
+            decode_file(file_path)
         }
         _ => {
-            // HEIC and all RAW formats: extract embedded preview via ExifTool
-            let tmp = tempfile::Builder::new()
-                .suffix(".jpg")
-                .tempfile()
-                .map_err(|e| format!("tempfile: {}", e))?;
-            let found = exiftool.extract_preview(file_path, tmp.path())?;
-            if !found {
-                return Err(format!(
-                    "no embedded preview in {}",
-                    file_path.display()
-                ));
-            }
-            let bytes = std::fs::read(tmp.path())
-                .map_err(|e| format!("read preview: {}", e))?;
-            ImageReader::new(Cursor::new(bytes))
-                .with_guessed_format()
-                .map_err(|e| format!("guess preview format: {}", e))?
-                .decode()
-                .map_err(|e| format!("decode preview: {}", e))
+            // HEIC and all RAW formats: embedded preview is the only option.
+            try_extract_preview(file_path, exiftool)?
+                .ok_or_else(|| format!("no embedded preview in {}", file_path.display()))
         }
     }
 }
 
-fn save_thumbnail(
-    img: &image::DynamicImage,
-    output_path: &Path,
-    target_px: u32,
-) -> Result<(), String> {
+fn try_extract_preview(
+    file_path: &Path,
+    exiftool: &mut ExiftoolProcess,
+) -> Result<Option<image::DynamicImage>, String> {
+    let tmp = tempfile::Builder::new()
+        .suffix(".jpg")
+        .tempfile()
+        .map_err(|e| format!("tempfile: {}", e))?;
+    let found = exiftool.extract_preview(file_path, tmp.path())?;
+    if !found {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(tmp.path())
+        .map_err(|e| format!("read preview: {}", e))?;
+    let img = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| format!("guess preview format: {}", e))?
+        .decode()
+        .map_err(|e| format!("decode preview: {}", e))?;
+    Ok(Some(img))
+}
+
+fn decode_file(file_path: &Path) -> Result<image::DynamicImage, String> {
+    ImageReader::open(file_path)
+        .map_err(|e| format!("open {}: {}", file_path.display(), e))?
+        .with_guessed_format()
+        .map_err(|e| format!("guess format: {}", e))?
+        .decode()
+        .map_err(|e| format!("decode {}: {}", file_path.display(), e))
+}
+
+fn resize_to(img: &image::DynamicImage, target_px: u32, filter: FilterType) -> image::DynamicImage {
     let (w, h) = (img.width(), img.height());
     let longest = w.max(h);
+    if longest <= target_px {
+        return img.clone();
+    }
+    let scale = target_px as f64 / longest as f64;
+    let new_w = (w as f64 * scale).round() as u32;
+    let new_h = (h as f64 * scale).round() as u32;
+    img.resize(new_w, new_h, filter)
+}
 
-    let resized;
-    let out = if longest <= target_px {
-        img
-    } else {
-        let scale = target_px as f64 / longest as f64;
-        let new_w = (w as f64 * scale).round() as u32;
-        let new_h = (h as f64 * scale).round() as u32;
-        resized = img.resize(new_w, new_h, FilterType::Lanczos3);
-        &resized
-    };
-
+fn save_jpeg(img: &image::DynamicImage, output_path: &Path) -> Result<(), String> {
     let file = std::fs::File::create(output_path)
         .map_err(|e| format!("create {}: {}", output_path.display(), e))?;
     let mut encoder =
         image::codecs::jpeg::JpegEncoder::new_with_quality(std::io::BufWriter::new(file), 85);
     encoder
-        .encode_image(out)
+        .encode_image(img)
         .map_err(|e| format!("jpeg encode: {}", e))?;
     Ok(())
 }
@@ -148,7 +164,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let img = make_image(200, 150);
         let out = dir.path().join("out.jpg");
-        save_thumbnail(&img, &out, 400).unwrap();
+        save_jpeg(&resize_to(&img, 400, FilterType::Triangle), &out).unwrap();
         let result = image::open(&out).unwrap();
         assert_eq!(result.width(), 200);
         assert_eq!(result.height(), 150);
@@ -159,7 +175,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let img = make_image(400, 300);
         let out = dir.path().join("out.jpg");
-        save_thumbnail(&img, &out, 400).unwrap();
+        save_jpeg(&resize_to(&img, 400, FilterType::Triangle), &out).unwrap();
         let result = image::open(&out).unwrap();
         assert_eq!(result.width(), 400);
         assert_eq!(result.height(), 300);
@@ -170,10 +186,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let img = make_image(1200, 800);
         let out = dir.path().join("out.jpg");
-        save_thumbnail(&img, &out, 400).unwrap();
+        save_jpeg(&resize_to(&img, 400, FilterType::Triangle), &out).unwrap();
         let result = image::open(&out).unwrap();
         assert_eq!(result.width(), 400);
-        // 800 * (400/1200) ≈ 267
         assert!(result.height() >= 265 && result.height() <= 268,
             "expected ~267, got {}", result.height());
     }
@@ -183,7 +198,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let img = make_image(800, 1200);
         let out = dir.path().join("out.jpg");
-        save_thumbnail(&img, &out, 400).unwrap();
+        save_jpeg(&resize_to(&img, 400, FilterType::Triangle), &out).unwrap();
         let result = image::open(&out).unwrap();
         assert_eq!(result.height(), 400);
         assert!(result.width() >= 265 && result.width() <= 268,
@@ -196,7 +211,7 @@ mod tests {
         let img = make_image(100, 100);
         let out = dir.path().join("thumb.jpg");
         assert!(!out.exists());
-        save_thumbnail(&img, &out, 400).unwrap();
+        save_jpeg(&resize_to(&img, 400, FilterType::Triangle), &out).unwrap();
         assert!(out.exists());
     }
 }

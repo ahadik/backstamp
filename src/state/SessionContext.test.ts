@@ -4,6 +4,7 @@ import type { Photo, Metadata, SessionState } from "./SessionContext";
 const nullMetadata: Metadata = {
   captureDate: null,
   captureTime: null,
+  utcOffset: null,
   timezone: null,
   gpsLat: null,
   gpsLng: null,

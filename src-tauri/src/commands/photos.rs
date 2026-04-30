@@ -1,7 +1,10 @@
 use crate::thumbnail;
 use crate::AppState;
+use hex;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
@@ -17,6 +20,7 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
 pub struct Metadata {
     pub capture_date: Option<String>,
     pub capture_time: Option<String>,
+    pub utc_offset: Option<String>,
     pub timezone: Option<String>,
     pub gps_lat: Option<f64>,
     pub gps_lng: Option<f64>,
@@ -51,6 +55,13 @@ struct ImportProgressPayload {
     error: Option<String>,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ImportCompletePayload {
+    total: usize,
+    skipped: usize,
+}
+
 fn is_supported(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -58,21 +69,90 @@ fn is_supported(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn already_imported(
-    db: &Arc<Mutex<rusqlite::Connection>>,
-    file_path: &str,
-) -> bool {
+fn already_imported_by_path(db: &Arc<Mutex<rusqlite::Connection>>, path: &str) -> bool {
     db.lock()
         .ok()
         .and_then(|conn| {
             conn.query_row(
                 "SELECT 1 FROM photos WHERE file_path = ?1",
-                params![file_path],
+                params![path],
                 |_| Ok(true),
             )
             .ok()
         })
         .unwrap_or(false)
+}
+
+fn already_imported_by_hash(db: &Arc<Mutex<rusqlite::Connection>>, hash: &str) -> bool {
+    db.lock()
+        .ok()
+        .and_then(|conn| {
+            conn.query_row(
+                "SELECT 1 FROM photos WHERE file_hash = ?1",
+                params![hash],
+                |_| Ok(true),
+            )
+            .ok()
+        })
+        .unwrap_or(false)
+}
+
+fn compute_file_hash(path: &Path) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    Ok(hex::encode(Sha256::digest(&bytes)))
+}
+
+/// Extract the UTC offset string from an XMP ISO 8601 datetime, e.g.
+/// "2024-03-15T14:30:00+09:00" → "+09:00", "...Z" → "+00:00".
+fn extract_utc_offset_from_xmp(xmp_dt: &str) -> Option<String> {
+    let t_pos = xmp_dt.find('T')?;
+    let time_part = &xmp_dt[t_pos + 1..];
+    if time_part.ends_with('Z') {
+        return Some("+00:00".to_string());
+    }
+    if time_part.len() <= 8 {
+        return None;
+    }
+    let after_hms = &time_part[8..]; // skip "HH:MM:SS"
+    for sep in ['+', '-'] {
+        if let Some(off_pos) = after_hms.find(sep) {
+            let offset = &after_hms[off_pos..];
+            if offset.len() >= 6 {
+                return Some(offset[..6].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Collect keywords from IPTC:Keywords and XMP:Subject, deduplicated by lowercase.
+fn extract_keywords(json: &serde_json::Value) -> Vec<String> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut keywords: Vec<String> = Vec::new();
+    for key in &["IPTC:Keywords", "XMP:Subject"] {
+        match json.get(key) {
+            Some(serde_json::Value::Array(arr)) => {
+                for v in arr {
+                    if let Some(s) = v.as_str() {
+                        let kw = s.trim().to_lowercase();
+                        if !kw.is_empty() && seen.insert(kw.clone()) {
+                            keywords.push(kw);
+                        }
+                    }
+                }
+            }
+            Some(serde_json::Value::String(s)) => {
+                for part in s.split([',', ';']) {
+                    let kw = part.trim().to_lowercase();
+                    if !kw.is_empty() && seen.insert(kw.clone()) {
+                        keywords.push(kw);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    keywords
 }
 
 fn parse_metadata(json: &serde_json::Value) -> Metadata {
@@ -93,6 +173,15 @@ fn parse_metadata(json: &serde_json::Value) -> Metadata {
         parse_exif_datetime(exif)
     } else {
         (None, None)
+    };
+
+    let utc_offset = {
+        let from_offset_tag = json
+            .get("OffsetTimeOriginal")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| if s == "Z" { "+00:00".to_string() } else { s.to_string() });
+        from_offset_tag.or_else(|| xmp_dt.and_then(extract_utc_offset_from_xmp))
     };
 
     let gps_lat = parse_gps_coord(
@@ -128,15 +217,23 @@ fn parse_metadata(json: &serde_json::Value) -> Metadata {
         .filter(|s| !s.is_empty())
         .map(|s| s.trim().to_string());
 
+    let film = json
+        .get("XMP:FilmStock")
+        .or_else(|| json.get("XMP:Film"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.trim().to_string());
+
     Metadata {
         capture_date,
         capture_time,
+        utc_offset,
         timezone: None,
         gps_lat,
         gps_lng,
         camera_body,
         lens,
-        film: None,
+        film,
     }
 }
 
@@ -203,7 +300,9 @@ fn insert_photo(
     db: &Arc<Mutex<rusqlite::Connection>>,
     id: &str,
     file_path: &str,
+    file_hash: Option<&str>,
     metadata: &Metadata,
+    keywords: &[String],
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| format!("db lock: {}", e))?;
     let now = std::time::SystemTime::now()
@@ -212,23 +311,18 @@ fn insert_photo(
         .as_millis() as i64;
 
     conn.execute(
-        "INSERT OR IGNORE INTO photos (id, file_path, added_at) VALUES (?1, ?2, ?3)",
-        params![id, file_path, now],
+        "INSERT OR IGNORE INTO photos (id, file_path, file_hash, added_at) VALUES (?1, ?2, ?3, ?4)",
+        params![id, file_path, file_hash, now],
     )
     .map_err(|e| format!("insert photo: {}", e))?;
 
     let fields: Vec<(&str, Option<String>)> = vec![
         ("capture_date", metadata.capture_date.clone()),
         ("capture_time", metadata.capture_time.clone()),
+        ("utc_offset", metadata.utc_offset.clone()),
         ("timezone", metadata.timezone.clone()),
-        (
-            "gps_lat",
-            metadata.gps_lat.map(|v| v.to_string()),
-        ),
-        (
-            "gps_lng",
-            metadata.gps_lng.map(|v| v.to_string()),
-        ),
+        ("gps_lat", metadata.gps_lat.map(|v| v.to_string())),
+        ("gps_lng", metadata.gps_lng.map(|v| v.to_string())),
         ("camera_body", metadata.camera_body.clone()),
         ("lens", metadata.lens.clone()),
         ("film", metadata.film.clone()),
@@ -248,6 +342,15 @@ fn insert_photo(
             .map_err(|e| format!("insert metadata_current: {}", e))?;
         }
     }
+
+    for keyword in keywords {
+        conn.execute(
+            "INSERT OR IGNORE INTO photo_keywords (photo_id, keyword) VALUES (?1, ?2)",
+            params![id, keyword],
+        )
+        .map_err(|e| format!("insert keyword: {}", e))?;
+    }
+
     Ok(())
 }
 
@@ -262,22 +365,53 @@ pub async fn import_photos(
     let thumbnails_dir = state.thumbnails_dir.clone();
 
     std::thread::spawn(move || {
-        let filtered: Vec<String> = paths
+        // Phase 1: extension filter
+        let extension_ok: Vec<String> = paths
             .into_iter()
-            .filter(|p| is_supported(Path::new(p)) && !already_imported(&db, p))
+            .filter(|p| is_supported(Path::new(p)))
             .collect();
 
-        let total = filtered.len();
+        // Phase 2: path dedup + content-hash dedup
+        // Computing hashes upfront gives an accurate `total` for the progress modal.
+        let mut to_import: Vec<(String, Option<String>)> = Vec::new();
+        let mut skipped: usize = 0;
+
+        for path_str in extension_ok {
+            if already_imported_by_path(&db, &path_str) {
+                skipped += 1;
+                continue;
+            }
+            match compute_file_hash(Path::new(&path_str)) {
+                Ok(hash) => {
+                    if already_imported_by_hash(&db, &hash) {
+                        skipped += 1;
+                    } else {
+                        to_import.push((path_str, Some(hash)));
+                    }
+                }
+                Err(_) => {
+                    // Unreadable file — attempt import anyway; error surfaces in process_one_file
+                    to_import.push((path_str, None));
+                }
+            }
+        }
+
+        let total = to_import.len();
+        println!("[import] {} to import, {} skipped as duplicates", total, skipped);
         let _ = app_handle.emit("import:start", ImportStartPayload { total });
 
-        for (i, path_str) in filtered.iter().enumerate() {
+        for (i, (path_str, file_hash)) in to_import.iter().enumerate() {
             let file_path = Path::new(path_str);
             let done = i + 1;
 
-            let result = process_one_file(file_path, &thumbnails_dir, &db, &exiftool);
+            println!("[import] ({}/{}) starting: {}", done, total, path_str);
+
+            let result =
+                process_one_file(file_path, file_hash.as_deref(), &thumbnails_dir, &db, &exiftool);
 
             match result {
                 Ok(photo) => {
+                    println!("[import] ({}/{}) done: {}", done, total, path_str);
                     let _ = app_handle.emit(
                         "import:progress",
                         ImportProgressPayload {
@@ -289,6 +423,7 @@ pub async fn import_photos(
                     );
                 }
                 Err(e) => {
+                    println!("[import] ({}/{}) error: {} — {}", done, total, path_str, e);
                     let _ = app_handle.emit(
                         "import:progress",
                         ImportProgressPayload {
@@ -302,7 +437,8 @@ pub async fn import_photos(
             }
         }
 
-        let _ = app_handle.emit("import:complete", ());
+        println!("[import] complete ({} skipped)", skipped);
+        let _ = app_handle.emit("import:complete", ImportCompletePayload { total, skipped });
     });
 
     Ok(())
@@ -310,23 +446,27 @@ pub async fn import_photos(
 
 fn process_one_file(
     file_path: &Path,
+    file_hash: Option<&str>,
     thumbnails_dir: &std::path::Path,
     db: &Arc<Mutex<rusqlite::Connection>>,
     exiftool: &Arc<Mutex<crate::exiftool::ExiftoolProcess>>,
 ) -> Result<PhotoData, String> {
     let mut et = exiftool.lock().map_err(|e| format!("exiftool lock: {}", e))?;
 
-    let thumb_paths =
-        thumbnail::generate_thumbnails(file_path, thumbnails_dir, &mut et)?;
+    println!("[import]   generating thumbnails...");
+    let thumb_paths = thumbnail::generate_thumbnails(file_path, thumbnails_dir, &mut et)?;
 
+    println!("[import]   reading metadata...");
     let metadata_json = et.read_metadata(file_path)?;
     drop(et);
 
+    println!("[import]   inserting into db...");
     let metadata = parse_metadata(&metadata_json);
+    let keywords = extract_keywords(&metadata_json);
     let id = Uuid::new_v4().to_string();
     let path_str = file_path.to_string_lossy().to_string();
 
-    insert_photo(db, &id, &path_str, &metadata)?;
+    insert_photo(db, &id, &path_str, file_hash, &metadata, &keywords)?;
 
     Ok(PhotoData {
         id,
@@ -345,18 +485,36 @@ pub async fn remove_photos(
 ) -> Result<(), String> {
     let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
     for id in &ids {
-        conn.execute("DELETE FROM photos WHERE id = ?1", params![id])
-            .map_err(|e| format!("delete photo: {}", e))?;
-        conn.execute(
-            "DELETE FROM metadata_original WHERE photo_id = ?1",
-            params![id],
-        )
-        .map_err(|e| format!("delete metadata: {}", e))?;
+        let file_path: Option<String> = conn
+            .query_row(
+                "SELECT file_path FROM photos WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .ok();
+        if let Some(path) = file_path {
+            let key = thumbnail::path_key(Path::new(&path));
+            let _ = std::fs::remove_file(
+                state.thumbnails_dir.join(format!("{}_small.jpg", key)),
+            );
+            let _ = std::fs::remove_file(
+                state.thumbnails_dir.join(format!("{}_large.jpg", key)),
+            );
+        }
+        conn.execute("DELETE FROM photo_keywords WHERE photo_id = ?1", params![id])
+            .map_err(|e| format!("delete keywords: {}", e))?;
         conn.execute(
             "DELETE FROM metadata_current WHERE photo_id = ?1",
             params![id],
         )
-        .map_err(|e| format!("delete metadata: {}", e))?;
+        .map_err(|e| format!("delete metadata_current: {}", e))?;
+        conn.execute(
+            "DELETE FROM metadata_original WHERE photo_id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("delete metadata_original: {}", e))?;
+        conn.execute("DELETE FROM photos WHERE id = ?1", params![id])
+            .map_err(|e| format!("delete photo: {}", e))?;
     }
     Ok(())
 }
@@ -415,20 +573,70 @@ mod tests {
         let m = parse_exiftool_output(r#"[{}]"#).unwrap();
         assert!(m.capture_date.is_none());
         assert!(m.capture_time.is_none());
+        assert!(m.utc_offset.is_none());
         assert!(m.camera_body.is_none());
         assert!(m.lens.is_none());
         assert!(m.gps_lat.is_none());
         assert!(m.gps_lng.is_none());
+        assert!(m.film.is_none());
     }
 
     #[test]
-    fn film_is_always_none() {
+    fn film_is_none_when_no_xmp_film_tags() {
         let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
         assert!(m.film.is_none());
     }
 
     #[test]
-    fn timezone_is_none_in_phase_1() {
+    fn parses_film_from_xmp_filmstock() {
+        let json = r#"[{"XMP:FilmStock": "Kodak Portra 400"}]"#;
+        let m = parse_exiftool_output(json).unwrap();
+        assert_eq!(m.film.as_deref(), Some("Kodak Portra 400"));
+    }
+
+    #[test]
+    fn parses_film_from_xmp_film_when_filmstock_absent() {
+        let json = r#"[{"XMP:Film": "Fujifilm Velvia 50"}]"#;
+        let m = parse_exiftool_output(json).unwrap();
+        assert_eq!(m.film.as_deref(), Some("Fujifilm Velvia 50"));
+    }
+
+    #[test]
+    fn prefers_xmp_filmstock_over_xmp_film() {
+        let json = r#"[{"XMP:FilmStock": "Kodak Portra 400", "XMP:Film": "other"}]"#;
+        let m = parse_exiftool_output(json).unwrap();
+        assert_eq!(m.film.as_deref(), Some("Kodak Portra 400"));
+    }
+
+    #[test]
+    fn utc_offset_is_none_when_no_offset_tags() {
+        let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
+        assert!(m.utc_offset.is_none());
+    }
+
+    #[test]
+    fn parses_utc_offset_from_offset_time_original() {
+        let json = r#"[{"OffsetTimeOriginal": "+09:00"}]"#;
+        let m = parse_exiftool_output(json).unwrap();
+        assert_eq!(m.utc_offset.as_deref(), Some("+09:00"));
+    }
+
+    #[test]
+    fn normalises_z_offset_to_plus_zero() {
+        let json = r#"[{"OffsetTimeOriginal": "Z"}]"#;
+        let m = parse_exiftool_output(json).unwrap();
+        assert_eq!(m.utc_offset.as_deref(), Some("+00:00"));
+    }
+
+    #[test]
+    fn parses_utc_offset_from_xmp_datetime_fallback() {
+        let json = r#"[{"XMP:DateTimeOriginal": "2024-06-15T09:45:30+02:00"}]"#;
+        let m = parse_exiftool_output(json).unwrap();
+        assert_eq!(m.utc_offset.as_deref(), Some("+02:00"));
+    }
+
+    #[test]
+    fn timezone_is_always_none() {
         let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
         assert!(m.timezone.is_none());
     }
@@ -461,5 +669,24 @@ mod tests {
     fn returns_error_on_invalid_json() {
         let result = parse_exiftool_output("not json");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn extracts_keywords_from_iptc_array() {
+        let json = serde_json::json!({
+            "IPTC:Keywords": ["Travel", "Japan", "travel"]
+        });
+        let kws = extract_keywords(&json);
+        assert!(kws.contains(&"travel".to_string()));
+        assert!(kws.contains(&"japan".to_string()));
+        assert_eq!(kws.len(), 2); // "Travel" and "travel" deduplicated
+    }
+
+    #[test]
+    fn extracts_keywords_from_xmp_subject_string() {
+        let json = serde_json::json!({"XMP:Subject": "cats, dogs"});
+        let kws = extract_keywords(&json);
+        assert!(kws.contains(&"cats".to_string()));
+        assert!(kws.contains(&"dogs".to_string()));
     }
 }
