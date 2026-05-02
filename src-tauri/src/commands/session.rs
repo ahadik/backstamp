@@ -85,7 +85,7 @@ pub async fn load_session(state: State<'_, AppState>) -> Result<SessionLoadResul
 
     let photo_ids: Vec<(String, String)> = {
         let mut stmt = conn
-            .prepare("SELECT id, file_path FROM photos ORDER BY added_at ASC")
+            .prepare("SELECT id, file_path FROM photos ORDER BY sort_order ASC, added_at ASC")
             .map_err(|e| e.to_string())?;
         let rows: Vec<(String, String)> = stmt
             .query_map([], |row| {

@@ -57,6 +57,7 @@ pub fn run() {
             session_commands::clear_session,
             photos::import_photos,
             photos::remove_photos,
+            photos::reorder_photos,
             metadata::apply_changes,
             metadata::rollback,
             metadata::reset_photos,

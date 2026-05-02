@@ -1,5 +1,5 @@
 .floatingControls {
-  position: absolute;
+  position: fixed;
   top: var(--space-3);
   left: 0;
   right: var(--inspector-width);

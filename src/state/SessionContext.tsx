@@ -39,6 +39,9 @@ type SessionAction =
   | { type: "IMPORT_PHOTOS"; photos: Photo[] }
   | { type: "IMPORT_PHOTO_PROGRESS"; photo: Photo }
   | { type: "SELECT"; id: string; mode: "single" | "shift" | "cmd" }
+  | { type: "SELECT_SINGLE"; id: string }
+  | { type: "TOGGLE_SELECT"; id: string }
+  | { type: "SELECT_RANGE"; fromId: string; toId: string; orderedIds: string[] }
   | { type: "SELECT_ALL" }
   | { type: "DESELECT_ALL" }
   | { type: "SET_PENDING"; ids: string[]; changes: Partial<Metadata> }
@@ -101,6 +104,27 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
           for (let i = lo; i <= hi; i++) ids.add(photoIds[i]);
         }
       }
+      return { ...state, selectedIds: ids };
+    }
+
+    case "SELECT_SINGLE":
+      return { ...state, selectedIds: new Set([action.id]) };
+
+    case "TOGGLE_SELECT": {
+      const ids = new Set(state.selectedIds);
+      if (ids.has(action.id)) ids.delete(action.id);
+      else ids.add(action.id);
+      return { ...state, selectedIds: ids };
+    }
+
+    case "SELECT_RANGE": {
+      const { fromId, toId, orderedIds } = action;
+      const fromIdx = orderedIds.indexOf(fromId);
+      const toIdx = orderedIds.indexOf(toId);
+      if (fromIdx === -1 || toIdx === -1) return state;
+      const [lo, hi] = [Math.min(fromIdx, toIdx), Math.max(fromIdx, toIdx)];
+      const ids = new Set(state.selectedIds);
+      for (let i = lo; i <= hi; i++) ids.add(orderedIds[i]);
       return { ...state, selectedIds: ids };
     }
 

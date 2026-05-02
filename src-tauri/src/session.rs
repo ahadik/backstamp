@@ -8,7 +8,24 @@ pub fn init_db(app_data_dir: &std::path::Path) -> Result<Connection> {
     let db_path = app_data_dir.join("session.db");
     let conn = Connection::open(db_path)?;
     apply_schema(&conn)?;
+    run_migrations(&conn)?;
     Ok(conn)
+}
+
+fn run_migrations(conn: &Connection) -> Result<()> {
+    let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    if version < 1 {
+        let col_exists: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('photos') WHERE name = 'sort_order'")?
+            .exists([])?;
+        if !col_exists {
+            conn.execute_batch(
+                "ALTER TABLE photos ADD COLUMN sort_order INTEGER DEFAULT 0",
+            )?;
+        }
+        conn.pragma_update(None, "user_version", 1i64)?;
+    }
+    Ok(())
 }
 
 pub fn apply_schema(conn: &Connection) -> Result<()> {
@@ -21,7 +38,8 @@ CREATE TABLE IF NOT EXISTS photos (
     file_path   TEXT NOT NULL UNIQUE,
     file_hash   TEXT,
     added_at    INTEGER NOT NULL,
-    nodateorder INTEGER
+    nodateorder INTEGER,
+    sort_order  INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS metadata_original (

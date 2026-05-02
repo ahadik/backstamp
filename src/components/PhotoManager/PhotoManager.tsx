@@ -1,13 +1,20 @@
 import { useEffect, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { FloatingControls } from "./FloatingControls/FloatingControls";
 import { PhotoGrid } from "./PhotoGrid/PhotoGrid";
 import { ImportModal } from "../ImportModal/ImportModal";
+import { DropImportOverlay } from "./DropImportOverlay";
 import { useSession } from "../../state/SessionContext";
 import type { Photo, Metadata } from "../../state/SessionContext";
 import { tauriCommands } from "../../lib/tauri";
 import styles from "./PhotoManager.module.css";
+
+const SUPPORTED_EXTENSIONS = new Set([
+  "jpg", "jpeg", "tif", "tiff", "heic",
+  "dng", "cr3", "cr2", "nef", "arw", "raf", "orf", "rw2", "pef",
+]);
 
 interface RawPhotoData {
   id: string;
@@ -63,6 +70,7 @@ function mapRawPhoto(raw: RawPhotoData): Photo {
 
 export function PhotoManager() {
   const { dispatch } = useSession();
+  const [showDropOverlay, setShowDropOverlay] = useState(false);
   const [importState, setImportState] = useState<{
     isOpen: boolean;
     done: number;
@@ -137,10 +145,38 @@ export function PhotoManager() {
     };
   }, [dispatch]);
 
+  useEffect(() => {
+    const webview = getCurrentWebviewWindow();
+    const unlisten = webview.onDragDropEvent((event) => {
+      const payload = event.payload;
+      if (payload.type === "enter" || payload.type === "over") {
+        setShowDropOverlay(true);
+      } else if (payload.type === "drop") {
+        setShowDropOverlay(false);
+        const paths = payload.paths ?? [];
+        const filtered = paths.filter((p) => {
+          const ext = p.split(".").pop()?.toLowerCase() ?? "";
+          return SUPPORTED_EXTENSIONS.has(ext);
+        });
+        if (filtered.length > 0) {
+          tauriCommands
+            .importPhotos(filtered)
+            .catch((err) => console.error("[finderDrop]", err));
+        }
+      } else {
+        setShowDropOverlay(false);
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   return (
     <div className={styles.photoManager}>
       <FloatingControls />
       <PhotoGrid />
+      <DropImportOverlay isVisible={showDropOverlay} />
       <ImportModal
         isOpen={importState.isOpen}
         done={importState.done}

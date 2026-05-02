@@ -479,6 +479,24 @@ fn process_one_file(
 }
 
 #[tauri::command]
+pub async fn reorder_photos(
+    ordered_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    for (i, id) in ordered_ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE photos SET sort_order = ?1 WHERE id = ?2",
+            params![i as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn remove_photos(
     ids: Vec<String>,
     state: State<'_, AppState>,

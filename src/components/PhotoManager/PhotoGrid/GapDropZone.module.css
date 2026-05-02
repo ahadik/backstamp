@@ -1,0 +1,18 @@
+.line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--color-accent);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.left {
+  left: 0;
+}
+
+.right {
+  right: 0;
+}

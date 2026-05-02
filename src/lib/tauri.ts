@@ -37,4 +37,7 @@ export const tauriCommands = {
 
   getThumbnail: (photoId: string) =>
     invoke<string>("get_thumbnail", { photoId }),
+
+  reorderPhotos: (orderedIds: string[]) =>
+    invoke<void>("reorder_photos", { orderedIds }),
 };
