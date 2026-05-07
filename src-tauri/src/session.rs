@@ -25,6 +25,16 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         }
         conn.pragma_update(None, "user_version", 1i64)?;
     }
+    if version < 2 {
+        // Add settings table if not present
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );"
+        )?;
+        conn.pragma_update(None, "user_version", 2i64)?;
+    }
     Ok(())
 }
 
@@ -94,6 +104,11 @@ CREATE TABLE IF NOT EXISTS photo_keywords (
     keyword  TEXT NOT NULL,
     PRIMARY KEY (photo_id, keyword),
     FOREIGN KEY (photo_id) REFERENCES photos(id)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 ";
 
@@ -169,5 +184,23 @@ mod tests {
         apply_schema(&conn).unwrap();
         // Running it a second time must not fail (CREATE TABLE IF NOT EXISTS)
         apply_schema(&conn).unwrap();
+    }
+
+    #[test]
+    fn schema_creates_settings_table() {
+        let conn = in_memory_db();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)",
+            ("mapbox_token", "pk.test"),
+        )
+        .unwrap();
+        let val: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                ["mapbox_token"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(val, "pk.test");
     }
 }

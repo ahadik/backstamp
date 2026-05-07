@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { tauriCommands } from "../../../lib/tauri";
 import { useUI } from "../../../state/UIContext";
 import { useSession } from "../../../state/SessionContext";
+import { WORKING_TIMEZONES } from "../../../lib/timezones";
 import { GridSizeControl } from "./GridSizeControl";
 import styles from "./FloatingControls.module.css";
 
@@ -57,13 +58,9 @@ export function FloatingControls() {
             dispatch({ type: "SET_WORKING_TIMEZONE", timezone: e.target.value })
           }
         >
-          <option value="America/Los_Angeles">US Pacific</option>
-          <option value="America/New_York">US Eastern</option>
-          <option value="America/Chicago">US Central</option>
-          <option value="America/Denver">US Mountain</option>
-          <option value="Europe/London">London</option>
-          <option value="Europe/Paris">Paris</option>
-          <option value="Asia/Tokyo">Tokyo</option>
+          {WORKING_TIMEZONES.map((tz) => (
+            <option key={tz.value} value={tz.value}>{tz.label}</option>
+          ))}
         </select>
         <GridSizeControl />
       </div>

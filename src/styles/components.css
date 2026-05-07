@@ -99,8 +99,4 @@
 }
 
 /* ── Inspector card ── */
-.inspector-card {
-  background: var(--color-surface);
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--color-border);
-}
+.inspector-card {}

@@ -5,19 +5,25 @@ export interface UIState {
   gridColumns: number;      // target number of columns in the photo grid
   panelWidth: number;       // current photo grid panel width in px (updated by PhotoGrid)
   mapPanelHeight: number;   // px
+  mapboxToken: string | null;
+  claudeApiKey: string | null;
 }
 
 type UIAction =
   | { type: "SET_WORKING_TIMEZONE"; timezone: string }
   | { type: "SET_GRID_COLUMNS"; columns: number }
   | { type: "SET_PANEL_WIDTH"; width: number }
-  | { type: "SET_MAP_PANEL_HEIGHT"; height: number };
+  | { type: "SET_MAP_PANEL_HEIGHT"; height: number }
+  | { type: "SET_MAPBOX_TOKEN"; token: string | null }
+  | { type: "SET_CLAUDE_API_KEY"; key: string | null };
 
 const initialState: UIState = {
   workingTimezone: "America/Los_Angeles",
   gridColumns: 5,
   panelWidth: 800,
   mapPanelHeight: 200,
+  mapboxToken: null,
+  claudeApiKey: null,
 };
 
 function uiReducer(state: UIState, action: UIAction): UIState {
@@ -30,6 +36,10 @@ function uiReducer(state: UIState, action: UIAction): UIState {
       return { ...state, panelWidth: action.width };
     case "SET_MAP_PANEL_HEIGHT":
       return { ...state, mapPanelHeight: Math.max(60, action.height) };
+    case "SET_MAPBOX_TOKEN":
+      return { ...state, mapboxToken: action.token };
+    case "SET_CLAUDE_API_KEY":
+      return { ...state, claudeApiKey: action.key };
     default:
       return state;
   }

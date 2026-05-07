@@ -20,6 +20,7 @@ const emptySessionState: SessionState = {
   selectedIds: new Set(),
   gpxFiles: [],
   applyInProgress: false,
+  canRollback: false,
 };
 
 const defaultUIState: UIState = {
@@ -27,6 +28,8 @@ const defaultUIState: UIState = {
   gridColumns: 5,
   panelWidth: 800,
   mapPanelHeight: 200,
+  mapboxToken: null,
+  claudeApiKey: null,
 };
 
 function setupMocks(

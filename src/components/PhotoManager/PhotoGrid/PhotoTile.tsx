@@ -53,18 +53,20 @@ export function PhotoTile({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      {photo.fileStatus === "missing" ? (
-        <div className={styles.missing}>
-          <span className="text-lg">?</span>
-          <span className="text-xs">File not found</span>
-        </div>
-      ) : (
-        <img src={src} className={styles.img} loading="lazy" draggable={false} />
-      )}
-      {photo.pendingChanges && <span className={styles.pendingDot} />}
-      {isSelected && <div className={styles.selectedOverlay} />}
-      {isSelected && <span className={styles.checkmark}>✓</span>}
-      {dropZone === "on-photo" && <div className={styles.dropOverlay} />}
+      <div className={styles.content}>
+        {photo.fileStatus === "missing" ? (
+          <div className={styles.missing}>
+            <span className="text-lg">?</span>
+            <span className="text-xs">File not found</span>
+          </div>
+        ) : (
+          <img src={src} className={styles.img} loading="lazy" draggable={false} />
+        )}
+        {photo.pendingChanges && <span className={styles.pendingDot} />}
+        {isSelected && <div className={styles.selectedOverlay} />}
+        {isSelected && <span className={styles.checkmark}>✓</span>}
+        {dropZone === "on-photo" && <div className={styles.dropOverlay} />}
+      </div>
       {dropZone === "gap-before" && <GapDropZone side="left" />}
       {dropZone === "gap-after" && <GapDropZone side="right" />}
     </div>

@@ -33,6 +33,7 @@ export interface SessionState {
   selectedIds: Set<string>;
   gpxFiles: GpxFile[];
   applyInProgress: boolean;
+  canRollback: boolean;
 }
 
 type SessionAction =
@@ -47,8 +48,8 @@ type SessionAction =
   | { type: "SET_PENDING"; ids: string[]; changes: Partial<Metadata> }
   | { type: "CLEAR_PENDING"; ids: string[] }
   | { type: "APPLY_START" }
-  | { type: "APPLY_COMPLETE"; updatedPhotos: Photo[] }
-  | { type: "ROLLBACK_COMPLETE"; restoredPhotos: Photo[] }
+  | { type: "APPLY_COMPLETE"; updatedPhotos: Photo[]; canRollback: boolean }
+  | { type: "ROLLBACK_COMPLETE"; restoredPhotos: Photo[]; canRollback: boolean }
   | { type: "REMOVE_PHOTOS"; ids: string[] }
   | { type: "MARK_MISSING"; ids: string[] }
   | { type: "ADD_GPX"; gpxFile: GpxFile }
@@ -73,6 +74,7 @@ const initialState: SessionState = {
   selectedIds: new Set(),
   gpxFiles: [],
   applyInProgress: false,
+  canRollback: false,
 };
 
 function sessionReducer(state: SessionState, action: SessionAction): SessionState {
@@ -93,7 +95,6 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         if (ids.has(id)) ids.delete(id);
         else ids.add(id);
       } else if (mode === "shift") {
-        // Shift-select: add range between last selected and id
         const photoIds = state.photos.map((p) => p.id);
         const clickedIdx = photoIds.indexOf(id);
         const lastIdx = photoIds.findLastIndex((pid: string) => ids.has(pid));
@@ -159,13 +160,13 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     case "APPLY_COMPLETE": {
       const byId = new Map(action.updatedPhotos.map((p) => [p.id, p]));
       const updated = state.photos.map((p) => byId.get(p.id) ?? p);
-      return { ...state, photos: updated, applyInProgress: false };
+      return { ...state, photos: updated, applyInProgress: false, canRollback: action.canRollback };
     }
 
     case "ROLLBACK_COMPLETE": {
       const byId = new Map(action.restoredPhotos.map((p) => [p.id, p]));
       const updated = state.photos.map((p) => byId.get(p.id) ?? p);
-      return { ...state, photos: updated };
+      return { ...state, photos: updated, canRollback: action.canRollback };
     }
 
     case "REMOVE_PHOTOS": {

@@ -25,6 +25,7 @@ pub(crate) struct PhotoRow {
 pub(crate) struct SessionLoadResult {
     photos: Vec<PhotoRow>,
     gpx_files: Vec<serde_json::Value>,
+    can_rollback: bool,
 }
 
 fn load_metadata_for(
@@ -127,9 +128,15 @@ pub async fn load_session(state: State<'_, AppState>) -> Result<SessionLoadResul
         })
         .collect();
 
+    let can_rollback: bool = conn
+        .query_row("SELECT COUNT(*) FROM apply_ops", [], |r| r.get::<_, i64>(0))
+        .map(|n| n > 0)
+        .unwrap_or(false);
+
     Ok(SessionLoadResult {
         photos,
         gpx_files: vec![],
+        can_rollback,
     })
 }
 

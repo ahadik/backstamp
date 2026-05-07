@@ -119,9 +119,12 @@ export function useDragDrop({
         }
       },
       onDrop: (e: React.DragEvent) => {
-        e.preventDefault();
-        const ids = draggingIdsRef.current;
+        const raw = e.dataTransfer.getData("text/plain");
+        const ids = raw.length > 0 ? raw.split(",") : draggingIdsRef.current;
+        // Not an in-app drag — let Finder file drops bubble to the document handler.
         if (ids.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
         const zone = zoneFromEvent(e);
         const target: DropTarget =
           zone === "on-photo"

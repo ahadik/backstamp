@@ -5,10 +5,11 @@ mod gpx;
 pub mod session;
 pub mod thumbnail;
 
-use commands::{metadata, photos, session as session_commands, thumbnails};
+use commands::{corpus as corpus_commands, metadata, photos, session as session_commands, settings, thumbnails, timezone};
 use exiftool::ExiftoolProcess;
 use rusqlite::Connection;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
@@ -16,6 +17,7 @@ pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
     pub exiftool: Arc<Mutex<ExiftoolProcess>>,
     pub thumbnails_dir: PathBuf,
+    pub apply_cancel_flag: Arc<AtomicBool>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -48,6 +50,7 @@ pub fn run() {
                 db: Arc::new(Mutex::new(db)),
                 exiftool: Arc::new(Mutex::new(exiftool)),
                 thumbnails_dir,
+                apply_cancel_flag: Arc::new(AtomicBool::new(false)),
             });
 
             Ok(())
@@ -59,9 +62,17 @@ pub fn run() {
             photos::remove_photos,
             photos::reorder_photos,
             metadata::apply_changes,
+            metadata::apply_cancel,
             metadata::rollback,
             metadata::reset_photos,
             thumbnails::get_thumbnail,
+            corpus_commands::load_corpus,
+            corpus_commands::add_corpus_entry,
+            corpus_commands::remove_corpus_entry,
+            corpus_commands::record_corpus_use,
+            settings::get_setting,
+            settings::set_setting,
+            timezone::resolve_timezone,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

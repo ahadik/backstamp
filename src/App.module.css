@@ -7,7 +7,6 @@
   z-index: var(--z-inspector);
   display: flex;
   flex-direction: column;
-  backdrop-filter: blur(var(--blur-glass));
-  -webkit-backdrop-filter: blur(var(--blur-glass));
-  border-left: 1px solid var(--color-glass-border);
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border);
 }

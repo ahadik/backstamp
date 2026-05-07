@@ -16,6 +16,7 @@ export function PhotoGrid() {
   const { state: session, dispatch } = useSession();
   const { state: ui, dispatch: uiDispatch } = useUI();
   const containerRef = useRef<HTMLDivElement>(null);
+  const inspectorFocusedAtMouseDown = useRef(false);
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -131,6 +132,10 @@ export function PhotoGrid() {
     setLastClickedId(photoId);
   }
 
+  function inspectorHasFocus() {
+    return !!document.getElementById("inspector-panel")?.contains(document.activeElement);
+  }
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "a") {
@@ -152,7 +157,13 @@ export function PhotoGrid() {
         ["--tile-size" as string]: `${tilePx}px`,
         ["--map-panel-height" as string]: `${ui.mapPanelHeight}px`,
       }}
-      onClick={() => dispatch({ type: "DESELECT_ALL" })}
+      onMouseDown={() => {
+        inspectorFocusedAtMouseDown.current = inspectorHasFocus();
+      }}
+      onClick={() => {
+        if (inspectorFocusedAtMouseDown.current) return;
+        dispatch({ type: "DESELECT_ALL" });
+      }}
     >
       {session.photos.length === 0 ? (
         <div className={styles.empty}>

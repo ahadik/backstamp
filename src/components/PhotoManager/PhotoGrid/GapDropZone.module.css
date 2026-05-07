@@ -1,3 +1,5 @@
+/* Gap is 8px (--space-2). A 3px bar centered in the gap sits 4px from the tile edge.
+   left/right = -(gap/2 + barWidth/2) = -(4 + 1.5) = -5.5px */
 .line {
   position: absolute;
   top: 0;
@@ -6,13 +8,33 @@
   background: var(--color-accent);
   border-radius: 2px;
   pointer-events: none;
-  z-index: 3;
+  z-index: 10;
+}
+
+.line::before,
+.line::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.line::before {
+  top: -3px;
+}
+
+.line::after {
+  bottom: -3px;
 }
 
 .left {
-  left: 0;
+  left: -5.5px;
 }
 
 .right {
-  right: 0;
+  right: -5.5px;
 }

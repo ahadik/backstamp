@@ -1,26 +1,42 @@
+import { useState } from "react";
+import { useSession } from "../../state/SessionContext";
+import { DateTimeSection } from "./DateTimeSection/DateTimeSection";
+import { CameraSection } from "./CameraSection/CameraSection";
+import { LocationSection } from "./LocationSection/LocationSection";
+import { VibeTagSection } from "./VibeTagSection/VibeTagSection";
+import { SettingsDrawer } from "../Settings/SettingsDrawer";
 import styles from "./InspectorPanel.module.css";
 
-const SECTIONS = [
-  { key: "datetime", label: "Date & Time" },
-  { key: "location", label: "Location" },
-  { key: "camera", label: "Camera Details" },
-  { key: "vibe", label: "Vibe Tag" },
-];
-
 export function InspectorPanel() {
+  const { state } = useSession();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const selectedPhotos = state.photos.filter((p) =>
+    state.selectedIds.has(p.id)
+  );
+
   return (
-    <aside className={styles.panel}>
+    <aside
+      id="inspector-panel"
+      className={styles.panel}
+      onKeyDown={(e) => { if (e.key === "Escape") e.stopPropagation(); }}
+    >
       <div className={styles.sections}>
-        {SECTIONS.map((s) => (
-          <div key={s.key} className="inspector-card">
-            <div className={styles.sectionHeader}>
-              <span className="section-label">{s.label}</span>
-            </div>
-            <div className={styles.sectionBody} />
-          </div>
-        ))}
+        <DateTimeSection selectedPhotos={selectedPhotos} />
+        <CameraSection selectedPhotos={selectedPhotos} />
+        <LocationSection
+          selectedPhotos={selectedPhotos}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+        <VibeTagSection
+          selectedPhotos={selectedPhotos}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
       </div>
-      <button className={styles.fab} disabled aria-label="Add">+</button>
+
+      {settingsOpen && (
+        <SettingsDrawer onClose={() => setSettingsOpen(false)} />
+      )}
     </aside>
   );
 }
