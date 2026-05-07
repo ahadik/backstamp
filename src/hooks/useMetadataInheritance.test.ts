@@ -152,3 +152,54 @@ describe("computeInheritance — gap at end of block (no after neighbor)", () =>
     expect(result.get("x")?.captureTime).toBe("10:01:00");
   });
 });
+
+describe("computeInheritance — gap drop with no neighbors", () => {
+  it("uses the dayKey and sets captureTime to null when neither neighbor has a time", () => {
+    const dragging = [makePhoto("x")];
+    const result = computeInheritance(
+      dragging,
+      { kind: "gap", gap: { beforeId: null, afterId: null, dayKey: "2024-03-15" } },
+      null,
+      null,
+      null,
+    );
+    expect(result.get("x")?.captureDate).toBe("2024-03-15");
+    expect(result.get("x")?.captureTime).toBeNull();
+  });
+});
+
+describe("computeInheritance — multiple dragging photos in a gap", () => {
+  it("assigns a distinct interpolated timestamp to each dragging photo", () => {
+    const before = makePhoto("b", { captureDate: "2024-03-15", captureTime: "10:00:00" });
+    const after = makePhoto("a", { captureDate: "2024-03-15", captureTime: "10:03:00" });
+    const dragging = [makePhoto("x"), makePhoto("y"), makePhoto("z")];
+    const result = computeInheritance(
+      dragging,
+      { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
+      null,
+      before,
+      after,
+    );
+    // With 3 photos between 10:00 and 10:03 → interpolation at t=1/4, 2/4, 3/4
+    // x: 10:00 + 0.25 * 180s = 10:00:45
+    // y: 10:00 + 0.50 * 180s = 10:01:30
+    // z: 10:00 + 0.75 * 180s = 10:02:15
+    expect(result.get("x")?.captureTime).toBe("10:00:45");
+    expect(result.get("y")?.captureTime).toBe("10:01:30");
+    expect(result.get("z")?.captureTime).toBe("10:02:15");
+  });
+
+  it("staggers end-of-block times: each dragging photo is 1 min later than the previous", () => {
+    const before = makePhoto("b", { captureTime: "10:00:00" });
+    const dragging = [makePhoto("x"), makePhoto("y")];
+    const result = computeInheritance(
+      dragging,
+      { kind: "gap", gap: { beforeId: "b", afterId: null, dayKey: "2024-03-15" } },
+      null,
+      before,
+      null,
+    );
+    expect(result.get("x")?.captureTime).toBe("10:01:00");
+    expect(result.get("y")?.captureTime).toBe("10:02:00");
+  });
+});

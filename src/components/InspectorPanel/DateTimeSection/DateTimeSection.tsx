@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useSession } from "../../../state/SessionContext";
-import { useUI } from "../../../state/UIContext";
 import { deriveFieldValue } from "../../../lib/inspectorUtils";
 import { WORKING_TIMEZONES } from "../../../lib/timezones";
 import { ConfirmDialog } from "../../common/ConfirmDialog/ConfirmDialog";
@@ -89,7 +88,6 @@ interface PendingConfirm {
 
 export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
   const { dispatch } = useSession();
-  const { state: uiState } = useUI();
 
   const captureDate = deriveFieldValue(selectedPhotos, (m) => m.captureDate);
   const captureTime = deriveFieldValue(selectedPhotos, (m) => m.captureTime);
@@ -104,12 +102,18 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
   const timeOriginalRef = useRef("");
   const tzRef = useRef<HTMLDivElement>(null);
 
-  const allTimezones = Array.from(
-    new Set([...WORKING_TIMEZONES.map((tz) => tz.value), ...Intl.supportedValuesOf("timeZone")])
-  ).sort();
-  const filteredTimezones = allTimezones.filter((tz) =>
-    tz.toLowerCase().includes(tzSearch.toLowerCase())
+  const search = tzSearch.toLowerCase();
+  const filteredCurated = WORKING_TIMEZONES.filter((tz) =>
+    tz.label.toLowerCase().includes(search) ||
+    tz.value.toLowerCase().includes(search)
   );
+  const curatedValues = new Set(WORKING_TIMEZONES.map((tz) => tz.value));
+  const extraIana: { value: string; label: string }[] = search
+    ? Intl.supportedValuesOf("timeZone")
+        .filter((tz) => !curatedValues.has(tz) && tz.toLowerCase().includes(search))
+        .map((tz) => ({ value: tz, label: tz }))
+    : [];
+  const filteredTimezones = [...filteredCurated, ...extraIana];
 
   const selectedIds = selectedPhotos.map((p) => p.id);
 
@@ -232,8 +236,8 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
       ? formatTimeDisplay(captureTime)
       : "";
 
-  const tzDisplayValue =
-    timezone && timezone !== "multiple" ? timezone : "";
+  const tzOption = WORKING_TIMEZONES.find((tz) => tz.value === timezone);
+  const tzDisplayValue = tzOption ? tzOption.label : (timezone && timezone !== "multiple" ? timezone : "");
   const tzPlaceholder =
     timezone === "multiple" ? "Multiple Values" : "Not set";
 
@@ -280,22 +284,22 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
                   className={`input ${styles.tzInput}`}
                   value={tzOpen ? tzSearch : tzDisplayValue}
                   placeholder={tzPlaceholder}
-                  onFocus={() => { setTzOpen(true); setTzSearch(uiState.workingTimezone); }}
+                  onFocus={() => { setTzOpen(true); setTzSearch(""); }}
                   onChange={(e) => setTzSearch(e.target.value)}
                   readOnly={!tzOpen}
                 />
                 {tzOpen && (
                   <div className={styles.tzDropdown}>
-                    {filteredTimezones.slice(0, 60).map((tz) => (
+                    {filteredTimezones.map((tz) => (
                       <button
-                        key={tz}
+                        key={tz.value}
                         className={styles.tzOption}
                         onMouseDown={(e) => {
                           e.preventDefault();
-                          handleTimezoneSelect(tz);
+                          handleTimezoneSelect(tz.value);
                         }}
                       >
-                        {tz}
+                        {tz.label}
                       </button>
                     ))}
                     {filteredTimezones.length === 0 && (
