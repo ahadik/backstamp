@@ -4,8 +4,8 @@ import {
   DateTimeSection,
   parseTimeInput,
   formatTimeDisplay,
-  getUtcOffset,
 } from "./DateTimeSection";
+import { getUtcOffset } from "../../../lib/timezone";
 import type { Photo, Metadata, SessionState } from "../../../state/SessionContext";
 
 vi.mock("../../../state/SessionContext", () => ({
@@ -18,7 +18,7 @@ import { useSession } from "../../../state/SessionContext";
 
 const baseMetadata: Metadata = {
   captureDate: null, captureTime: null, utcOffset: null, timezone: null,
-  gpsLat: null, gpsLng: null, cameraBody: null, lens: null, film: null,
+  gpsLat: null, gpsLng: null, cameraMake: null, cameraModel: null, lens: null, filmVendor: null, filmType: null,
 };
 
 const emptySessionState: SessionState = {

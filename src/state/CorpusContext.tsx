@@ -5,44 +5,32 @@ export interface CorpusEntry {
   isBuiltin: boolean;
   lastUsed: number | null;
   useCount: number;
+  vendor?: string | null;
 }
 
 export interface CorpusState {
-  cameraOptions: CorpusEntry[];
+  cameraMakeOptions: CorpusEntry[];
+  cameraModelOptions: CorpusEntry[];
   lensOptions: CorpusEntry[];
-  filmOptions: CorpusEntry[];
+  filmVendors: CorpusEntry[];
+  filmTypes: CorpusEntry[];
 }
+
+export type CorpusCategory = "camera_make" | "camera_model" | "lens" | "film_vendor" | "film_type";
 
 type CorpusAction =
   | { type: "LOAD_CORPUS"; corpus: CorpusState }
-  | { type: "ADD_ENTRY"; category: "camera" | "lens" | "film"; value: string }
-  | { type: "REMOVE_ENTRY"; category: "camera" | "lens" | "film"; value: string }
-  | { type: "RECORD_USE"; category: "camera" | "lens" | "film"; value: string };
+  | { type: "ADD_ENTRY"; category: CorpusCategory; value: string; vendor?: string }
+  | { type: "REMOVE_ENTRY"; category: CorpusCategory; value: string; vendor?: string }
+  | { type: "RECORD_USE"; category: CorpusCategory; value: string; vendor?: string };
 
 const initialState: CorpusState = {
-  cameraOptions: [],
+  cameraMakeOptions: [],
+  cameraModelOptions: [],
   lensOptions: [],
-  filmOptions: [],
+  filmVendors: [],
+  filmTypes: [],
 };
-
-function getList(
-  state: CorpusState,
-  category: "camera" | "lens" | "film"
-): CorpusEntry[] {
-  if (category === "camera") return state.cameraOptions;
-  if (category === "lens") return state.lensOptions;
-  return state.filmOptions;
-}
-
-function setList(
-  state: CorpusState,
-  category: "camera" | "lens" | "film",
-  list: CorpusEntry[]
-): CorpusState {
-  if (category === "camera") return { ...state, cameraOptions: list };
-  if (category === "lens") return { ...state, lensOptions: list };
-  return { ...state, filmOptions: list };
-}
 
 function corpusReducer(state: CorpusState, action: CorpusAction): CorpusState {
   switch (action.type) {
@@ -50,37 +38,132 @@ function corpusReducer(state: CorpusState, action: CorpusAction): CorpusState {
       return action.corpus;
 
     case "ADD_ENTRY": {
-      const list = getList(state, action.category);
+      const vendor = action.vendor ?? null;
       const key = action.value.trim().toLowerCase();
-      if (list.some((e) => e.value.trim().toLowerCase() === key)) return state;
-      const newEntry: CorpusEntry = {
-        value: action.value.trim(),
-        isBuiltin: false,
-        lastUsed: null,
-        useCount: 0,
-      };
-      return setList(state, action.category, [...list, newEntry]);
+
+      if (action.category === "camera_make") {
+        if (state.cameraMakeOptions.some((e) => e.value.trim().toLowerCase() === key)) return state;
+        const entry: CorpusEntry = { value: action.value.trim(), isBuiltin: false, lastUsed: null, useCount: 0 };
+        return { ...state, cameraMakeOptions: [...state.cameraMakeOptions, entry] };
+      }
+      if (action.category === "camera_model") {
+        if (state.cameraModelOptions.some(
+          (e) => e.value.trim().toLowerCase() === key &&
+                 (e.vendor ?? null) === vendor
+        )) return state;
+        const entry: CorpusEntry = { value: action.value.trim(), isBuiltin: false, lastUsed: null, useCount: 0, vendor };
+        return { ...state, cameraModelOptions: [...state.cameraModelOptions, entry] };
+      }
+      if (action.category === "lens") {
+        if (state.lensOptions.some((e) => e.value.trim().toLowerCase() === key)) return state;
+        const entry: CorpusEntry = { value: action.value.trim(), isBuiltin: false, lastUsed: null, useCount: 0 };
+        return { ...state, lensOptions: [...state.lensOptions, entry] };
+      }
+      if (action.category === "film_vendor") {
+        if (state.filmVendors.some((e) => e.value.trim().toLowerCase() === key)) return state;
+        const entry: CorpusEntry = { value: action.value.trim(), isBuiltin: false, lastUsed: null, useCount: 0 };
+        return { ...state, filmVendors: [...state.filmVendors, entry] };
+      }
+      if (action.category === "film_type") {
+        if (state.filmTypes.some(
+          (e) => e.vendor?.toLowerCase() === vendor?.toLowerCase() && e.value.trim().toLowerCase() === key
+        )) return state;
+        const entry: CorpusEntry = { vendor, value: action.value.trim(), isBuiltin: false, lastUsed: null, useCount: 0 };
+        return { ...state, filmTypes: [...state.filmTypes, entry] };
+      }
+      return state;
     }
 
     case "REMOVE_ENTRY": {
-      const list = getList(state, action.category);
+      const vendor = action.vendor ?? null;
       const key = action.value.trim().toLowerCase();
-      return setList(
-        state,
-        action.category,
-        list.filter((e) => e.value.trim().toLowerCase() !== key)
-      );
+
+      if (action.category === "camera_make") {
+        return { ...state, cameraMakeOptions: state.cameraMakeOptions.filter((e) => e.value.trim().toLowerCase() !== key) };
+      }
+      if (action.category === "camera_model") {
+        return {
+          ...state,
+          cameraModelOptions: state.cameraModelOptions.filter(
+            (e) => !(e.value.trim().toLowerCase() === key && (e.vendor ?? null) === vendor)
+          ),
+        };
+      }
+      if (action.category === "lens") {
+        return { ...state, lensOptions: state.lensOptions.filter((e) => e.value.trim().toLowerCase() !== key) };
+      }
+      if (action.category === "film_vendor") {
+        return {
+          ...state,
+          filmVendors: state.filmVendors.filter((e) => e.value.trim().toLowerCase() !== key),
+          filmTypes: state.filmTypes.filter((e) => e.vendor?.toLowerCase() !== key),
+        };
+      }
+      if (action.category === "film_type") {
+        return {
+          ...state,
+          filmTypes: state.filmTypes.filter(
+            (e) => !(e.vendor?.toLowerCase() === vendor?.toLowerCase() && e.value.trim().toLowerCase() === key)
+          ),
+        };
+      }
+      return state;
     }
 
     case "RECORD_USE": {
-      const list = getList(state, action.category);
+      const vendor = action.vendor ?? null;
       const key = action.value.trim().toLowerCase();
-      const updated = list.map((e) =>
-        e.value.trim().toLowerCase() === key
-          ? { ...e, lastUsed: Date.now(), useCount: e.useCount + 1 }
-          : e
-      );
-      return setList(state, action.category, updated);
+      const now = Date.now();
+
+      if (action.category === "camera_make") {
+        return {
+          ...state,
+          cameraMakeOptions: state.cameraMakeOptions.map((e) =>
+            e.value.trim().toLowerCase() === key ? { ...e, lastUsed: now, useCount: e.useCount + 1 } : e
+          ),
+        };
+      }
+      if (action.category === "camera_model") {
+        // Update vendor-exact matches; if none found, promote null-vendor (legacy) entries.
+        let promoted = false;
+        const updated = state.cameraModelOptions.map((e) => {
+          if (e.value.trim().toLowerCase() !== key) return e;
+          if ((e.vendor ?? null) === vendor) return { ...e, lastUsed: now, useCount: e.useCount + 1 };
+          if (e.vendor == null && !promoted) {
+            promoted = true;
+            return { ...e, vendor: vendor, lastUsed: now, useCount: e.useCount + 1 };
+          }
+          return e;
+        });
+        return { ...state, cameraModelOptions: updated };
+      }
+      if (action.category === "lens") {
+        return {
+          ...state,
+          lensOptions: state.lensOptions.map((e) =>
+            e.value.trim().toLowerCase() === key ? { ...e, lastUsed: now, useCount: e.useCount + 1 } : e
+          ),
+        };
+      }
+      if (action.category === "film_vendor") {
+        return {
+          ...state,
+          filmVendors: state.filmVendors.map((e) =>
+            e.value.trim().toLowerCase() === key ? { ...e, lastUsed: now, useCount: e.useCount + 1 } : e
+          ),
+        };
+      }
+      if (action.category === "film_type") {
+        return {
+          ...state,
+          filmTypes: state.filmTypes.map((e) =>
+            e.vendor?.toLowerCase() === vendor?.toLowerCase() && e.value.trim().toLowerCase() === key
+              ? { ...e, lastUsed: now, useCount: e.useCount + 1 }
+              : e
+          ),
+        };
+      }
+      return state;
     }
 
     default:

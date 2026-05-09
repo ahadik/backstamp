@@ -1,136 +1,130 @@
-import { useState, useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { useSession } from "../../state/SessionContext";
-import { tauriCommands } from "../../lib/tauri";
-import type { Photo, Metadata } from "../../state/SessionContext";
+import { useEffect } from "react";
 import styles from "./ApplyModal.module.css";
 
-type Phase = "applying" | "undoing" | "done";
+export interface ApplyError {
+  photoId: string;
+  filePath: string;
+  error: string;
+}
+
+export type ApplyPhase =
+  | { type: "idle" }
+  | { type: "applying"; done: number; total: number; errors: ApplyError[] }
+  | { type: "undoing"; done: number; total: number }
+  | { type: "complete"; errors: ApplyError[] }
+  | { type: "cancelled" };
 
 interface ApplyModalProps {
-  total: number;
-  onClose: () => void;
+  phase: ApplyPhase;
+  onCancel: () => void;
+  onDismiss: () => void;
 }
 
-interface ProgressEvent {
-  done: number;
-  total: number;
-}
-
-function mapLoadedPhoto(p: {
-  id: string;
-  filePath: string;
-  fileStatus: "ok" | "missing";
-  thumbnailSmall: string;
-  thumbnailLarge: string;
-  originalMetadata: Metadata;
-  currentMetadata: Metadata;
-  pendingChanges: null;
-}): Photo {
-  return {
-    id: p.id,
-    filePath: p.filePath,
-    fileStatus: p.fileStatus,
-    thumbnail: {
-      small: convertFileSrc(p.thumbnailSmall),
-      large: convertFileSrc(p.thumbnailLarge),
-    },
-    originalMetadata: p.originalMetadata,
-    currentMetadata: p.currentMetadata,
-    pendingChanges: null,
-  };
-}
-
-export function ApplyModal({ total, onClose }: ApplyModalProps) {
-  const { dispatch } = useSession();
-  const [phase, setPhase] = useState<Phase>("applying");
-  const [done, setDone] = useState(0);
-  const [currentTotal, setCurrentTotal] = useState(total);
-  const [cancelling, setCancelling] = useState(false);
-
+export function ApplyModal({ phase, onCancel, onDismiss }: ApplyModalProps) {
+  // Auto-dismiss after 1.5s when complete with no errors
   useEffect(() => {
-    const unlisteners = [
-      listen<ProgressEvent>("apply:progress", (e) => {
-        setDone(e.payload.done);
-        setCurrentTotal(e.payload.total);
-      }),
-
-      listen<ProgressEvent>("apply:undo_progress", (e) => {
-        setPhase("undoing");
-        setDone(e.payload.done);
-        setCurrentTotal(e.payload.total);
-      }),
-
-      listen("apply:complete", async () => {
-        try {
-          const result = await tauriCommands.loadSession();
-          const photos = result.photos.map(mapLoadedPhoto);
-          dispatch({ type: "APPLY_COMPLETE", updatedPhotos: photos, canRollback: result.canRollback });
-        } catch (err) {
-          console.error("[ApplyModal] loadSession failed:", err);
-          dispatch({ type: "APPLY_COMPLETE", updatedPhotos: [], canRollback: true });
-        }
-        onClose();
-      }),
-
-      listen("apply:cancelled", () => {
-        dispatch({ type: "APPLY_START" }); // clears applyInProgress via inverse dispatch
-        // Actually we need to reset applyInProgress — dispatch a no-op style action
-        // The apply was cancelled and undone; just close the modal
-        onClose();
-      }),
-    ];
-
-    return () => {
-      unlisteners.forEach((p) => p.then((fn) => fn()));
-    };
-  }, [dispatch, onClose]);
-
-  async function handleCancel() {
-    setCancelling(true);
-    try {
-      await tauriCommands.applyCancel();
-    } catch (err) {
-      console.error("[ApplyModal] applyCancel failed:", err);
+    if (phase.type === "complete" && phase.errors.length === 0) {
+      const id = setTimeout(onDismiss, 1500);
+      return () => clearTimeout(id);
     }
-  }
+  }, [phase, onDismiss]);
 
-  const percent =
-    currentTotal > 0 ? Math.round((done / currentTotal) * 100) : 0;
+  if (phase.type === "idle") return null;
+
+  const renderProgress = () => {
+    if (phase.type === "applying" || phase.type === "undoing") {
+      const pct =
+        phase.total > 0 ? Math.round((phase.done / phase.total) * 100) : 0;
+      return (
+        <div className={styles.progressTrack}>
+          <div className={styles.progressFill} style={{ width: `${pct}%` }} />
+        </div>
+      );
+    }
+    if (phase.type === "complete") {
+      const pct =
+        phase.errors.length === 0
+          ? 100
+          : 0; // partial shown via error list
+      return (
+        <div className={styles.progressTrack}>
+          <div className={styles.progressFill} style={{ width: `${pct}%` }} />
+        </div>
+      );
+    }
+    return null;
+  };
 
   return (
-    <div className={styles.backdrop}>
-      <div className={`inspector-card ${styles.modal}`}>
-        {phase === "applying" && (
+    <div className={styles.overlay}>
+      <div className={styles.card}>
+        {phase.type === "applying" && (
           <>
-            <h3 className={styles.title}>Writing changes…</h3>
-            <p className={styles.counter}>
-              {done} / {currentTotal} files
-            </p>
+            <h3 className={styles.title}>
+              Writing {phase.done} of {phase.total} photos…
+            </h3>
+            {renderProgress()}
+            <div className={styles.actions}>
+              <button className="btn btn-glass" onClick={onCancel}>
+                Cancel
+              </button>
+            </div>
           </>
         )}
-        {phase === "undoing" && (
+
+        {phase.type === "undoing" && (
           <>
-            <h3 className={styles.title}>Reverting changes…</h3>
-            <p className={styles.counter}>
-              {done} / {currentTotal} files
-            </p>
+            <h3 className={styles.title}>
+              Undoing {phase.done} of {phase.total} photos… (cannot cancel)
+            </h3>
+            {renderProgress()}
           </>
         )}
-        <div className={styles.progressTrack}>
-          <div
-            className={styles.progressFill}
-            style={{ width: `${percent}%` }}
-          />
-        </div>
-        {phase === "applying" && !cancelling && (
-          <button className="btn btn-glass" onClick={handleCancel}>
-            Cancel
-          </button>
+
+        {phase.type === "complete" && phase.errors.length === 0 && (
+          <>
+            <h3 className={styles.title}>All photos written successfully.</h3>
+            {renderProgress()}
+            <div className={styles.actions}>
+              <button className="btn btn-primary" onClick={onDismiss}>
+                Dismiss
+              </button>
+            </div>
+          </>
         )}
-        {cancelling && (
-          <p className={styles.cancelNote}>Cancelling…</p>
+
+        {phase.type === "complete" && phase.errors.length > 0 && (
+          <>
+            <h3 className={styles.title}>
+              {phase.errors.length} file(s) could not be written.
+            </h3>
+            <ul className={styles.errorList}>
+              {phase.errors.map((e) => (
+                <li key={e.photoId} className={styles.errorItem}>
+                  <span className={`text-sm ${styles.filePath}`}>
+                    {e.filePath || e.photoId}
+                  </span>
+                  <span className={`text-xs ${styles.errorMsg}`}>{e.error}</span>
+                </li>
+              ))}
+            </ul>
+            <div className={styles.actions}>
+              <button className="btn btn-primary" onClick={onDismiss}>
+                Dismiss
+              </button>
+            </div>
+          </>
+        )}
+
+        {phase.type === "cancelled" && (
+          <>
+            <h3 className={styles.title}>Changes cancelled.</h3>
+            <div className={styles.actions}>
+              <button className="btn btn-glass" onClick={onDismiss}>
+                Dismiss
+              </button>
+            </div>
+          </>
         )}
       </div>
     </div>

@@ -1,6 +1,7 @@
+use crate::write_metadata::{FieldWrite, PhotoWrite};
 use crate::AppState;
 use rusqlite::params;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -9,9 +10,59 @@ use uuid::Uuid;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct ProgressEvent {
+struct ApplyProgressEvent {
     done: usize,
     total: usize,
+    photo_id: String,
+    success: bool,
+    error: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct UndoProgressEvent {
+    done: usize,
+    total: usize,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ApplyCompleteEvent {
+    failed_files: Vec<FailedFile>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct FailedFile {
+    photo_id: String,
+    error: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RollbackResult {
+    pub can_rollback: bool,
+    pub failed_files: Vec<FailedFile>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetResult {
+    pub failed_files: Vec<FailedFile>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PhotoApplyChanges {
+    capture_date: Option<Option<String>>,
+    capture_time: Option<Option<String>>,
+    utc_offset: Option<Option<String>>,
+    gps_lat: Option<Option<f64>>,
+    gps_lng: Option<Option<f64>>,
+    camera_make: Option<Option<String>>,
+    camera_model: Option<Option<String>>,
+    lens: Option<Option<String>>,
+    film: Option<Option<String>>,
 }
 
 fn camel_to_snake(key: &str) -> &str {
@@ -22,9 +73,12 @@ fn camel_to_snake(key: &str) -> &str {
         "timezone" => "timezone",
         "gpsLat" => "gps_lat",
         "gpsLng" => "gps_lng",
-        "cameraBody" => "camera_body",
+        "cameraMake" => "camera_make",
+        "cameraModel" => "camera_model",
         "lens" => "lens",
-        "film" => "film",
+        "film" => "film",       // kept for backward compat with old apply_history rows
+        "filmVendor" => "film_vendor",
+        "filmType" => "film_type",
         other => other,
     }
 }
@@ -35,6 +89,69 @@ fn value_to_string(v: &Value) -> Option<String> {
         Value::String(s) => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),
         _ => Some(v.to_string()),
+    }
+}
+
+fn changes_to_photo_write(
+    photo_id: &str,
+    file_path: &str,
+    fields: &HashMap<String, Value>,
+) -> PhotoWrite {
+    let mut fw_list: Vec<FieldWrite> = Vec::new();
+    let mut utc_offset: Option<String> = None;
+
+    for (field_camel, val) in fields {
+        let field = camel_to_snake(field_camel);
+        if field == "utc_offset" {
+            utc_offset = value_to_string(val);
+            continue;
+        }
+        if field == "timezone" {
+            // timezone is stored in SQLite but not written via ExifTool directly
+            // utcOffset handles the EXIF write
+            continue;
+        }
+        fw_list.push(FieldWrite {
+            field: field.to_string(),
+            value: value_to_string(val),
+        });
+    }
+
+    PhotoWrite {
+        photo_id: photo_id.to_string(),
+        file_path: std::path::PathBuf::from(file_path),
+        fields: fw_list,
+        utc_offset,
+    }
+}
+
+fn history_to_photo_write(
+    photo_id: &str,
+    file_path: &str,
+    entries: &[(String, Option<String>)],
+) -> PhotoWrite {
+    let mut fw_list: Vec<FieldWrite> = Vec::new();
+    let mut utc_offset: Option<String> = None;
+
+    for (field, val) in entries {
+        if field == "utc_offset" {
+            utc_offset = val.clone();
+            continue;
+        }
+        if field == "timezone" {
+            continue;
+        }
+        fw_list.push(FieldWrite {
+            field: field.clone(),
+            value: val.clone(),
+        });
+    }
+
+    PhotoWrite {
+        photo_id: photo_id.to_string(),
+        file_path: std::path::PathBuf::from(file_path),
+        fields: fw_list,
+        utc_offset,
     }
 }
 
@@ -68,10 +185,10 @@ pub async fn apply_changes(
 
     let apply_id = Uuid::new_v4().to_string();
 
-    // Reset cancel flag
     state.apply_cancel_flag.store(false, Ordering::Relaxed);
 
-    // Record apply_ops and apply_history in SQLite
+    // Read file paths and record apply_ops + apply_history
+    let mut photo_file_paths: HashMap<String, String> = HashMap::new();
     {
         let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
 
@@ -82,11 +199,20 @@ pub async fn apply_changes(
         .map_err(|e| format!("insert apply_ops: {}", e))?;
 
         for (photo_id, fields) in &changes_map {
+            // Look up file path
+            let file_path: String = conn
+                .query_row(
+                    "SELECT file_path FROM photos WHERE id = ?1",
+                    params![photo_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or_default();
+            photo_file_paths.insert(photo_id.clone(), file_path);
+
             for (field_camel, new_val) in fields {
                 let field = camel_to_snake(field_camel);
                 let new_str = value_to_string(new_val);
 
-                // Read current value as "before"
                 let before: Option<String> = conn
                     .query_row(
                         "SELECT value FROM metadata_current WHERE photo_id = ?1 AND field = ?2",
@@ -106,15 +232,17 @@ pub async fn apply_changes(
     }
 
     let db = std::sync::Arc::clone(&state.db);
+    let exiftool = std::sync::Arc::clone(&state.exiftool);
     let cancel_flag = std::sync::Arc::clone(&state.apply_cancel_flag);
     let app_clone = app.clone();
 
-    // Process each photo in a blocking task
     let photo_ids: Vec<(String, HashMap<String, Value>)> = changes_map.into_iter().collect();
 
     tokio::task::spawn_blocking(move || {
         let mut done = 0usize;
         let mut cancelled_at: Option<usize> = None;
+        let mut failed_files: Vec<FailedFile> = Vec::new();
+        let mut written_ids: Vec<String> = Vec::new();
 
         for (i, (photo_id, fields)) in photo_ids.iter().enumerate() {
             if cancel_flag.load(Ordering::Relaxed) {
@@ -122,100 +250,147 @@ pub async fn apply_changes(
                 break;
             }
 
-            // Update metadata_current in SQLite (mark as applied)
-            if let Ok(conn) = db.lock() {
-                for (field_camel, new_val) in fields {
-                    let field = camel_to_snake(field_camel);
-                    let new_str = value_to_string(new_val);
-                    let _ = conn.execute(
-                        "INSERT INTO metadata_current (photo_id, field, value, is_pending)
-                         VALUES (?1, ?2, ?3, 0)
-                         ON CONFLICT(photo_id, field)
-                         DO UPDATE SET value = excluded.value, is_pending = 0",
-                        params![photo_id, field, new_str],
-                    );
-                    // Also update metadata_original so Reset works correctly after Apply
-                    let _ = conn.execute(
-                        "INSERT INTO metadata_original (photo_id, field, value)
-                         VALUES (?1, ?2, ?3)
-                         ON CONFLICT(photo_id, field)
-                         DO UPDATE SET value = excluded.value",
-                        params![photo_id, field, new_str],
-                    );
-                }
-            }
+            let file_path = photo_file_paths.get(photo_id).cloned().unwrap_or_default();
 
-            done += 1;
-            let _ = app_clone.emit("apply:progress", ProgressEvent { done, total });
-        }
-
-        if let Some(cancelled_idx) = cancelled_at {
-            // Undo already-written changes by restoring apply_history value_before
-            let applied_ids: Vec<&str> = photo_ids[..cancelled_idx]
-                .iter()
-                .map(|(id, _)| id.as_str())
-                .collect();
-
-            // Re-read apply_history for undo
-            let undo_entries: Vec<(String, String, Option<String>)> = if let Ok(conn) = db.lock() {
-                let mut stmt = match conn.prepare(
-                    "SELECT photo_id, field, value_before FROM apply_history WHERE apply_id = ?1",
-                ) {
-                    Ok(s) => s,
-                    Err(_) => {
-                        let _ = app_clone.emit("apply:cancelled", ());
-                        return;
-                    }
-                };
-                stmt.query_map(params![apply_id], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                })
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                .unwrap_or_default()
+            // Write to disk via ExifTool
+            let write = changes_to_photo_write(photo_id, &file_path, fields);
+            let write_result = if let Ok(mut et) = exiftool.lock() {
+                crate::write_metadata::write_metadata(&mut et, &write)
             } else {
-                vec![]
+                Err("exiftool lock failed".to_string())
             };
 
-            // Only undo the applied ones
-            let undo_set: std::collections::HashSet<&str> =
-                applied_ids.iter().copied().collect();
-            let to_undo: Vec<_> = undo_entries
-                .iter()
-                .filter(|(pid, _, _)| undo_set.contains(pid.as_str()))
-                .collect();
-            let undo_total = to_undo.len();
-            let mut undo_done = 0;
-
-            for (photo_id, field, before) in &to_undo {
-                if let Ok(conn) = db.lock() {
-                    let _ = conn.execute(
-                        "INSERT INTO metadata_current (photo_id, field, value, is_pending)
-                         VALUES (?1, ?2, ?3, 0)
-                         ON CONFLICT(photo_id, field)
-                         DO UPDATE SET value = excluded.value, is_pending = 0",
-                        params![photo_id, field, before],
-                    );
-                    // Restore original too
-                    let _ = conn.execute(
-                        "INSERT INTO metadata_original (photo_id, field, value)
-                         VALUES (?1, ?2, ?3)
-                         ON CONFLICT(photo_id, field)
-                         DO UPDATE SET value = excluded.value",
-                        params![photo_id, field, before],
+            match write_result {
+                Ok(()) => {
+                    // Update metadata_current in SQLite
+                    if let Ok(conn) = db.lock() {
+                        for (field_camel, new_val) in fields {
+                            let field = camel_to_snake(field_camel);
+                            let new_str = value_to_string(new_val);
+                            let _ = conn.execute(
+                                "INSERT INTO metadata_current (photo_id, field, value, is_pending)
+                                 VALUES (?1, ?2, ?3, 0)
+                                 ON CONFLICT(photo_id, field)
+                                 DO UPDATE SET value = excluded.value, is_pending = 0",
+                                params![photo_id, field, new_str],
+                            );
+                        }
+                    }
+                    written_ids.push(photo_id.clone());
+                    done += 1;
+                    let _ = app_clone.emit(
+                        "apply:progress",
+                        ApplyProgressEvent {
+                            done,
+                            total,
+                            photo_id: photo_id.clone(),
+                            success: true,
+                            error: None,
+                        },
                     );
                 }
-                undo_done += 1;
-                let _ = app_clone.emit(
-                    "apply:undo_progress",
-                    ProgressEvent { done: undo_done, total: undo_total },
-                );
+                Err(err) => {
+                    failed_files.push(FailedFile {
+                        photo_id: photo_id.clone(),
+                        error: err.clone(),
+                    });
+                    done += 1;
+                    let _ = app_clone.emit(
+                        "apply:progress",
+                        ApplyProgressEvent {
+                            done,
+                            total,
+                            photo_id: photo_id.clone(),
+                            success: false,
+                            error: Some(err),
+                        },
+                    );
+                }
+            }
+        }
+
+        if let Some(_cancelled_idx) = cancelled_at {
+            // Undo already-successfully-written files in reverse order
+            let undo_entries: Vec<(String, String, Option<String>)> =
+                if let Ok(conn) = db.lock() {
+                    let mut stmt = match conn.prepare(
+                        "SELECT ah.photo_id, ah.field, ah.value_before
+                         FROM apply_history ah
+                         JOIN photos p ON p.id = ah.photo_id
+                         WHERE ah.apply_id = ?1",
+                    ) {
+                        Ok(s) => s,
+                        Err(_) => {
+                            let _ = app_clone.emit("apply:cancelled", ());
+                            return;
+                        }
+                    };
+                    stmt.query_map(params![apply_id], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    })
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default()
+                } else {
+                    vec![]
+                };
+
+            // Group by photo_id for undo writes
+            let written_set: std::collections::HashSet<&str> =
+                written_ids.iter().map(|s| s.as_str()).collect();
+
+            // Build per-photo undo writes
+            let mut undo_by_photo: HashMap<String, Vec<(String, Option<String>)>> =
+                HashMap::new();
+            for (pid, field, before) in &undo_entries {
+                if written_set.contains(pid.as_str()) {
+                    undo_by_photo
+                        .entry(pid.clone())
+                        .or_default()
+                        .push((field.clone(), before.clone()));
+                }
             }
 
-            // Clean up the partial apply_ops record
+            let undo_total = undo_by_photo.len();
+            let mut undo_done = 0;
+
+            // Undo in reverse order
+            for photo_id in written_ids.iter().rev() {
+                if let Some(fields) = undo_by_photo.get(photo_id) {
+                    let file_path =
+                        photo_file_paths.get(photo_id).cloned().unwrap_or_default();
+                    let undo_write = history_to_photo_write(photo_id, &file_path, fields);
+                    if let Ok(mut et) = exiftool.lock() {
+                        let _ =
+                            crate::write_metadata::write_metadata(&mut et, &undo_write);
+                    }
+                    // Restore SQLite
+                    if let Ok(conn) = db.lock() {
+                        for (field, before) in fields {
+                            let _ = conn.execute(
+                                "INSERT INTO metadata_current (photo_id, field, value, is_pending)
+                                 VALUES (?1, ?2, ?3, 1)
+                                 ON CONFLICT(photo_id, field)
+                                 DO UPDATE SET value = excluded.value, is_pending = 1",
+                                params![photo_id, field, before],
+                            );
+                        }
+                    }
+                    undo_done += 1;
+                    let _ = app_clone.emit(
+                        "apply:undo_progress",
+                        UndoProgressEvent {
+                            done: undo_done,
+                            total: undo_total,
+                        },
+                    );
+                }
+            }
+
+            // Clean up the partial apply record
             if let Ok(conn) = db.lock() {
                 let _ = conn.execute(
                     "DELETE FROM apply_history WHERE apply_id = ?1",
@@ -229,7 +404,25 @@ pub async fn apply_changes(
 
             let _ = app_clone.emit("apply:cancelled", ());
         } else {
-            let _ = app_clone.emit("apply:complete", ());
+            // Normal completion — clean up apply_ops if all failed
+            if written_ids.is_empty() && !failed_files.is_empty() {
+                if let Ok(conn) = db.lock() {
+                    let _ = conn.execute(
+                        "DELETE FROM apply_history WHERE apply_id = ?1",
+                        params![apply_id],
+                    );
+                    let _ = conn.execute(
+                        "DELETE FROM apply_ops WHERE id = ?1",
+                        params![apply_id],
+                    );
+                }
+            }
+            let _ = app_clone.emit(
+                "apply:complete",
+                ApplyCompleteEvent {
+                    failed_files,
+                },
+            );
         }
     });
 
@@ -243,10 +436,11 @@ pub async fn apply_cancel(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn rollback(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn rollback(
+    state: State<'_, AppState>,
+) -> Result<RollbackResult, String> {
     let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
 
-    // Find the most recent apply_ops entry
     let apply_id: String = conn
         .query_row(
             "SELECT id FROM apply_ops ORDER BY applied_at DESC LIMIT 1",
@@ -255,18 +449,22 @@ pub async fn rollback(state: State<'_, AppState>) -> Result<(), String> {
         )
         .map_err(|_| "No apply history to roll back".to_string())?;
 
-    // Read the apply_history entries for this apply
-    let entries: Vec<(String, String, Option<String>)> = {
+    // Load apply_history grouped by photo with file paths
+    let entries: Vec<(String, String, String, Option<String>)> = {
         let mut stmt = conn
             .prepare(
-                "SELECT photo_id, field, value_before FROM apply_history WHERE apply_id = ?1",
+                "SELECT ah.photo_id, p.file_path, ah.field, ah.value_before
+                 FROM apply_history ah
+                 JOIN photos p ON p.id = ah.photo_id
+                 WHERE ah.apply_id = ?1",
             )
             .map_err(|e| format!("prepare rollback: {}", e))?;
-        let rows = stmt.query_map(params![apply_id], |row| {
+        let rows: Vec<_> = stmt.query_map(params![apply_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
             ))
         })
         .map_err(|e| format!("query rollback: {}", e))?
@@ -275,28 +473,64 @@ pub async fn rollback(state: State<'_, AppState>) -> Result<(), String> {
         rows
     };
 
-    // Restore metadata_current to value_before
-    for (photo_id, field, before) in &entries {
-        conn.execute(
-            "INSERT INTO metadata_current (photo_id, field, value, is_pending)
-             VALUES (?1, ?2, ?3, 0)
-             ON CONFLICT(photo_id, field)
-             DO UPDATE SET value = excluded.value, is_pending = 0",
-            params![photo_id, field, before],
-        )
-        .map_err(|e| format!("restore metadata_current: {}", e))?;
-
-        conn.execute(
-            "INSERT INTO metadata_original (photo_id, field, value)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(photo_id, field)
-             DO UPDATE SET value = excluded.value",
-            params![photo_id, field, before],
-        )
-        .map_err(|e| format!("restore metadata_original: {}", e))?;
+    // Group by photo_id
+    let mut by_photo: HashMap<String, (String, Vec<(String, Option<String>)>)> = HashMap::new();
+    for (photo_id, file_path, field, before) in &entries {
+        let entry = by_photo
+            .entry(photo_id.clone())
+            .or_insert_with(|| (file_path.clone(), vec![]));
+        entry.1.push((field.clone(), before.clone()));
     }
 
-    // Delete the apply_history and apply_ops for this operation
+    drop(conn); // release lock before ExifTool writes
+
+    let mut failed_files: Vec<FailedFile> = Vec::new();
+    let mut restored_ids: Vec<String> = Vec::new();
+
+    for (photo_id, (file_path, fields)) in &by_photo {
+        let undo_write = history_to_photo_write(photo_id, file_path, fields);
+        let result = {
+            let mut et = state
+                .exiftool
+                .lock()
+                .map_err(|e| format!("exiftool lock: {}", e))?;
+            crate::write_metadata::write_metadata(&mut et, &undo_write)
+        };
+        match result {
+            Ok(()) => restored_ids.push(photo_id.clone()),
+            Err(e) => failed_files.push(FailedFile {
+                photo_id: photo_id.clone(),
+                error: e,
+            }),
+        }
+    }
+
+    // Restore SQLite for successfully written photos
+    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
+    for photo_id in &restored_ids {
+        if let Some((_, fields)) = by_photo.get(photo_id) {
+            for (field, before) in fields {
+                conn.execute(
+                    "INSERT INTO metadata_current (photo_id, field, value, is_pending)
+                     VALUES (?1, ?2, ?3, 0)
+                     ON CONFLICT(photo_id, field)
+                     DO UPDATE SET value = excluded.value, is_pending = 0",
+                    params![photo_id, field, before],
+                )
+                .map_err(|e| format!("restore metadata_current: {}", e))?;
+
+                conn.execute(
+                    "INSERT INTO metadata_original (photo_id, field, value)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(photo_id, field)
+                     DO UPDATE SET value = excluded.value",
+                    params![photo_id, field, before],
+                )
+                .map_err(|e| format!("restore metadata_original: {}", e))?;
+            }
+        }
+    }
+
     conn.execute(
         "DELETE FROM apply_history WHERE apply_id = ?1",
         params![apply_id],
@@ -306,46 +540,95 @@ pub async fn rollback(state: State<'_, AppState>) -> Result<(), String> {
     conn.execute("DELETE FROM apply_ops WHERE id = ?1", params![apply_id])
         .map_err(|e| format!("delete apply_ops: {}", e))?;
 
-    Ok(())
+    let remaining: i64 = conn
+        .query_row("SELECT COUNT(*) FROM apply_ops", [], |r| r.get(0))
+        .unwrap_or(0);
+
+    Ok(RollbackResult {
+        can_rollback: remaining > 0,
+        failed_files,
+    })
 }
 
 #[tauri::command]
 pub async fn reset_photos(
     state: State<'_, AppState>,
     ids: Vec<String>,
-) -> Result<(), String> {
+) -> Result<ResetResult, String> {
     if ids.is_empty() {
-        return Ok(());
+        return Ok(ResetResult { failed_files: vec![] });
     }
-    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
+
+    // Load original metadata + file paths
+    let by_photo: HashMap<String, (String, Vec<(String, Option<String>)>)> = {
+        let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
+        let mut result = HashMap::new();
+        for photo_id in &ids {
+            let file_path: String = conn
+                .query_row(
+                    "SELECT file_path FROM photos WHERE id = ?1",
+                    params![photo_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or_default();
+
+            let fields: Vec<(String, Option<String>)> = {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT field, value FROM metadata_original WHERE photo_id = ?1",
+                    )
+                    .map_err(|e| format!("prepare reset: {}", e))?;
+                let rows: Vec<_> = stmt.query_map(params![photo_id], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                    ))
+                })
+                .map_err(|e| format!("query reset: {}", e))?
+                .filter_map(|r| r.ok())
+                .collect();
+                rows
+            };
+
+            result.insert(photo_id.clone(), (file_path, fields));
+        }
+        result
+    };
+
+    let mut failed_files: Vec<FailedFile> = Vec::new();
 
     for photo_id in &ids {
-        // Read metadata_original fields
-        let fields: Vec<(String, Option<String>)> = {
-            let mut stmt = conn
-                .prepare("SELECT field, value FROM metadata_original WHERE photo_id = ?1")
-                .map_err(|e| format!("prepare reset: {}", e))?;
-            let rows = stmt.query_map(params![photo_id], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
-            })
-            .map_err(|e| format!("query reset: {}", e))?
-            .filter_map(|r| r.ok())
-            .collect();
-            rows
-        };
-
-        // Restore metadata_current from original
-        for (field, value) in &fields {
-            conn.execute(
-                "INSERT INTO metadata_current (photo_id, field, value, is_pending)
-                 VALUES (?1, ?2, ?3, 0)
-                 ON CONFLICT(photo_id, field)
-                 DO UPDATE SET value = excluded.value, is_pending = 0",
-                params![photo_id, field, value],
-            )
-            .map_err(|e| format!("reset metadata_current: {}", e))?;
+        if let Some((file_path, fields)) = by_photo.get(photo_id) {
+            let reset_write = history_to_photo_write(photo_id, file_path, fields);
+            let result = {
+                let mut et = state
+                    .exiftool
+                    .lock()
+                    .map_err(|e| format!("exiftool lock: {}", e))?;
+                crate::write_metadata::write_metadata(&mut et, &reset_write)
+            };
+            match result {
+                Ok(()) => {
+                    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
+                    for (field, value) in fields {
+                        let _ = conn.execute(
+                            "INSERT INTO metadata_current (photo_id, field, value, is_pending)
+                             VALUES (?1, ?2, ?3, 0)
+                             ON CONFLICT(photo_id, field)
+                             DO UPDATE SET value = excluded.value, is_pending = 0",
+                            params![photo_id, field, value],
+                        );
+                    }
+                }
+                Err(e) => {
+                    failed_files.push(FailedFile {
+                        photo_id: photo_id.clone(),
+                        error: e,
+                    });
+                }
+            }
         }
     }
 
-    Ok(())
+    Ok(ResetResult { failed_files })
 }

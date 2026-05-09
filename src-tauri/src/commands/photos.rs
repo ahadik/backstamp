@@ -26,7 +26,8 @@ pub struct Metadata {
     pub gps_lng: Option<f64>,
     pub camera_body: Option<String>,
     pub lens: Option<String>,
-    pub film: Option<String>,
+    pub film_vendor: Option<String>,
+    pub film_type: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -217,12 +218,23 @@ fn parse_metadata(json: &serde_json::Value) -> Metadata {
         .filter(|s| !s.is_empty())
         .map(|s| s.trim().to_string());
 
-    let film = json
+    let film_str = json
         .get("XMP:FilmStock")
         .or_else(|| json.get("XMP:Film"))
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.trim().to_string());
+
+    let (film_vendor, film_type) = match film_str {
+        None => (None, None),
+        Some(ref s) => match s.find(' ') {
+            Some(pos) => (
+                Some(s[..pos].to_string()),
+                Some(s[pos + 1..].to_string()),
+            ),
+            None => (Some(s.clone()), None),
+        },
+    };
 
     Metadata {
         capture_date,
@@ -233,7 +245,8 @@ fn parse_metadata(json: &serde_json::Value) -> Metadata {
         gps_lng,
         camera_body,
         lens,
-        film,
+        film_vendor,
+        film_type,
     }
 }
 
@@ -325,7 +338,8 @@ fn insert_photo(
         ("gps_lng", metadata.gps_lng.map(|v| v.to_string())),
         ("camera_body", metadata.camera_body.clone()),
         ("lens", metadata.lens.clone()),
-        ("film", metadata.film.clone()),
+        ("film_vendor", metadata.film_vendor.clone()),
+        ("film_type", metadata.film_type.clone()),
     ];
 
     for (field, value) in &fields {
@@ -596,34 +610,39 @@ mod tests {
         assert!(m.lens.is_none());
         assert!(m.gps_lat.is_none());
         assert!(m.gps_lng.is_none());
-        assert!(m.film.is_none());
+        assert!(m.film_vendor.is_none());
+        assert!(m.film_type.is_none());
     }
 
     #[test]
     fn film_is_none_when_no_xmp_film_tags() {
         let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
-        assert!(m.film.is_none());
+        assert!(m.film_vendor.is_none());
+        assert!(m.film_type.is_none());
     }
 
     #[test]
-    fn parses_film_from_xmp_filmstock() {
+    fn parses_film_from_xmp_filmstock_splits_vendor_and_type() {
         let json = r#"[{"XMP:FilmStock": "Kodak Portra 400"}]"#;
         let m = parse_exiftool_output(json).unwrap();
-        assert_eq!(m.film.as_deref(), Some("Kodak Portra 400"));
+        assert_eq!(m.film_vendor.as_deref(), Some("Kodak"));
+        assert_eq!(m.film_type.as_deref(), Some("Portra 400"));
     }
 
     #[test]
     fn parses_film_from_xmp_film_when_filmstock_absent() {
         let json = r#"[{"XMP:Film": "Fujifilm Velvia 50"}]"#;
         let m = parse_exiftool_output(json).unwrap();
-        assert_eq!(m.film.as_deref(), Some("Fujifilm Velvia 50"));
+        assert_eq!(m.film_vendor.as_deref(), Some("Fujifilm"));
+        assert_eq!(m.film_type.as_deref(), Some("Velvia 50"));
     }
 
     #[test]
     fn prefers_xmp_filmstock_over_xmp_film() {
         let json = r#"[{"XMP:FilmStock": "Kodak Portra 400", "XMP:Film": "other"}]"#;
         let m = parse_exiftool_output(json).unwrap();
-        assert_eq!(m.film.as_deref(), Some("Kodak Portra 400"));
+        assert_eq!(m.film_vendor.as_deref(), Some("Kodak"));
+        assert_eq!(m.film_type.as_deref(), Some("Portra 400"));
     }
 
     #[test]

@@ -190,6 +190,13 @@ export function PhotoGrid() {
                       e.stopPropagation();
                       handleTileClick(photo.id, e);
                     }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      tauriCommands.showPhotoContextMenu(
+                        photo.filePath,
+                        photo.fileStatus === "missing"
+                      );
+                    }}
                     {...dragHandlers(photo.id)}
                     {...tileDropProps(photo.id)}
                   />

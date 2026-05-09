@@ -52,6 +52,19 @@ describe("uiReducer", () => {
     });
   });
 
+  describe("SET_MAPBOX_TOKEN", () => {
+    it("stores the token", () => {
+      const next = uiReducer(uiInitialState, { type: "SET_MAPBOX_TOKEN", token: "pk.test" });
+      expect(next.mapboxToken).toBe("pk.test");
+    });
+
+    it("accepts null to clear the token", () => {
+      const withToken = { ...uiInitialState, mapboxToken: "pk.old" };
+      const next = uiReducer(withToken, { type: "SET_MAPBOX_TOKEN", token: null });
+      expect(next.mapboxToken).toBeNull();
+    });
+  });
+
   describe("unknown action", () => {
     it("returns state unchanged", () => {
       // @ts-expect-error intentional unknown action

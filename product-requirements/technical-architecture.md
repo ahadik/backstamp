@@ -125,7 +125,8 @@ interface Metadata {
   gpsLng: number | null;
   cameraBody: string | null;
   lens: string | null;
-  film: string | null;
+  filmVendor: string | null;   // e.g. "Kodak"
+  filmType: string | null;     // e.g. "Portra 400"; null when filmVendor is null
 }
 
 interface SessionState {
@@ -158,13 +159,23 @@ interface UIState {
 
 ```typescript
 // state/CorpusContext.tsx
-// Each corpus is independent — entries from one cannot be assigned to another.
-// All entries are stored and used as combined strings at runtime.
-// Structured input is enforced only in the creation UI.
+// Make and Model maintain separate corpora. Model entries are associated with a
+// Make at creation time; the Model dropdown is disabled until a Make is selected
+// and shows only models previously used with that Make.
+interface CorpusEntry {
+  value: string;
+  isBuiltin: boolean;
+  lastUsed: number | null;
+  useCount: number;
+  vendor?: string | null;  // camera make for camera_model entries; film vendor for film_type entries
+}
+
 interface CorpusState {
-  cameraOptions: CorpusEntry[];  // combined string: "Manufacturer Model"
-  lensOptions: CorpusEntry[];    // combined string: "Manufacturer Length"
-  filmOptions: CorpusEntry[];    // combined string: "Brand Type ISO"
+  cameraMakeOptions: CorpusEntry[];   // e.g. "Canon", "Nikon"
+  cameraModelOptions: CorpusEntry[];  // vendor = associated make; filtered by selected Make at render time
+  lensOptions: CorpusEntry[];
+  filmVendors: CorpusEntry[];         // e.g. "Kodak", "Fujifilm"
+  filmTypes: CorpusEntry[];           // vendor = associated film vendor; filtered by selected vendor at render time
 }
 ```
 
@@ -536,12 +547,15 @@ CREATE TABLE gpx_files (
 
 -- Camera/lens/film corpus (persists across session clears)
 -- Each category is a distinct corpus; entries are not shared across categories.
--- 'value' is always the combined display string and is what gets written to metadata.
--- Structured input is enforced at creation time in the UI; the components are not
--- stored separately at runtime.
+-- Make and Model are stored separately. Model entries are associated with a Make
+-- at creation time via the 'vendor' column (vendor = make value for camera_model rows).
+-- Film types are associated with a film vendor similarly (vendor = film vendor value).
+-- The Model dropdown in the UI filters to only show models whose vendor matches the
+-- currently selected Make; selecting a different Make clears the Model selection.
 CREATE TABLE corpus (
-  category    TEXT NOT NULL,   -- 'camera_body' | 'lens' | 'film'
-  value       TEXT NOT NULL,   -- combined string: "Kodak Portra 400", "Canon EOS R5", "Canon RF 50mm f/1.8"
+  category    TEXT NOT NULL,   -- 'camera_make' | 'camera_model' | 'lens' | 'film_vendor' | 'film_type'
+  value       TEXT NOT NULL,   -- e.g. "Canon", "EOS R5", "Canon RF 50mm f/1.8", "Kodak", "Portra 400"
+  vendor      TEXT,            -- non-NULL for 'camera_model' (= the make) and 'film_type' (= the film vendor)
   is_builtin  INTEGER NOT NULL DEFAULT 0,
   last_used   INTEGER,         -- epoch ms, for "recently used" sorting
   use_count   INTEGER NOT NULL DEFAULT 0,
@@ -561,26 +575,26 @@ Stored in the `corpus` SQLite table (see §5). The pre-loaded built-in options a
 
 All three corpuses share the same SQLite table and `CorpusEntry` runtime type. They are distinguished by the `category` column and are never mixed — the UI enforces that only camera body entries appear in the camera body dropdown, etc.
 
-When a user creates a new entry, the UI presents structured input fields specific to that category and combines them into the stored string:
-- **Camera body**: Manufacturer + Model → `"Canon EOS R5"`
-- **Lens**: Manufacturer + Focal Length → `"Canon RF 50mm f/1.8"`
-- **Film**: Brand + Type + ISO → `"Kodak Portra 400"`
+When a user creates a new entry, the UI presents structured input fields specific to that category:
+- **Camera body**: Manufacturer + Model → combined display string `"Canon EOS R5"`
+- **Lens**: Manufacturer + Focal Length → combined display string `"Canon RF 50mm f/1.8"`
+- **Film**: Two-level selection — Vendor (e.g. `"Kodak"`) then Type (e.g. `"Portra 400"`). Vendor and Type are stored separately as `film_vendor` and `film_type` corpus entries. The display string `"Kodak Portra 400"` is derived at render time. New film entries are created by selecting or creating a Vendor, then adding a Type under it.
 
-This structured entry form prevents free-form strings and keeps the corpus clean. Once saved, only the combined string is stored and used.
+This structured entry form prevents free-form strings and keeps the corpus clean.
 
 **Camera bodies** — major mirrorless and film camera brands/models covering the likely user base: Canon (EOS R-series, older film bodies), Nikon (Z-series, F-series film bodies), Sony (A7-series), Fujifilm (X-series, GFX), Leica (M-series), Olympus/OM System, Hasselblad.
 
 **Lenses** — a sparse set of canonical examples. Users will primarily add their own.
 
-**Film stocks** — a complete set of commonly shot films:
-- Kodak: Portra 160/400/800, Gold 200, UltraMax 400, Ektar 100, ColorPlus 200, Tri-X 400, T-MAX 100/400
-- Fujifilm: Superia X-TRA 400, Pro 400H, Velvia 50/100, Provia 100F, Acros 100
-- Ilford: HP5 Plus 400, Delta 100/400, FP4 Plus 125, XP2 Super 400
+**Film stocks** — pre-loaded as Vendor → Type pairs covering commonly shot films:
+- Kodak: Portra 160, Portra 400, Portra 800, Gold 200, UltraMax 400, Ektar 100, ColorPlus 200, Tri-X 400, T-MAX 100, T-MAX 400
+- Fujifilm: Superia X-TRA 400, Pro 400H, Velvia 50, Velvia 100, Provia 100F, Acros 100
+- Ilford: HP5 Plus 400, Delta 100, Delta 400, FP4 Plus 125, XP2 Super 400
 - Cinestill: 800T, 400D, 50D
 
 ### Matching rules
 
-All lookups are case-insensitive after Unicode NFC normalization and whitespace trimming. The `value` column stores the canonical casing; search and deduplication compare the lowercase-trimmed form. "KODAK PORTRA 400" and "kodak portra 400" resolve to the same entry.
+All lookups are case-insensitive after Unicode NFC normalization and whitespace trimming. The `value` column stores the canonical casing; search and deduplication compare the lowercase-trimmed form. For film, matching is applied independently to Vendor and Type — "KODAK" and "kodak" resolve to the same vendor; "PORTRA 400" and "portra 400" resolve to the same type under that vendor.
 
 ---
 
@@ -690,9 +704,10 @@ Available fields:
 - capture_date: ISO 8601 date (YYYY-MM-DD)
 - capture_time: 24-hour time (HH:MM:SS)
 - timezone: IANA timezone name
-- camera_body: string
+- camera_make: string  (manufacturer, e.g. "Canon")
+- camera_model: string  (body name, e.g. "EOS R5"; only valid when camera_make is also provided)
 - lens: string
-- film: { brand: string, type: string, iso: number }
+- film: string
 - location: call the geocode_location tool to resolve a place name to coordinates
 
 Rules:
@@ -745,9 +760,10 @@ interface MetadataProposal {
   capture_date?: string;       // "2025-03-15"
   capture_time?: string;       // "14:30:00"
   timezone?: string;           // "America/Los_Angeles"
-  camera_body?: string;
+  camera_make?: string;
+  camera_model?: string;  // only set when camera_make is also provided
   lens?: string;
-  film?: { brand: string; type: string; iso: number };
+  film?: string;
   location?: { lat: number; lng: number; display_name: string };
 }
 ```
@@ -809,3 +825,71 @@ Two independent test suites run without a live Tauri process or ExifTool binary.
 ### Conversation continuity (Follow Up)
 
 The `messages` array is maintained in `SessionContext` state and scoped to the current photo selection. When the selected photo set changes, the conversation history is cleared — it is stale and irrelevant to a different set of photos. The history is also cleared when the Vibe Tag panel is closed or the session is cleared. It is never persisted to SQLite.
+
+---
+
+## 10. Settings & API Key Management
+
+### Secure storage
+
+API keys are stored in the macOS Keychain via **`tauri-plugin-keychain`** (Tauri v2's typed wrapper around the system credential store). Keys are read at call time and never held in JS memory longer than the duration of a single API request. They are never written to SQLite, `localStorage`, or any plaintext file.
+
+Two keys are managed:
+
+| Key | Service name in Keychain | Used by |
+|---|---|---|
+| Anthropic API key | `photo-manager.anthropic` | Vibe Tag (§8) |
+| Mapbox access token | `photo-manager.mapbox` | Map rendering, geocoding, GPX thumbnail (§7, §3) |
+
+### Tauri commands
+
+```rust
+// commands/settings.rs
+#[tauri::command] async fn get_api_key(service: String) -> Result<Option<String>, String>
+#[tauri::command] async fn set_api_key(service: String, key: String) -> Result<(), String>
+#[tauri::command] async fn delete_api_key(service: String) -> Result<(), String>
+#[tauri::command] async fn validate_anthropic_key(key: String) -> Result<bool, String>
+#[tauri::command] async fn validate_mapbox_key(key: String) -> Result<bool, String>
+```
+
+`get_api_key` / `set_api_key` / `delete_api_key` are thin wrappers over the keychain plugin. `validate_*` make the cheapest possible API call to each service:
+- **Anthropic** — POST to `v1/messages` with `max_tokens: 1` and a minimal prompt. A `200` or `400` (bad request) response confirms the key is accepted; `401` means invalid.
+- **Mapbox** — GET to the Geocoding API with a fixed test query. A `200` confirms the key; `401` / `403` means invalid.
+
+Validation is performed on the Rust side so the key is never passed through JS network calls; it is read from the Keychain and used directly in the Rust `reqwest` call.
+
+### Settings UI
+
+The Settings panel is a full-window modal overlay (`SettingsModal` component) — a distinct component from `InspectorPanel`, not a conditional state of it. It is opened from a gear icon in the top bar and rendered above all other UI layers at a `z-index` above `--z-topbar`. Closing it returns the app to exactly the state it was in before opening; no main-view state changes as a result of the modal being open or closed (except that `useApiKeys` re-fetches on close).
+
+```
+src/components/
+└── SettingsModal/
+    ├── SettingsModal.tsx
+    └── SettingsModal.module.css
+```
+
+Each key field follows this pattern:
+1. Labelled `<input type="password">` pre-filled with the masked value (`sk-ant-••••••••••••XXXX`) on load if a key is stored.
+2. **Show / Hide** toggle (`type="text"` ↔ `type="password"`) reveals the full key.
+3. **Test** button triggers the corresponding `validate_*` command and shows an inline success/error badge.
+4. **Remove** button calls `delete_api_key` and clears the field.
+5. Changes are saved automatically on blur (no explicit Save button).
+
+### Feature gating
+
+Key presence is checked at render time via a `useApiKeys` hook that calls `get_api_key` for both services on mount and re-checks whenever the Settings modal closes. The hook exposes:
+
+```typescript
+interface ApiKeyState {
+  anthropicKeySet: boolean;
+  mapboxKeySet: boolean;
+}
+```
+
+Components consuming this hook:
+- `VibeTagSection` — renders a "Set Anthropic API key in Settings" prompt when `anthropicKeySet` is `false`.
+- `LocationSection` (mini-map), `MapPanel`, and location type-ahead — render a "Set Mapbox API key in Settings" prompt when `mapboxKeySet` is `false`.
+- GPX import handler — surfaces a Settings prompt before opening the file picker when `mapboxKeySet` is `false`.
+
+The hook does not poll; it only re-fetches when the Settings modal closes (the modal calls an `onClose` callback that triggers a re-fetch in the hook).

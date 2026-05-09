@@ -3,7 +3,7 @@ import type { Photo, Metadata } from "../state/SessionContext";
 
 const nullMeta: Metadata = {
   captureDate: null, captureTime: null, utcOffset: null, timezone: null,
-  gpsLat: null, gpsLng: null, cameraBody: null, lens: null, film: null,
+  gpsLat: null, gpsLng: null, cameraMake: null, cameraModel: null, lens: null, filmVendor: null, filmType: null,
 };
 
 function makePhoto(id: string, meta: Partial<Metadata> = {}): Photo {
@@ -26,9 +26,11 @@ describe("computeInheritance — photo drop", () => {
       captureTime: "10:30:00",
       gpsLat: 37.7,
       gpsLng: -122.4,
-      cameraBody: "Canon EOS R5",
+      cameraMake: "Canon",
+      cameraModel: "EOS R5",
       lens: "RF 50mm",
-      film: "Kodak Portra 400",
+      filmVendor: "Kodak",
+      filmType: "Portra 400",
     });
     const result = computeInheritance(
       dragging,
@@ -42,8 +44,10 @@ describe("computeInheritance — photo drop", () => {
       expect(result.get(id)?.captureDate).toBe("2024-03-15");
       expect(result.get(id)?.captureTime).toBe("10:30:00");
       expect(result.get(id)?.gpsLat).toBe(37.7);
-      expect(result.get(id)?.cameraBody).toBe("Canon EOS R5");
-      expect(result.get(id)?.film).toBe("Kodak Portra 400");
+      expect(result.get(id)?.cameraMake).toBe("Canon");
+      expect(result.get(id)?.cameraModel).toBe("EOS R5");
+      expect(result.get(id)?.filmVendor).toBe("Kodak");
+      expect(result.get(id)?.filmType).toBe("Portra 400");
     }
   });
 
@@ -107,8 +111,8 @@ describe("computeInheritance — gap drop between two dated photos", () => {
   });
 
   it("copies camera metadata from the closer (before) neighbor", () => {
-    const before = makePhoto("b", { cameraBody: "Nikon Z9", lens: "50mm" });
-    const after = makePhoto("a", { cameraBody: "Canon R5", lens: "85mm" });
+    const before = makePhoto("b", { cameraMake: "Nikon", cameraModel: "Z9", lens: "50mm" });
+    const after = makePhoto("a", { cameraMake: "Canon", cameraModel: "R5", lens: "85mm" });
     const dragging = [makePhoto("x")];
     const result = computeInheritance(
       dragging,
@@ -117,7 +121,8 @@ describe("computeInheritance — gap drop between two dated photos", () => {
       before,
       after,
     );
-    expect(result.get("x")?.cameraBody).toBe("Nikon Z9");
+    expect(result.get("x")?.cameraMake).toBe("Nikon");
+    expect(result.get("x")?.cameraModel).toBe("Z9");
   });
 });
 

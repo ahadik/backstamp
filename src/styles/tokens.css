@@ -36,7 +36,7 @@
   --z-inspector: 20;
   --z-floating-controls: 30;
   --z-topbar: 40;
-  --z-settings: 25;
+  --z-modal: 50;
 
   /* Transitions */
   --transition-fast: 150ms ease;

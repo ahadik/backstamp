@@ -94,6 +94,12 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
 19. If I select multiple photos that have different values for any meta-data, that section of the Inspector Panel says “Multiple Values” where there are multiple values. Where values match, those values are rendered.
     1. If I change the value for something that says “Multiple Values” that overwrites all of the unique values with the new single value. A confirmation dialog asks “Are you sure you want to change X values with this new value?”
 20. Whenever I set new data for selected photos in the right-hand Inspector Panel, the photo thumbnail receives a blue dot in the top right to indicate a pending change. In a separate control group (The Control Bar) above the Inspector panel, an Apply button becomes active when at least one photo has changes to be written. I must click the “Apply” button to write pending changes to the files.
+21. Right-clicking on a photo thumbnail opens a native macOS context menu for that photo.
+    1. The menu contains the following items, in order:
+        1. **Open Image** — opens the file using the system default application (e.g. Preview on macOS).
+        2. **Show in Finder** — opens a Finder window with the associated file highlighted and selected.
+    2. Right-clicking anywhere else in the app retains the default browser/WebView context menu behavior (e.g. on text, links, or blank areas).
+    3. Right-clicking a photo that is `missing` (file not found on disk) shows the same menu, but both items are disabled.
     0. The Control Bar (with Apply, Roll Back, Reset All/Selected) sits above the Inspector panel as a separate UI element.
     1. When changes are Applied a modal pops up with a progress bar. The bar shows what percent of photos have been successfully updated. Interaction with the software is not allowed. The user can cancel progress at any time. This will undo the edits that were made so far. It may take time to undo the edits. A progress bar for this may show as well. It cannot be cancelled.
     2. After photos have been modified in an Apply, there is a Roll Back button available in the Control Bar. The app retains rollback history back to the start of the session, so multiple sequential Roll Back operations are possible. Each Roll Back undoes the most recent Apply, restoring all affected files to their state before that Apply. Roll Back itself cannot be undone — once rolled back, that Apply is gone from history.
@@ -165,22 +171,26 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
     1. If the photos on either side have the same camera data, the camera data for the dropped photos is updated to match it.
     2. If the photos on either side have mis-matched camera data, (including if one doesn’t have it set), then a dialog pops up asking which of the two sets of data I want to set. The user can choose one or the other or choose to not set it.
 2. In the Inspector Panel the following data can be set:
-    1. Camera Body
-    2. Lens
-    3. Film — available on all photos regardless of whether they are scanned film or digital. A digital photo may have a film stock assigned if desired.
-3. Each property is set by selecting from a drop down of common options.
-    1. The software comes pre-loaded with options covering a few major camera brands and common film stocks as a starting point.
+    1. Camera Make — the manufacturer (e.g. "Canon", "Nikon"). Selecting a Make is required before Model can be set.
+    2. Camera Model — the specific body (e.g. "EOS R5"). The Model combobox is disabled until Make is set. When Make changes, Model is cleared.
+    3. Lens
+    4. Film — available on all photos regardless of whether they are scanned film or digital. A digital photo may have a film stock assigned if desired.
+3. Make and Model are linked: the Model corpus is scoped to models previously associated with the selected Make. When the user enters a new Model under a given Make, that Model is stored in the corpus associated with that Make. Selecting a different Make loads only that Make’s associated Models.
+4. Each property is set by selecting from a drop down of common options.
+    1. The software comes pre-loaded with options covering a few major camera brands and their common models as a starting point.
     2. Recently used options are presented at the top of the list. The full option corpus (pre-loaded defaults, custom additions, and recently-used ordering) is stored persistently and survives session clears.
     3. You start typing in the input field to filter the list. If what you type does not match an item in the list, it can be added as a new option. This is also persisted across sessions.
     4. Custom-added options can be removed permanently using an icon on the drop-down item. Removing it from the list does not remove that value from photos that the value has been assigned to.
     5. If a photo has a value set already that doesn’t exist (string match) in the corpus of options, it is presented in italics with an option to add it to the set.
-    6. Film is defined by:
-        1. Brand (e.g. Kodak)
-        2. Type (e.g. Gold)
-        3. ISO (e.g. 200)
-4. Camera metadata storage and edge cases:
-    1. For digital photos with existing EXIF data, Camera Body and Lens should be read from standard tags where possible.
-    2. When the user sets Camera Body or Lens, the app must write these values in a standard-compatible way (typically via XMP, and EXIF where safe) so that Lightroom can display them.
+    6. Film uses a two-level Vendor → Type hierarchy:
+        1. Vendor (e.g. Kodak) is selected first. The Type field is disabled until a Vendor is chosen.
+        2. Type (e.g. Gold 200) is selected second; the dropdown shows only Types belonging to the selected Vendor.
+        3. The software comes pre-loaded with Vendors and Types covering common industry film stocks.
+        4. New Vendors and Types can be added using the same mechanic as Camera Body: type to filter, add if not found. When adding a new Type, it is associated with the Vendor that is selected. If a Vendor is not set, a Type cannot be set or added - the Type input is disabled.
+        5. Removing a Vendor from the corpus also removes all of its associated Types. As with all corpus entries, removing a Type does not remove that value from photos it has already been assigned to.
+5. Camera metadata storage and edge cases:
+    1. For digital photos with existing EXIF data, Camera Make, Camera Model, and Lens should be read from standard tags where possible.
+    2. When the user sets Make, Model, or Lens, the app must write these values in a standard-compatible way (typically via XMP, and EXIF where safe) so that Lightroom can display them.
     3. Film does not have a universal EXIF equivalent for all workflows; the app must define a consistent storage strategy (e.g. XMP custom namespace field and/or structured keyword convention) so it round-trips reliably across sessions.
     4. The option corpus matching rules should be deterministic (e.g., whitespace trimming, case sensitivity rules, and duplicate handling) so that “Kodak Gold 200” and “kodak gold 200” do not behave unexpectedly.
 
@@ -208,6 +218,22 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
     2. Any parsing, geocoding, or other processing required to convert the user’s natural language into a concrete value within the whitelist is handled by the Vibe Tagger before writing.
     3. If the user’s input implies a metadata change that cannot be mapped to one of the whitelisted fields, the input is rejected with an error and no metadata is written.
     4. There is no response given from the model other than a valid, parseable metadata object, or an error response “I couldn’t figure out what you meant”.
+
+### Settings & API Keys
+
+1. The app has a Settings panel accessible via a gear icon or menu item in the top bar. It contains all user configuration that persists across sessions.
+2. Two external API keys are required for full functionality:
+    1. **Anthropic API key** — required for the Vibe Tag feature (Claude integration).
+    2. **Mapbox API key** — required for map rendering, location search, reverse geocoding, and GPX route thumbnails.
+3. Each key is entered in a labelled text field. The field masks the key after entry (shows a truncated prefix and dots for the remainder). A "Show / Hide" toggle reveals the full key on demand.
+4. A "Test" button appears next to each key field. Clicking it makes a lightweight API call to verify the key is valid and returns a success or failure indicator inline.
+5. When a key is absent or invalid:
+    1. **Anthropic key missing or invalid** — the Vibe Tag section in the Inspector Panel is replaced with a message explaining that an Anthropic API key is required, with a button that opens Settings directly to the key field.
+    2. **Mapbox key missing or invalid** — the Map Panel, the mini-map in the Location section, and location type-ahead search are all replaced with a placeholder message explaining that a Mapbox API key is required, with the same direct-to-Settings button. GPX file import is also blocked and surfaces the same prompt.
+6. The app does not require either key to be set in order to open or use core photo management, date/time, and camera metadata features.
+7. Keys are stored securely and never written to disk in plaintext. They persist across sessions and survive session clears.
+8. A "Remove" action is available for each key to delete it from secure storage entirely.
+9. The Settings panel is a modal overlay that covers the full app window. It is not a state of the Inspector Panel and does not replace or affect any part of the main view. The Inspector Panel remains unchanged while Settings is open (though it is visually covered by the modal).
 
 ### Compatibility & acceptance criteria
 

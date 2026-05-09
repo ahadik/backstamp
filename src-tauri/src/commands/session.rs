@@ -61,7 +61,8 @@ fn load_metadata_for(
         gps_lng: None,
         camera_body: None,
         lens: None,
-        film: None,
+        film_vendor: None,
+        film_type: None,
     };
     for (field, value) in pairs {
         match field.as_str() {
@@ -73,7 +74,8 @@ fn load_metadata_for(
             "gps_lng" => m.gps_lng = value.parse().ok(),
             "camera_body" => m.camera_body = Some(value),
             "lens" => m.lens = Some(value),
-            "film" => m.film = Some(value),
+            "film_vendor" => m.film_vendor = Some(value),
+            "film_type" => m.film_type = Some(value),
             _ => {}
         }
     }

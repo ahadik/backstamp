@@ -10,6 +10,7 @@ interface CorpusComboBoxProps {
   onAddEntry: (value: string) => void;
   onRemoveEntry: (value: string) => void;
   placeholder?: string;
+  disabled?: boolean;
 }
 
 function normalize(s: string): string {
@@ -24,6 +25,7 @@ export function CorpusComboBox({
   onAddEntry,
   onRemoveEntry,
   placeholder,
+  disabled = false,
 }: CorpusComboBoxProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -63,6 +65,7 @@ export function CorpusComboBox({
     value && value !== "multiple" && !entries.some((e) => normalize(e.value) === normalize(value));
 
   function handleOpen() {
+    if (disabled) return;
     setOpen(true);
     setSearch("");
     setTimeout(() => inputRef.current?.focus(), 0);
@@ -103,7 +106,7 @@ export function CorpusComboBox({
   }
 
   return (
-    <div ref={wrapperRef} className={styles.wrapper}>
+    <div ref={wrapperRef} className={`${styles.wrapper} ${disabled ? styles.disabled : ""}`}>
       <span className={styles.fieldLabel}>{label}</span>
       <div className={styles.inputRow}>
         <input
@@ -115,6 +118,7 @@ export function CorpusComboBox({
           onFocus={handleOpen}
           onChange={(e) => setSearch(e.target.value)}
           readOnly={!open}
+          disabled={disabled}
         />
         <span className={styles.caret} onClick={handleOpen} aria-hidden>
           ▾

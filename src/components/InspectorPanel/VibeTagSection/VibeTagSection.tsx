@@ -17,9 +17,11 @@ function buildMetadataSummary(photos: Photo[]): object {
     capture_date: deriveFieldValue(photos, (m) => m.captureDate) ?? "unset",
     capture_time: deriveFieldValue(photos, (m) => m.captureTime) ?? "unset",
     timezone: deriveFieldValue(photos, (m) => m.timezone) ?? "unset",
-    camera_body: deriveFieldValue(photos, (m) => m.cameraBody) ?? "unset",
+    camera_make: deriveFieldValue(photos, (m) => m.cameraMake) ?? "unset",
+    camera_model: deriveFieldValue(photos, (m) => m.cameraModel) ?? "unset",
     lens: deriveFieldValue(photos, (m) => m.lens) ?? "unset",
-    film: deriveFieldValue(photos, (m) => m.film) ?? "unset",
+    film_vendor: deriveFieldValue(photos, (m) => m.filmVendor) ?? "unset",
+    film_type: deriveFieldValue(photos, (m) => m.filmType) ?? "unset",
     gps:
       deriveFieldValue(
         photos,
@@ -36,9 +38,13 @@ function proposalToChanges(proposal: MetadataProposal): Partial<Metadata> {
   if (proposal.capture_date !== undefined) changes.captureDate = proposal.capture_date;
   if (proposal.capture_time !== undefined) changes.captureTime = proposal.capture_time;
   if (proposal.timezone !== undefined) changes.timezone = proposal.timezone;
-  if (proposal.camera_body !== undefined) changes.cameraBody = proposal.camera_body;
+  if (proposal.camera_make !== undefined) changes.cameraMake = proposal.camera_make || null;
+  if (proposal.camera_model !== undefined) changes.cameraModel = proposal.camera_model || null;
   if (proposal.lens !== undefined) changes.lens = proposal.lens;
-  if (proposal.film !== undefined) changes.film = proposal.film;
+  if (proposal.film !== undefined) {
+    changes.filmVendor = proposal.film.vendor || null;
+    changes.filmType = proposal.film.type || null;
+  }
   if (proposal.location !== undefined) {
     changes.gpsLat = proposal.location.lat;
     changes.gpsLng = proposal.location.lng;
@@ -51,9 +57,10 @@ function formatProposal(proposal: MetadataProposal): string {
   if (proposal.capture_date) lines.push(`Date: ${proposal.capture_date}`);
   if (proposal.capture_time) lines.push(`Time: ${proposal.capture_time}`);
   if (proposal.timezone) lines.push(`Timezone: ${proposal.timezone}`);
-  if (proposal.camera_body) lines.push(`Camera: ${proposal.camera_body}`);
+  if (proposal.camera_make) lines.push(`Make: ${proposal.camera_make}`);
+  if (proposal.camera_model) lines.push(`Model: ${proposal.camera_model}`);
   if (proposal.lens) lines.push(`Lens: ${proposal.lens}`);
-  if (proposal.film) lines.push(`Film: ${proposal.film}`);
+  if (proposal.film) lines.push(`Film: ${[proposal.film.vendor, proposal.film.type].filter(Boolean).join(" ")}`);
   if (proposal.location)
     lines.push(`Location: ${proposal.location.display_name}`);
   return lines.join("\n");

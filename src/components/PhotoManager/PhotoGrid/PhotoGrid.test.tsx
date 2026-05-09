@@ -63,11 +63,11 @@ describe("PhotoGrid", () => {
           thumbnail: { small: "/s.jpg", large: "/l.jpg" },
           originalMetadata: {
             captureDate: null, captureTime: null, utcOffset: null, timezone: null,
-            gpsLat: null, gpsLng: null, cameraBody: null, lens: null, film: null,
+            gpsLat: null, gpsLng: null, cameraMake: null, cameraModel: null, lens: null, filmVendor: null, filmType: null,
           },
           currentMetadata: {
             captureDate: null, captureTime: null, utcOffset: null, timezone: null,
-            gpsLat: null, gpsLng: null, cameraBody: null, lens: null, film: null,
+            gpsLat: null, gpsLng: null, cameraMake: null, cameraModel: null, lens: null, filmVendor: null, filmType: null,
           },
           pendingChanges: null,
         },
@@ -83,15 +83,15 @@ describe("PhotoGrid", () => {
         {
           id: "p1", filePath: "/p1.jpg", fileStatus: "ok",
           thumbnail: { small: "/s1.jpg", large: "/l1.jpg" },
-          originalMetadata: { captureDate: null, captureTime: null, utcOffset: null, timezone: null, gpsLat: null, gpsLng: null, cameraBody: null, lens: null, film: null },
-          currentMetadata: { captureDate: null, captureTime: null, utcOffset: null, timezone: null, gpsLat: null, gpsLng: null, cameraBody: null, lens: null, film: null },
+          originalMetadata: { captureDate: null, captureTime: null, utcOffset: null, timezone: null, gpsLat: null, gpsLng: null, cameraMake: null, cameraModel: null, lens: null, filmVendor: null, filmType: null },
+          currentMetadata: { captureDate: null, captureTime: null, utcOffset: null, timezone: null, gpsLat: null, gpsLng: null, cameraMake: null, cameraModel: null, lens: null, filmVendor: null, filmType: null },
           pendingChanges: null,
         },
         {
           id: "p2", filePath: "/p2.jpg", fileStatus: "ok",
           thumbnail: { small: "/s2.jpg", large: "/l2.jpg" },
-          originalMetadata: { captureDate: null, captureTime: null, utcOffset: null, timezone: null, gpsLat: null, gpsLng: null, cameraBody: null, lens: null, film: null },
-          currentMetadata: { captureDate: null, captureTime: null, utcOffset: null, timezone: null, gpsLat: null, gpsLng: null, cameraBody: null, lens: null, film: null },
+          originalMetadata: { captureDate: null, captureTime: null, utcOffset: null, timezone: null, gpsLat: null, gpsLng: null, cameraMake: null, cameraModel: null, lens: null, filmVendor: null, filmType: null },
+          currentMetadata: { captureDate: null, captureTime: null, utcOffset: null, timezone: null, gpsLat: null, gpsLng: null, cameraMake: null, cameraModel: null, lens: null, filmVendor: null, filmType: null },
           pendingChanges: null,
         },
       ],

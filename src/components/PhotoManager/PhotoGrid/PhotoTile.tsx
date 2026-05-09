@@ -16,6 +16,7 @@ interface Props {
   onDragOver?: (e: React.DragEvent) => void;
   onDragLeave?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }
 
 export function PhotoTile({
@@ -31,6 +32,7 @@ export function PhotoTile({
   onDragOver,
   onDragLeave,
   onDrop,
+  onContextMenu,
 }: Props) {
   const src = tilePx > 400 ? photo.thumbnail.large : photo.thumbnail.small;
 
@@ -46,6 +48,7 @@ export function PhotoTile({
     <div
       className={tileClass}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}

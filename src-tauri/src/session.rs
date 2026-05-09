@@ -1,3 +1,4 @@
+use crate::corpus_seed;
 use rusqlite::{Connection, Result};
 
 pub fn init_db(app_data_dir: &std::path::Path) -> Result<Connection> {
@@ -34,6 +35,65 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             );"
         )?;
         conn.pragma_update(None, "user_version", 2i64)?;
+    }
+    if version < 3 {
+        let col_exists: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('corpus') WHERE name = 'vendor'")?
+            .exists([])?;
+        if !col_exists {
+            conn.execute_batch("ALTER TABLE corpus ADD COLUMN vendor TEXT")?;
+        }
+        // Migrate old 'film' corpus entries to 'film_vendor'
+        conn.execute_batch(
+            "UPDATE corpus SET category = 'film_vendor' WHERE category = 'film';",
+        )?;
+        // Migrate old 'film' metadata rows to 'film_vendor' (split "Vendor Type" on first space)
+        // We do this in Rust because SQLite lacks a clean split-on-first-space.
+        let film_rows: Vec<(String, String, String)> = {
+            let mut stmt = conn.prepare(
+                "SELECT photo_id, field, value FROM metadata_current WHERE field = 'film'
+                 UNION ALL
+                 SELECT photo_id, field, value FROM metadata_original WHERE field = 'film'",
+            )?;
+            let rows: Vec<(String, String, String)> = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+            rows
+        };
+        for (photo_id, _field, value) in &film_rows {
+            let (vendor, film_type) = match value.find(' ') {
+                Some(pos) => (Some(&value[..pos]), Some(&value[pos + 1..])),
+                None => (Some(value.as_str()), None),
+            };
+            for (tbl, meta_field, meta_val) in &[
+                ("metadata_current", "film_vendor", vendor),
+                ("metadata_current", "film_type", film_type),
+                ("metadata_original", "film_vendor", vendor),
+                ("metadata_original", "film_type", film_type),
+            ] {
+                if let Some(v) = meta_val {
+                    conn.execute(
+                        &format!("INSERT OR REPLACE INTO {} (photo_id, field, value) VALUES (?1, ?2, ?3)", tbl),
+                        rusqlite::params![photo_id, meta_field, v],
+                    )?;
+                }
+            }
+            conn.execute(
+                "DELETE FROM metadata_current WHERE photo_id = ?1 AND field = 'film'",
+                rusqlite::params![photo_id],
+            )?;
+            conn.execute(
+                "DELETE FROM metadata_original WHERE photo_id = ?1 AND field = 'film'",
+                rusqlite::params![photo_id],
+            )?;
+        }
+        conn.pragma_update(None, "user_version", 3i64)?;
+    }
+    if version < 4 {
+        corpus_seed::seed_film_corpus(conn)?;
+        conn.pragma_update(None, "user_version", 4i64)?;
     }
     Ok(())
 }

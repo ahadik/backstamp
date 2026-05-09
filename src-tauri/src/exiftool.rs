@@ -27,7 +27,20 @@ impl ExiftoolProcess {
 
     pub fn start(app_handle: &AppHandle) -> Result<Self, String> {
         let binary = Self::binary_path(app_handle);
-        let mut child = Command::new(&binary)
+
+        // -config must be the very first argument; it cannot be passed per-command in -stay_open mode.
+        let config = app_handle
+            .path()
+            .resource_dir()
+            .ok()
+            .map(|d| d.join("exiftool.config"))
+            .filter(|p| p.exists());
+
+        let mut cmd = Command::new(&binary);
+        if let Some(ref cfg) = config {
+            cmd.arg("-config").arg(cfg);
+        }
+        let mut child = cmd
             .args(["-stay_open", "True", "-@", "/dev/stdin"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

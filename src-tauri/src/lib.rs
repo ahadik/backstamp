@@ -1,11 +1,13 @@
 mod commands;
 mod corpus;
+mod corpus_seed;
 mod exiftool;
 mod gpx;
 pub mod session;
 pub mod thumbnail;
+pub mod write_metadata;
 
-use commands::{corpus as corpus_commands, metadata, photos, session as session_commands, settings, thumbnails, timezone};
+use commands::{context_menu, corpus as corpus_commands, metadata, photos, session as session_commands, settings, thumbnails, timezone};
 use exiftool::ExiftoolProcess;
 use rusqlite::Connection;
 use std::path::PathBuf;
@@ -18,6 +20,7 @@ pub struct AppState {
     pub exiftool: Arc<Mutex<ExiftoolProcess>>,
     pub thumbnails_dir: PathBuf,
     pub apply_cancel_flag: Arc<AtomicBool>,
+    pub context_menu_path: Arc<Mutex<Option<String>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -51,6 +54,27 @@ pub fn run() {
                 exiftool: Arc::new(Mutex::new(exiftool)),
                 thumbnails_dir,
                 apply_cancel_flag: Arc::new(AtomicBool::new(false)),
+                context_menu_path: Arc::new(Mutex::new(None)),
+            });
+
+            app.on_menu_event(|app, event| {
+                let state = app.state::<AppState>();
+                let path = state.context_menu_path.lock().unwrap().clone();
+                if let Some(path) = path {
+                    match event.id().0.as_str() {
+                        "show_in_finder" => {
+                            let _ = std::process::Command::new("open")
+                                .args(["-R", &path])
+                                .spawn();
+                        }
+                        "open_image" => {
+                            let _ = std::process::Command::new("open")
+                                .arg(&path)
+                                .spawn();
+                        }
+                        _ => {}
+                    }
+                }
             });
 
             Ok(())
@@ -73,6 +97,7 @@ pub fn run() {
             settings::get_setting,
             settings::set_setting,
             timezone::resolve_timezone,
+            context_menu::show_photo_context_menu,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

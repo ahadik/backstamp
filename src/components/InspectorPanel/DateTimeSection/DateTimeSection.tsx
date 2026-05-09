@@ -55,27 +55,6 @@ export function formatTimeDisplay(time24: string): string {
   return `${h12}:${String(m).padStart(2, "0")} ${period}`;
 }
 
-export function getUtcOffset(ianaTimezone: string, date: Date): string {
-  try {
-    const fmt = new Intl.DateTimeFormat("en", {
-      timeZone: ianaTimezone,
-      timeZoneName: "shortOffset",
-    });
-    const parts = fmt.formatToParts(date);
-    const offsetPart = parts.find((p) => p.type === "timeZoneName");
-    if (!offsetPart) return "+00:00";
-    const val = offsetPart.value;
-    if (val === "GMT") return "+00:00";
-    const match = val.match(/GMT([+-])(\d+)(?::(\d+))?/);
-    if (!match) return "+00:00";
-    const sign = match[1];
-    const hours = match[2].padStart(2, "0");
-    const mins = (match[3] ?? "00").padStart(2, "0");
-    return `${sign}${hours}:${mins}`;
-  } catch {
-    return "+00:00";
-  }
-}
 
 interface DateTimeSectionProps {
   selectedPhotos: Photo[];
@@ -103,14 +82,15 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
   const tzRef = useRef<HTMLDivElement>(null);
 
   const search = tzSearch.toLowerCase();
+  const tzMatches = (s: string) =>
+    s.toLowerCase().includes(search) || s.toLowerCase().replace(/_/g, " ").includes(search);
   const filteredCurated = WORKING_TIMEZONES.filter((tz) =>
-    tz.label.toLowerCase().includes(search) ||
-    tz.value.toLowerCase().includes(search)
+    tz.label.toLowerCase().includes(search) || tzMatches(tz.value)
   );
   const curatedValues = new Set(WORKING_TIMEZONES.map((tz) => tz.value));
   const extraIana: { value: string; label: string }[] = search
     ? Intl.supportedValuesOf("timeZone")
-        .filter((tz) => !curatedValues.has(tz) && tz.toLowerCase().includes(search))
+        .filter((tz) => !curatedValues.has(tz) && tzMatches(tz))
         .map((tz) => ({ value: tz, label: tz }))
     : [];
   const filteredTimezones = [...filteredCurated, ...extraIana];

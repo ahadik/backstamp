@@ -17,9 +17,11 @@ export function computeInheritance(
       captureTime: targetPhoto.currentMetadata.captureTime,
       gpsLat: targetPhoto.currentMetadata.gpsLat,
       gpsLng: targetPhoto.currentMetadata.gpsLng,
-      cameraBody: targetPhoto.currentMetadata.cameraBody,
+      cameraMake: targetPhoto.currentMetadata.cameraMake,
+      cameraModel: targetPhoto.currentMetadata.cameraModel,
       lens: targetPhoto.currentMetadata.lens,
-      film: targetPhoto.currentMetadata.film,
+      filmVendor: targetPhoto.currentMetadata.filmVendor,
+      filmType: targetPhoto.currentMetadata.filmType,
     };
     for (const p of draggingPhotos) result.set(p.id, changes);
     return result;
@@ -50,9 +52,11 @@ export function computeInheritance(
     const changes: Partial<Metadata> = {
       captureDate: t.captureDate,
       captureTime: t.captureTime,
-      cameraBody: closerNeighbor?.currentMetadata.cameraBody ?? null,
+      cameraMake: closerNeighbor?.currentMetadata.cameraMake ?? null,
+      cameraModel: closerNeighbor?.currentMetadata.cameraModel ?? null,
       lens: closerNeighbor?.currentMetadata.lens ?? null,
-      film: closerNeighbor?.currentMetadata.film ?? null,
+      filmVendor: closerNeighbor?.currentMetadata.filmVendor ?? null,
+      filmType: closerNeighbor?.currentMetadata.filmType ?? null,
       ...gps,
     };
     result.set(p.id, changes);

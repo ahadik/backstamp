@@ -2,8 +2,36 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Metadata, GpxFile } from "../state/SessionContext";
 import type { CorpusState } from "../state/CorpusContext";
 
+export interface PhotoApplyChanges {
+  captureDate?: string | null;
+  captureTime?: string | null;
+  utcOffset?: string | null;
+  timezone?: string | null;
+  gpsLat?: number | null;
+  gpsLng?: number | null;
+  cameraMake?: string | null;
+  cameraModel?: string | null;
+  lens?: string | null;
+  filmVendor?: string | null;
+  filmType?: string | null;
+}
+
 export interface ApplyPayload {
-  changes: Record<string, Record<string, string | number | null>>;
+  changes: Record<string, PhotoApplyChanges>;
+}
+
+export interface FailedFile {
+  photoId: string;
+  error: string;
+}
+
+export interface RollbackResult {
+  canRollback: boolean;
+  failedFiles: FailedFile[];
+}
+
+export interface ResetResult {
+  failedFiles: FailedFile[];
 }
 
 export interface SessionLoadResult {
@@ -35,9 +63,9 @@ export const tauriCommands = {
 
   applyCancel: () => invoke<void>("apply_cancel"),
 
-  rollback: () => invoke<void>("rollback"),
+  rollback: () => invoke<RollbackResult>("rollback"),
 
-  resetPhotos: (ids: string[]) => invoke<void>("reset_photos", { ids }),
+  resetPhotos: (ids: string[]) => invoke<ResetResult>("reset_photos", { ids }),
 
   getThumbnail: (photoId: string) =>
     invoke<string>("get_thumbnail", { photoId }),
@@ -47,14 +75,14 @@ export const tauriCommands = {
 
   loadCorpus: () => invoke<CorpusState>("load_corpus"),
 
-  addCorpusEntry: (category: string, value: string) =>
-    invoke<void>("add_corpus_entry", { category, value }),
+  addCorpusEntry: (category: string, value: string, vendor?: string) =>
+    invoke<void>("add_corpus_entry", { category, value, vendor: vendor ?? null }),
 
-  removeCorpusEntry: (category: string, value: string) =>
-    invoke<void>("remove_corpus_entry", { category, value }),
+  removeCorpusEntry: (category: string, value: string, vendor?: string) =>
+    invoke<void>("remove_corpus_entry", { category, value, vendor: vendor ?? null }),
 
-  recordCorpusUse: (category: string, value: string) =>
-    invoke<void>("record_corpus_use", { category, value }),
+  recordCorpusUse: (category: string, value: string, vendor?: string) =>
+    invoke<void>("record_corpus_use", { category, value, vendor: vendor ?? null }),
 
   getSetting: (key: string) => invoke<string | null>("get_setting", { key }),
 
@@ -63,4 +91,7 @@ export const tauriCommands = {
 
   resolveTimezone: (lat: number, lng: number) =>
     invoke<string>("resolve_timezone", { lat, lng }),
+
+  showPhotoContextMenu: (filePath: string, fileMissing: boolean) =>
+    invoke<void>("show_photo_context_menu", { filePath, fileMissing }),
 };

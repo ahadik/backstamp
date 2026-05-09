@@ -8,9 +8,11 @@ const nullMetadata: Metadata = {
   timezone: null,
   gpsLat: null,
   gpsLng: null,
-  cameraBody: null,
+  cameraMake: null,
+  cameraModel: null,
   lens: null,
-  film: null,
+  filmVendor: null,
+  filmType: null,
 };
 
 function makePhoto(id: string, overrides: Partial<Photo> = {}): Photo {
@@ -256,6 +258,106 @@ describe("sessionReducer", () => {
         orderedIds: ["b", "ghost", "a"],
       });
       expect(next.photos.map((p) => p.id)).toEqual(["b", "a"]);
+    });
+  });
+
+  describe("RESET_PHOTOS", () => {
+    it("restores currentMetadata from originalMetadata and clears pendingChanges", () => {
+      const original: Metadata = { ...nullMetadata, cameraMake: "Canon", cameraModel: "EOS R5" };
+      const state: SessionState = {
+        ...initialState,
+        photos: [
+          makePhoto("a", {
+            originalMetadata: original,
+            currentMetadata: { ...original, lens: "RF 50mm" },
+            pendingChanges: { lens: "RF 50mm" },
+          }),
+        ],
+      };
+      const next = sessionReducer(state, { type: "RESET_PHOTOS", ids: ["a"] });
+      expect(next.photos[0].currentMetadata).toEqual(original);
+      expect(next.photos[0].pendingChanges).toBeNull();
+    });
+
+    it("leaves photos not in ids unchanged", () => {
+      const state: SessionState = {
+        ...initialState,
+        photos: [
+          makePhoto("a", { pendingChanges: { lens: "RF 50mm" } }),
+          makePhoto("b", { pendingChanges: { filmVendor: "Kodak", filmType: "Portra 400" } }),
+        ],
+      };
+      const next = sessionReducer(state, { type: "RESET_PHOTOS", ids: ["a"] });
+      expect(next.photos[1].pendingChanges).toEqual({ filmVendor: "Kodak", filmType: "Portra 400" });
+    });
+  });
+
+  describe("APPLY_COMPLETE", () => {
+    it("clears applyInProgress and updates canRollback", () => {
+      const state: SessionState = { ...initialState, applyInProgress: true };
+      const updated = makePhoto("a", { pendingChanges: null });
+      const next = sessionReducer(state, {
+        type: "APPLY_COMPLETE",
+        updatedPhotos: [updated],
+        canRollback: true,
+      });
+      expect(next.applyInProgress).toBe(false);
+      expect(next.canRollback).toBe(true);
+    });
+
+    it("merges updatedPhotos into existing photos by id", () => {
+      const state: SessionState = {
+        ...initialState,
+        photos: [makePhoto("a"), makePhoto("b")],
+      };
+      const updated = makePhoto("a", {
+        currentMetadata: { ...nullMetadata, lens: "RF 50mm" },
+      });
+      const next = sessionReducer(state, {
+        type: "APPLY_COMPLETE",
+        updatedPhotos: [updated],
+        canRollback: false,
+      });
+      expect(next.photos.find((p) => p.id === "a")?.currentMetadata.lens).toBe("RF 50mm");
+      expect(next.photos.find((p) => p.id === "b")?.id).toBe("b");
+    });
+  });
+
+  describe("ROLLBACK_COMPLETE", () => {
+    it("updates canRollback from the result", () => {
+      const state: SessionState = { ...initialState, canRollback: true };
+      const next = sessionReducer(state, {
+        type: "ROLLBACK_COMPLETE",
+        restoredPhotos: [],
+        canRollback: false,
+      });
+      expect(next.canRollback).toBe(false);
+    });
+
+    it("sets canRollback to true when more history remains", () => {
+      const state: SessionState = { ...initialState, canRollback: false };
+      const next = sessionReducer(state, {
+        type: "ROLLBACK_COMPLETE",
+        restoredPhotos: [],
+        canRollback: true,
+      });
+      expect(next.canRollback).toBe(true);
+    });
+
+    it("merges restoredPhotos into existing photos by id", () => {
+      const state: SessionState = {
+        ...initialState,
+        photos: [makePhoto("a"), makePhoto("b")],
+      };
+      const restored = makePhoto("a", {
+        currentMetadata: { ...nullMetadata, cameraMake: "Nikon" },
+      });
+      const next = sessionReducer(state, {
+        type: "ROLLBACK_COMPLETE",
+        restoredPhotos: [restored],
+        canRollback: false,
+      });
+      expect(next.photos.find((p) => p.id === "a")?.currentMetadata.cameraMake).toBe("Nikon");
     });
   });
 

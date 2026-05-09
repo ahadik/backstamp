@@ -37,7 +37,7 @@ export function flatOrderedIds(blocks: DayBlock[]): string[] {
   return blocks.flatMap((b) => b.photos.map((p) => p.id));
 }
 
-function getDateKey(photo: Photo, workingTimezone: string): string {
+export function getDateKey(photo: Photo, workingTimezone: string): string {
   const { captureDate, captureTime, utcOffset } = photo.currentMetadata;
   if (!captureDate) return "no-date";
   if (!utcOffset || !captureTime) return captureDate;
@@ -65,7 +65,7 @@ function comparePhotos(a: Photo, b: Photo): number {
   return a.filePath < b.filePath ? -1 : a.filePath > b.filePath ? 1 : 0;
 }
 
-function formatLabel(dateKey: string): string {
+export function formatLabel(dateKey: string): string {
   if (dateKey === "no-date") return "No Date";
   const [y, m, d] = dateKey.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString("en-US", {

@@ -1,3 +1,4 @@
+pub mod context_menu;
 pub mod corpus;
 pub mod metadata;
 pub mod photos;

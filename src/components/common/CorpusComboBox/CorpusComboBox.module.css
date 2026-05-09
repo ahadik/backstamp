@@ -5,6 +5,11 @@
   gap: var(--space-1);
 }
 
+.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 .fieldLabel {
   font-size: 11px;
   color: var(--color-text-secondary);

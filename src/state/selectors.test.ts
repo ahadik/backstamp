@@ -1,9 +1,9 @@
-import { groupPhotosByDay, flatOrderedIds } from "./selectors";
+import { groupPhotosByDay, flatOrderedIds, getDateKey, formatLabel } from "./selectors";
 import type { Photo, Metadata } from "./SessionContext";
 
 const nullMeta: Metadata = {
   captureDate: null, captureTime: null, utcOffset: null, timezone: null,
-  gpsLat: null, gpsLng: null, cameraBody: null, lens: null, film: null,
+  gpsLat: null, gpsLng: null, cameraMake: null, cameraModel: null, lens: null, filmVendor: null, filmType: null,
 };
 
 function makePhoto(id: string, overrides: Partial<Metadata> = {}): Photo {
@@ -147,5 +147,92 @@ describe("flatOrderedIds", () => {
       TZ,
     );
     expect(flatOrderedIds(blocks)[0]).toBe("nodated");
+  });
+});
+
+// ── getDateKey ────────────────────────────────────────────────────────────────
+
+describe("getDateKey", () => {
+  function makePhoto(meta: Partial<Metadata> = {}): Photo {
+    return {
+      id: "p",
+      filePath: "/p.jpg",
+      fileStatus: "ok",
+      thumbnail: { small: "", large: "" },
+      originalMetadata: { ...nullMeta, ...meta },
+      currentMetadata: { ...nullMeta, ...meta },
+      pendingChanges: null,
+    };
+  }
+
+  it("returns 'no-date' when captureDate is null", () => {
+    expect(getDateKey(makePhoto(), "UTC")).toBe("no-date");
+  });
+
+  it("returns captureDate as-is when utcOffset is missing", () => {
+    const photo = makePhoto({ captureDate: "2024-03-15", captureTime: "10:00:00" });
+    expect(getDateKey(photo, "America/New_York")).toBe("2024-03-15");
+  });
+
+  it("returns captureDate as-is when captureTime is missing", () => {
+    const photo = makePhoto({ captureDate: "2024-03-15", utcOffset: "+09:00" });
+    expect(getDateKey(photo, "America/New_York")).toBe("2024-03-15");
+  });
+
+  it("returns captureDate unchanged when it already matches the working timezone", () => {
+    // Noon UTC stays March 15 in UTC
+    const photo = makePhoto({ captureDate: "2024-03-15", captureTime: "12:00:00", utcOffset: "+00:00" });
+    expect(getDateKey(photo, "UTC")).toBe("2024-03-15");
+  });
+
+  it("shifts the date forward when the UTC instant falls on the next day in the working timezone", () => {
+    // 22:00 local time at UTC-5 = 03:00 UTC the following day.
+    // Viewed in Asia/Tokyo (UTC+9) that 03:00 UTC becomes 12:00 the next day.
+    const photo = makePhoto({ captureDate: "2024-03-14", captureTime: "22:00:00", utcOffset: "-05:00" });
+    expect(getDateKey(photo, "Asia/Tokyo")).toBe("2024-03-15");
+  });
+
+  it("shifts the date back when the UTC instant falls on the previous day in the working timezone", () => {
+    // 01:00 local time at UTC+9 = 16:00 UTC the previous day.
+    // Viewed in America/New_York (UTC-4 in March 2024, after DST) that is still March 14.
+    const photo = makePhoto({ captureDate: "2024-03-15", captureTime: "01:00:00", utcOffset: "+09:00" });
+    expect(getDateKey(photo, "America/New_York")).toBe("2024-03-14");
+  });
+
+  it("returns captureDate when the constructed date string is invalid (NaN)", () => {
+    const photo = makePhoto({ captureDate: "2024-03-15", captureTime: "not-a-time", utcOffset: "+00:00" });
+    expect(getDateKey(photo, "UTC")).toBe("2024-03-15");
+  });
+
+  it("returns captureDate when the working timezone is invalid (exception path)", () => {
+    const photo = makePhoto({ captureDate: "2024-03-15", captureTime: "12:00:00", utcOffset: "+00:00" });
+    expect(getDateKey(photo, "Not/A/Timezone")).toBe("2024-03-15");
+  });
+});
+
+// ── formatLabel ───────────────────────────────────────────────────────────────
+
+describe("formatLabel", () => {
+  it("returns 'No Date' for the no-date sentinel", () => {
+    expect(formatLabel("no-date")).toBe("No Date");
+  });
+
+  it("formats a known Monday correctly", () => {
+    // 2024-01-01 is a Monday
+    expect(formatLabel("2024-01-01")).toBe("Monday, January 1, 2024");
+  });
+
+  it("formats a known Friday correctly", () => {
+    // 2024-03-15 is a Friday
+    expect(formatLabel("2024-03-15")).toBe("Friday, March 15, 2024");
+  });
+
+  it("formats a known Tuesday correctly", () => {
+    // 2024-12-31 is a Tuesday
+    expect(formatLabel("2024-12-31")).toBe("Tuesday, December 31, 2024");
+  });
+
+  it("includes the full month name", () => {
+    expect(formatLabel("2024-06-15")).toMatch(/June/);
   });
 });

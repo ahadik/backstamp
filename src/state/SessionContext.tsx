@@ -4,12 +4,14 @@ export interface Metadata {
   captureDate: string | null;   // "YYYY-MM-DD"
   captureTime: string | null;   // "HH:MM:SS"
   utcOffset: string | null;     // e.g. "+09:00" from EXIF OffsetTimeOriginal
-  timezone: string | null;      // IANA name — resolved from GPS in Phase 6
+  timezone: string | null;      // IANA name
   gpsLat: number | null;
   gpsLng: number | null;
-  cameraBody: string | null;
+  cameraMake: string | null;    // e.g. "Canon"
+  cameraModel: string | null;   // e.g. "EOS R5"
   lens: string | null;
-  film: string | null;
+  filmVendor: string | null;
+  filmType: string | null;
 }
 
 export interface Photo {
@@ -26,6 +28,8 @@ export interface GpxFile {
   id: string;
   filePath: string;
   addedAt: number;
+  trackPoints: Array<{ lat: number; lng: number; timestamp: string }>;
+  thumbnailPath: string | null;
 }
 
 export interface SessionState {
@@ -50,6 +54,7 @@ type SessionAction =
   | { type: "APPLY_START" }
   | { type: "APPLY_COMPLETE"; updatedPhotos: Photo[]; canRollback: boolean }
   | { type: "ROLLBACK_COMPLETE"; restoredPhotos: Photo[]; canRollback: boolean }
+  | { type: "RESET_PHOTOS"; ids: string[] }
   | { type: "REMOVE_PHOTOS"; ids: string[] }
   | { type: "MARK_MISSING"; ids: string[] }
   | { type: "ADD_GPX"; gpxFile: GpxFile }
@@ -57,19 +62,21 @@ type SessionAction =
   | { type: "REORDER_PHOTOS"; orderedIds: string[] }
   | { type: "CLEAR_SESSION" };
 
-const initialMetadata: Metadata = {
+export const initialMetadata: Metadata = {
   captureDate: null,
   captureTime: null,
   utcOffset: null,
   timezone: null,
   gpsLat: null,
   gpsLng: null,
-  cameraBody: null,
+  cameraMake: null,
+  cameraModel: null,
   lens: null,
-  film: null,
+  filmVendor: null,
+  filmType: null,
 };
 
-const initialState: SessionState = {
+export const initialState: SessionState = {
   photos: [],
   selectedIds: new Set(),
   gpxFiles: [],
@@ -77,7 +84,7 @@ const initialState: SessionState = {
   canRollback: false,
 };
 
-function sessionReducer(state: SessionState, action: SessionAction): SessionState {
+export function sessionReducer(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
     case "IMPORT_PHOTOS":
       return { ...state, photos: action.photos };
@@ -169,6 +176,18 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
       return { ...state, photos: updated, canRollback: action.canRollback };
     }
 
+    case "RESET_PHOTOS": {
+      const idSet = new Set(action.ids);
+      return {
+        ...state,
+        photos: state.photos.map((p) =>
+          idSet.has(p.id)
+            ? { ...p, currentMetadata: { ...p.originalMetadata }, pendingChanges: null }
+            : p
+        ),
+      };
+    }
+
     case "REMOVE_PHOTOS": {
       const idsSet = new Set(action.ids);
       const selected = new Set([...state.selectedIds].filter((id) => !idsSet.has(id)));
@@ -231,5 +250,3 @@ export function useSession(): SessionContextValue {
   if (!ctx) throw new Error("useSession must be used within SessionProvider");
   return ctx;
 }
-
-export { initialMetadata, initialState, sessionReducer };

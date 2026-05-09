@@ -1,19 +1,28 @@
-import { useState } from "react";
 import { useSession } from "../../state/SessionContext";
 import { DateTimeSection } from "./DateTimeSection/DateTimeSection";
 import { CameraSection } from "./CameraSection/CameraSection";
 import { LocationSection } from "./LocationSection/LocationSection";
 import { VibeTagSection } from "./VibeTagSection/VibeTagSection";
-import { SettingsDrawer } from "../Settings/SettingsDrawer";
 import styles from "./InspectorPanel.module.css";
 
-export function InspectorPanel() {
+interface InspectorPanelProps {
+  onOpenSettings: () => void;
+}
+
+export function InspectorPanel({ onOpenSettings }: InspectorPanelProps) {
   const { state } = useSession();
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const selectedPhotos = state.photos.filter((p) =>
     state.selectedIds.has(p.id)
   );
+
+  const singlePhoto = selectedPhotos.length === 1 ? selectedPhotos[0] : null;
+  const fileName = singlePhoto
+    ? singlePhoto.filePath.split("/").pop() ?? singlePhoto.filePath
+    : null;
+  const dirPath = singlePhoto && fileName
+    ? singlePhoto.filePath.slice(0, -(fileName.length + 1))
+    : null;
 
   return (
     <aside
@@ -21,22 +30,24 @@ export function InspectorPanel() {
       className={styles.panel}
       onKeyDown={(e) => { if (e.key === "Escape") e.stopPropagation(); }}
     >
+      {singlePhoto && (
+        <div className={styles.fileInfo}>
+          <span className={styles.fileName}>{fileName}</span>
+          <span className={styles.dirPath}>{dirPath}</span>
+        </div>
+      )}
       <div className={styles.sections}>
         <DateTimeSection selectedPhotos={selectedPhotos} />
         <CameraSection selectedPhotos={selectedPhotos} />
         <LocationSection
           selectedPhotos={selectedPhotos}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={onOpenSettings}
         />
         <VibeTagSection
           selectedPhotos={selectedPhotos}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={onOpenSettings}
         />
       </div>
-
-      {settingsOpen && (
-        <SettingsDrawer onClose={() => setSettingsOpen(false)} />
-      )}
     </aside>
   );
 }

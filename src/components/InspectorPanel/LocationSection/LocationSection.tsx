@@ -33,6 +33,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
   const [suggestions, setSuggestions] = useState<GeocodingFeature[]>([]);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [resolvedTz, setResolvedTz] = useState<string | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
   const [multiConfirm, setMultiConfirm] = useState<{
     lat: number;
     lng: number;
@@ -41,6 +42,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
+  const maybeDispatchCoordsRef = useRef<(lat: number, lng: number) => void>(null!);
 
   const selectedIds = selectedPhotos.map((p) => p.id);
   const gpsLat = deriveFieldValue(selectedPhotos, (m) => m.gpsLat);
@@ -53,6 +55,8 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
     gpsLng !== null &&
     gpsLng !== "multiple";
   const multipleCoords = gpsLat === "multiple" || gpsLng === "multiple";
+  const isEmpty = selectedPhotos.length === 0;
+  const showMap = !isEmpty && !multipleCoords;
 
   function dispatchCoords(lat: number, lng: number) {
     dispatch({
@@ -71,26 +75,34 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
       dispatchCoords(lat, lng);
     }
   }
+  maybeDispatchCoordsRef.current = maybeDispatchCoords;
 
-  // Initialise map
+  // Initialise map — only when the container is actually in the DOM (showMap=true)
   useEffect(() => {
-    if (!mapboxToken || !mapContainerRef.current || mapRef.current) return;
+    if (!mapboxToken || !showMap || !mapContainerRef.current || mapRef.current) return;
 
+    setMapError(null);
     mapboxgl.accessToken = mapboxToken;
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: "mapbox://styles/mapbox/streets-v12",
-      zoom: hasCoords ? 12 : 1,
-      center: hasCoords
-        ? [gpsLng as number, gpsLat as number]
-        : [0, 20],
-    });
+    let map: mapboxgl.Map;
+    try {
+      map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: "mapbox://styles/mapbox/streets-v12",
+        zoom: hasCoords ? 12 : 1,
+        center: hasCoords
+          ? [gpsLng as number, gpsLat as number]
+          : [0, 20],
+      });
+    } catch (err) {
+      setMapError(err instanceof Error ? err.message : String(err));
+      return;
+    }
     mapRef.current = map;
 
     // Click on map to set location
     map.on("click", (e) => {
       const { lat, lng } = e.lngLat;
-      maybeDispatchCoords(lat, lng);
+      maybeDispatchCoordsRef.current(lat, lng);
     });
 
     return () => {
@@ -99,7 +111,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
       markerRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapboxToken]);
+  }, [mapboxToken, showMap]);
 
   // Update marker when coords change
   useEffect(() => {
@@ -120,7 +132,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
         .addTo(map);
       marker.on("dragend", () => {
         const pos = marker.getLngLat();
-        maybeDispatchCoords(pos.lat, pos.lng);
+        maybeDispatchCoordsRef.current(pos.lat, pos.lng);
       });
       markerRef.current = marker;
     }
@@ -160,6 +172,12 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
     debounceRef.current = setTimeout(() => fetchSuggestions(q), DEBOUNCE_MS);
   }
 
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" && suggestions.length > 0) {
+      handleSuggestionSelect(suggestions[0]);
+    }
+  }
+
   async function handleSuggestionSelect(feature: GeocodingFeature) {
     setSuggestionsOpen(false);
     setSearchQuery(feature.properties.full_address);
@@ -184,14 +202,16 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
     timezone !== "multiple" &&
     resolvedTz !== timezone;
 
-  const isEmpty = selectedPhotos.length === 0;
-
-  if (!mapboxToken) {
+  if (!mapboxToken || mapError) {
     return (
       <div className={styles.section}>
         <div className="section-label">Location</div>
         <div className={`inspector-card ${styles.card}`}>
-          <p className={styles.noKey}>A Mapbox API key is required for location features.</p>
+          <p className={styles.noKey}>
+            {mapError
+              ? "Invalid Mapbox token — use a public token (pk.*) in Settings."
+              : "A Mapbox API key is required for location features."}
+          </p>
           <button className="btn btn-primary" onClick={onOpenSettings}>
             Open Settings
           </button>
@@ -217,6 +237,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                 placeholder="Search location…"
                 value={searchQuery}
                 onChange={handleSearchChange}
+                onKeyDown={handleSearchKeyDown}
                 onFocus={() => suggestions.length > 0 && setSuggestionsOpen(true)}
               />
               {suggestionsOpen && suggestions.length > 0 && (

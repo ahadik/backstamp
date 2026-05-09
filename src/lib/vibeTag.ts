@@ -5,9 +5,10 @@ export interface MetadataProposal {
   capture_date?: string;
   capture_time?: string;
   timezone?: string;
-  camera_body?: string;
+  camera_make?: string;
+  camera_model?: string;
   lens?: string;
-  film?: string;
+  film?: { vendor: string; type: string };
   location?: { lat: number; lng: number; display_name: string };
 }
 
@@ -26,9 +27,10 @@ Available fields:
 - capture_date: ISO 8601 date (YYYY-MM-DD)
 - capture_time: 24-hour time (HH:MM:SS)
 - timezone: IANA timezone name
-- camera_body: string
+- camera_make: manufacturer string e.g. "Canon"
+- camera_model: body string e.g. "EOS R5"
 - lens: string
-- film: combined string e.g. "Kodak Portra 400"
+- film: { vendor: string, type: string } e.g. { vendor: "Kodak", type: "Portra 400" }
 - location: call the geocode_location tool to resolve a place name to coordinates
 
 Rules:

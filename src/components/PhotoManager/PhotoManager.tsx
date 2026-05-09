@@ -30,9 +30,11 @@ interface RawPhotoData {
     timezone: string | null;
     gpsLat: number | null;
     gpsLng: number | null;
-    cameraBody: string | null;
+    cameraMake: string | null;
+    cameraModel: string | null;
     lens: string | null;
-    film: string | null;
+    filmVendor: string | null;
+    filmType: string | null;
   };
 }
 
@@ -51,9 +53,11 @@ function mapRawPhoto(raw: RawPhotoData): Photo {
     timezone: raw.metadata.timezone,
     gpsLat: raw.metadata.gpsLat,
     gpsLng: raw.metadata.gpsLng,
-    cameraBody: raw.metadata.cameraBody,
+    cameraMake: raw.metadata.cameraMake,
+    cameraModel: raw.metadata.cameraModel,
     lens: raw.metadata.lens,
-    film: raw.metadata.film,
+    filmVendor: raw.metadata.filmVendor,
+    filmType: raw.metadata.filmType,
   };
   return {
     id: raw.id,
