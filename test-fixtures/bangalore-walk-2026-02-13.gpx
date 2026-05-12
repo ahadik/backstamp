@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Manual Test Fixture"
+  xmlns="http://www.topografix.com/GPX/1/1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  <metadata>
+    <name>Bangalore City Walk - February 13 2026</name>
+    <desc>Two-hour midday walk around Bangalore city center (MG Road / Cubbon Park area). Synthetic test fixture — GPS points are fabricated.</desc>
+    <time>2026-02-13T06:30:00Z</time>
+  </metadata>
+  <trk>
+    <name>Bangalore Walk</name>
+    <trkseg>
+      <!-- 12:00 IST = 06:30 UTC — starting near MG Road / Trinity Circle -->
+      <trkpt lat="12.97570" lon="77.60940"><ele>920</ele><time>2026-02-13T06:30:00Z</time></trkpt>
+      <trkpt lat="12.97583" lon="77.60921"><ele>919</ele><time>2026-02-13T06:31:00Z</time></trkpt>
+      <trkpt lat="12.97601" lon="77.60898"><ele>919</ele><time>2026-02-13T06:32:00Z</time></trkpt>
+      <trkpt lat="12.97618" lon="77.60872"><ele>920</ele><time>2026-02-13T06:33:00Z</time></trkpt>
+      <trkpt lat="12.97630" lon="77.60843"><ele>921</ele><time>2026-02-13T06:34:00Z</time></trkpt>
+      <trkpt lat="12.97645" lon="77.60811"><ele>921</ele><time>2026-02-13T06:35:00Z</time></trkpt>
+      <trkpt lat="12.97659" lon="77.60784"><ele>922</ele><time>2026-02-13T06:36:00Z</time></trkpt>
+      <trkpt lat="12.97671" lon="77.60762"><ele>922</ele><time>2026-02-13T06:37:00Z</time></trkpt>
+      <trkpt lat="12.97685" lon="77.60740"><ele>921</ele><time>2026-02-13T06:38:00Z</time></trkpt>
+      <trkpt lat="12.97699" lon="77.60718"><ele>920</ele><time>2026-02-13T06:39:00Z</time></trkpt>
+      <!-- heading west along Kasturba Road toward Cubbon Park -->
+      <trkpt lat="12.97714" lon="77.60694"><ele>920</ele><time>2026-02-13T06:40:00Z</time></trkpt>
+      <trkpt lat="12.97728" lon="77.60669"><ele>919</ele><time>2026-02-13T06:41:00Z</time></trkpt>
+      <trkpt lat="12.97742" lon="77.60641"><ele>919</ele><time>2026-02-13T06:42:00Z</time></trkpt>
+      <trkpt lat="12.97755" lon="77.60612"><ele>918</ele><time>2026-02-13T06:43:00Z</time></trkpt>
+      <trkpt lat="12.97769" lon="77.60580"><ele>918</ele><time>2026-02-13T06:44:00Z</time></trkpt>
+      <trkpt lat="12.97780" lon="77.60552"><ele>917</ele><time>2026-02-13T06:45:00Z</time></trkpt>
+      <trkpt lat="12.97792" lon="77.60523"><ele>917</ele><time>2026-02-13T06:46:00Z</time></trkpt>
+      <trkpt lat="12.97803" lon="77.60497"><ele>916</ele><time>2026-02-13T06:47:00Z</time></trkpt>
+      <trkpt lat="12.97814" lon="77.60472"><ele>916</ele><time>2026-02-13T06:48:00Z</time></trkpt>
+      <trkpt lat="12.97825" lon="77.60448"><ele>915</ele><time>2026-02-13T06:49:00Z</time></trkpt>
+      <!-- entering Cubbon Park area -->
+      <trkpt lat="12.97836" lon="77.60422"><ele>915</ele><time>2026-02-13T06:50:00Z</time></trkpt>
+      <trkpt lat="12.97848" lon="77.60398"><ele>914</ele><time>2026-02-13T06:51:00Z</time></trkpt>
+      <trkpt lat="12.97862" lon="77.60375"><ele>914</ele><time>2026-02-13T06:52:00Z</time></trkpt>
+      <trkpt lat="12.97878" lon="77.60354"><ele>913</ele><time>2026-02-13T06:53:00Z</time></trkpt>
+      <trkpt lat="12.97893" lon="77.60337"><ele>913</ele><time>2026-02-13T06:54:00Z</time></trkpt>
+      <trkpt lat="12.97907" lon="77.60322"><ele>914</ele><time>2026-02-13T06:55:00Z</time></trkpt>
+      <trkpt lat="12.97921" lon="77.60309"><ele>914</ele><time>2026-02-13T06:56:00Z</time></trkpt>
+      <trkpt lat="12.97934" lon="77.60298"><ele>914</ele><time>2026-02-13T06:57:00Z</time></trkpt>
+      <trkpt lat="12.97946" lon="77.60288"><ele>913</ele><time>2026-02-13T06:58:00Z</time></trkpt>
+      <trkpt lat="12.97957" lon="77.60278"><ele>913</ele><time>2026-02-13T06:59:00Z</time></trkpt>
+      <!-- wandering through Cubbon Park — slower pace, more noise -->
+      <trkpt lat="12.97964" lon="77.60263"><ele>912</ele><time>2026-02-13T07:00:00Z</time></trkpt>
+      <trkpt lat="12.97970" lon="77.60245"><ele>912</ele><time>2026-02-13T07:01:00Z</time></trkpt>
+      <trkpt lat="12.97974" lon="77.60228"><ele>911</ele><time>2026-02-13T07:02:00Z</time></trkpt>
+      <trkpt lat="12.97977" lon="77.60214"><ele>911</ele><time>2026-02-13T07:03:00Z</time></trkpt>
+      <trkpt lat="12.97980" lon="77.60200"><ele>910</ele><time>2026-02-13T07:04:00Z</time></trkpt>
+      <trkpt lat="12.97983" lon="77.60188"><ele>910</ele><time>2026-02-13T07:05:00Z</time></trkpt>
+      <trkpt lat="12.97986" lon="77.60176"><ele>910</ele><time>2026-02-13T07:06:00Z</time></trkpt>
+      <trkpt lat="12.97990" lon="77.60164"><ele>910</ele><time>2026-02-13T07:07:00Z</time></trkpt>
+      <trkpt lat="12.97993" lon="77.60152"><ele>911</ele><time>2026-02-13T07:08:00Z</time></trkpt>
+      <trkpt lat="12.97996" lon="77.60140"><ele>911</ele><time>2026-02-13T07:09:00Z</time></trkpt>
+      <!-- turning north toward Vidhana Soudha -->
+      <trkpt lat="12.97999" lon="77.60128"><ele>911</ele><time>2026-02-13T07:10:00Z</time></trkpt>
+      <trkpt lat="12.98004" lon="77.60118"><ele>912</ele><time>2026-02-13T07:11:00Z</time></trkpt>
+      <trkpt lat="12.98013" lon="77.60110"><ele>912</ele><time>2026-02-13T07:12:00Z</time></trkpt>
+      <trkpt lat="12.98025" lon="77.60104"><ele>913</ele><time>2026-02-13T07:13:00Z</time></trkpt>
+      <trkpt lat="12.98039" lon="77.60099"><ele>913</ele><time>2026-02-13T07:14:00Z</time></trkpt>
+      <trkpt lat="12.98055" lon="77.60095"><ele>914</ele><time>2026-02-13T07:15:00Z</time></trkpt>
+      <trkpt lat="12.98071" lon="77.60091"><ele>914</ele><time>2026-02-13T07:16:00Z</time></trkpt>
+      <trkpt lat="12.98087" lon="77.60088"><ele>915</ele><time>2026-02-13T07:17:00Z</time></trkpt>
+      <trkpt lat="12.98103" lon="77.60085"><ele>915</ele><time>2026-02-13T07:18:00Z</time></trkpt>
+      <trkpt lat="12.98118" lon="77.60083"><ele>916</ele><time>2026-02-13T07:19:00Z</time></trkpt>
+      <!-- near Vidhana Soudha -->
+      <trkpt lat="12.98133" lon="77.60081"><ele>916</ele><time>2026-02-13T07:20:00Z</time></trkpt>
+      <trkpt lat="12.98148" lon="77.60079"><ele>917</ele><time>2026-02-13T07:21:00Z</time></trkpt>
+      <trkpt lat="12.98161" lon="77.60077"><ele>917</ele><time>2026-02-13T07:22:00Z</time></trkpt>
+      <trkpt lat="12.98174" lon="77.60075"><ele>917</ele><time>2026-02-13T07:23:00Z</time></trkpt>
+      <trkpt lat="12.98185" lon="77.60072"><ele>917</ele><time>2026-02-13T07:24:00Z</time></trkpt>
+      <trkpt lat="12.98195" lon="77.60068"><ele>918</ele><time>2026-02-13T07:25:00Z</time></trkpt>
+      <trkpt lat="12.98204" lon="77.60063"><ele>918</ele><time>2026-02-13T07:26:00Z</time></trkpt>
+      <trkpt lat="12.98211" lon="77.60057"><ele>918</ele><time>2026-02-13T07:27:00Z</time></trkpt>
+      <trkpt lat="12.98217" lon="77.60050"><ele>918</ele><time>2026-02-13T07:28:00Z</time></trkpt>
+      <trkpt lat="12.98221" lon="77.60042"><ele>917</ele><time>2026-02-13T07:29:00Z</time></trkpt>
+      <!-- heading east, back toward Brigade Road -->
+      <trkpt lat="12.98224" lon="77.60033"><ele>917</ele><time>2026-02-13T07:30:00Z</time></trkpt>
+      <trkpt lat="12.98226" lon="77.60048"><ele>916</ele><time>2026-02-13T07:31:00Z</time></trkpt>
+      <trkpt lat="12.98225" lon="77.60068"><ele>916</ele><time>2026-02-13T07:32:00Z</time></trkpt>
+      <trkpt lat="12.98222" lon="77.60090"><ele>915</ele><time>2026-02-13T07:33:00Z</time></trkpt>
+      <trkpt lat="12.98217" lon="77.60114"><ele>915</ele><time>2026-02-13T07:34:00Z</time></trkpt>
+      <trkpt lat="12.98210" lon="77.60138"><ele>914</ele><time>2026-02-13T07:35:00Z</time></trkpt>
+      <trkpt lat="12.98201" lon="77.60163"><ele>914</ele><time>2026-02-13T07:36:00Z</time></trkpt>
+      <trkpt lat="12.98192" lon="77.60190"><ele>914</ele><time>2026-02-13T07:37:00Z</time></trkpt>
+      <trkpt lat="12.98183" lon="77.60218"><ele>913</ele><time>2026-02-13T07:38:00Z</time></trkpt>
+      <trkpt lat="12.98174" lon="77.60246"><ele>913</ele><time>2026-02-13T07:39:00Z</time></trkpt>
+      <!-- turning south on Mahatma Gandhi Road -->
+      <trkpt lat="12.98163" lon="77.60274"><ele>914</ele><time>2026-02-13T07:40:00Z</time></trkpt>
+      <trkpt lat="12.98150" lon="77.60298"><ele>914</ele><time>2026-02-13T07:41:00Z</time></trkpt>
+      <trkpt lat="12.98135" lon="77.60317"><ele>915</ele><time>2026-02-13T07:42:00Z</time></trkpt>
+      <trkpt lat="12.98118" lon="77.60333"><ele>915</ele><time>2026-02-13T07:43:00Z</time></trkpt>
+      <trkpt lat="12.98100" lon="77.60345"><ele>916</ele><time>2026-02-13T07:44:00Z</time></trkpt>
+      <trkpt lat="12.98081" lon="77.60354"><ele>916</ele><time>2026-02-13T07:45:00Z</time></trkpt>
+      <trkpt lat="12.98062" lon="77.60360"><ele>917</ele><time>2026-02-13T07:46:00Z</time></trkpt>
+      <trkpt lat="12.98043" lon="77.60363"><ele>917</ele><time>2026-02-13T07:47:00Z</time></trkpt>
+      <trkpt lat="12.98025" lon="77.60364"><ele>917</ele><time>2026-02-13T07:48:00Z</time></trkpt>
+      <trkpt lat="12.98007" lon="77.60363"><ele>917</ele><time>2026-02-13T07:49:00Z</time></trkpt>
+      <!-- continuing south, now near Commercial Street area -->
+      <trkpt lat="12.97991" lon="77.60361"><ele>916</ele><time>2026-02-13T07:50:00Z</time></trkpt>
+      <trkpt lat="12.97975" lon="77.60357"><ele>916</ele><time>2026-02-13T07:51:00Z</time></trkpt>
+      <trkpt lat="12.97960" lon="77.60352"><ele>915</ele><time>2026-02-13T07:52:00Z</time></trkpt>
+      <trkpt lat="12.97945" lon="77.60346"><ele>915</ele><time>2026-02-13T07:53:00Z</time></trkpt>
+      <trkpt lat="12.97930" lon="77.60339"><ele>914</ele><time>2026-02-13T07:54:00Z</time></trkpt>
+      <trkpt lat="12.97915" lon="77.60331"><ele>914</ele><time>2026-02-13T07:55:00Z</time></trkpt>
+      <trkpt lat="12.97900" lon="77.60322"><ele>913</ele><time>2026-02-13T07:56:00Z</time></trkpt>
+      <trkpt lat="12.97885" lon="77.60312"><ele>913</ele><time>2026-02-13T07:57:00Z</time></trkpt>
+      <trkpt lat="12.97870" lon="77.60301"><ele>912</ele><time>2026-02-13T07:58:00Z</time></trkpt>
+      <trkpt lat="12.97855" lon="77.60290"><ele>912</ele><time>2026-02-13T07:59:00Z</time></trkpt>
+      <!-- heading east on Brigade Road -->
+      <trkpt lat="12.97843" lon="77.60311"><ele>912</ele><time>2026-02-13T08:00:00Z</time></trkpt>
+      <trkpt lat="12.97832" lon="77.60334"><ele>912</ele><time>2026-02-13T08:01:00Z</time></trkpt>
+      <trkpt lat="12.97822" lon="77.60358"><ele>913</ele><time>2026-02-13T08:02:00Z</time></trkpt>
+      <trkpt lat="12.97813" lon="77.60383"><ele>913</ele><time>2026-02-13T08:03:00Z</time></trkpt>
+      <trkpt lat="12.97805" lon="77.60408"><ele>914</ele><time>2026-02-13T08:04:00Z</time></trkpt>
+      <trkpt lat="12.97798" lon="77.60434"><ele>914</ele><time>2026-02-13T08:05:00Z</time></trkpt>
+      <trkpt lat="12.97792" lon="77.60461"><ele>915</ele><time>2026-02-13T08:06:00Z</time></trkpt>
+      <trkpt lat="12.97787" lon="77.60489"><ele>915</ele><time>2026-02-13T08:07:00Z</time></trkpt>
+      <trkpt lat="12.97783" lon="77.60517"><ele>916</ele><time>2026-02-13T08:08:00Z</time></trkpt>
+      <trkpt lat="12.97780" lon="77.60546"><ele>916</ele><time>2026-02-13T08:09:00Z</time></trkpt>
+      <!-- approaching Church Street / MG Road junction -->
+      <trkpt lat="12.97778" lon="77.60575"><ele>917</ele><time>2026-02-13T08:10:00Z</time></trkpt>
+      <trkpt lat="12.97777" lon="77.60604"><ele>917</ele><time>2026-02-13T08:11:00Z</time></trkpt>
+      <trkpt lat="12.97777" lon="77.60633"><ele>918</ele><time>2026-02-13T08:12:00Z</time></trkpt>
+      <trkpt lat="12.97779" lon="77.60661"><ele>918</ele><time>2026-02-13T08:13:00Z</time></trkpt>
+      <trkpt lat="12.97781" lon="77.60689"><ele>919</ele><time>2026-02-13T08:14:00Z</time></trkpt>
+      <trkpt lat="12.97785" lon="77.60716"><ele>919</ele><time>2026-02-13T08:15:00Z</time></trkpt>
+      <trkpt lat="12.97790" lon="77.60742"><ele>920</ele><time>2026-02-13T08:16:00Z</time></trkpt>
+      <trkpt lat="12.97796" lon="77.60766"><ele>920</ele><time>2026-02-13T08:17:00Z</time></trkpt>
+      <trkpt lat="12.97803" lon="77.60789"><ele>920</ele><time>2026-02-13T08:18:00Z</time></trkpt>
+      <trkpt lat="12.97811" lon="77.60811"><ele>921</ele><time>2026-02-13T08:19:00Z</time></trkpt>
+      <!-- final stretch back to Trinity Circle start point -->
+      <trkpt lat="12.97820" lon="77.60831"><ele>921</ele><time>2026-02-13T08:20:00Z</time></trkpt>
+      <trkpt lat="12.97831" lon="77.60849"><ele>921</ele><time>2026-02-13T08:21:00Z</time></trkpt>
+      <trkpt lat="12.97843" lon="77.60866"><ele>921</ele><time>2026-02-13T08:22:00Z</time></trkpt>
+      <trkpt lat="12.97856" lon="77.60882"><ele>920</ele><time>2026-02-13T08:23:00Z</time></trkpt>
+      <trkpt lat="12.97870" lon="77.60896"><ele>920</ele><time>2026-02-13T08:24:00Z</time></trkpt>
+      <trkpt lat="12.97885" lon="77.60909"><ele>920</ele><time>2026-02-13T08:25:00Z</time></trkpt>
+      <trkpt lat="12.97901" lon="77.60921"><ele>919</ele><time>2026-02-13T08:26:00Z</time></trkpt>
+      <trkpt lat="12.97918" lon="77.60931"><ele>919</ele><time>2026-02-13T08:27:00Z</time></trkpt>
+      <trkpt lat="12.97936" lon="77.60940"><ele>919</ele><time>2026-02-13T08:28:00Z</time></trkpt>
+      <trkpt lat="12.97954" lon="77.60946"><ele>920</ele><time>2026-02-13T08:29:00Z</time></trkpt>
+      <!-- 14:00 IST = 08:30 UTC -->
+      <trkpt lat="12.97970" lon="77.60950"><ele>920</ele><time>2026-02-13T08:30:00Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

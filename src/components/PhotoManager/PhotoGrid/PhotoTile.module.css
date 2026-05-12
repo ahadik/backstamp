@@ -33,6 +33,17 @@
   gap: var(--space-1);
 }
 
+.locationPin {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 12px;
+  line-height: 1;
+  z-index: 2;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5));
+}
+
 .pendingDot {
   position: absolute;
   top: 6px;

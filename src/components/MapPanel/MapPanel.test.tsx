@@ -54,7 +54,7 @@ const nullMeta = {
 const emptySession: SessionState = {
   photos: [],
   selectedIds: new Set(),
-  gpxFiles: [],
+  gpxFiles: [], selectedGpxId: null,
   applyInProgress: false,
   canRollback: false,
 };

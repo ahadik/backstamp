@@ -1,3 +1,4 @@
+use crate::gpx::TrackPoint;
 use crate::thumbnail::path_key;
 use crate::AppState;
 use rusqlite::params;
@@ -22,9 +23,19 @@ pub(crate) struct PhotoRow {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct GpxRow {
+    id: String,
+    file_path: String,
+    added_at: i64,
+    track_points: Vec<TrackPoint>,
+    thumbnail_path: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SessionLoadResult {
     photos: Vec<PhotoRow>,
-    gpx_files: Vec<serde_json::Value>,
+    gpx_files: Vec<GpxRow>,
     can_rollback: bool,
 }
 
@@ -130,6 +141,37 @@ pub async fn load_session(state: State<'_, AppState>) -> Result<SessionLoadResul
         })
         .collect();
 
+    let gpx_files: Vec<GpxRow> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, file_path, added_at, track_points, thumbnail_path
+                 FROM gpx_files ORDER BY added_at ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let raw: Vec<(String, String, i64, Option<String>, Option<String>)> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        raw.into_iter()
+        .map(|(id, file_path, added_at, tp_json, thumbnail_path)| {
+            let track_points: Vec<TrackPoint> = tp_json
+                .as_deref()
+                .and_then(|j| serde_json::from_str(j).ok())
+                .unwrap_or_default();
+            GpxRow { id, file_path, added_at, track_points, thumbnail_path }
+        })
+        .collect()
+    };
+
     let can_rollback: bool = conn
         .query_row("SELECT COUNT(*) FROM apply_ops", [], |r| r.get::<_, i64>(0))
         .map(|n| n > 0)
@@ -137,7 +179,7 @@ pub async fn load_session(state: State<'_, AppState>) -> Result<SessionLoadResul
 
     Ok(SessionLoadResult {
         photos,
-        gpx_files: vec![],
+        gpx_files,
         can_rollback,
     })
 }

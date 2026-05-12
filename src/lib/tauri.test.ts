@@ -63,4 +63,22 @@ describe("tauriCommands", () => {
     await tauriCommands.applyChanges(payload);
     expect(mockInvoke).toHaveBeenCalledWith("apply_changes", { payload });
   });
+
+  it("importGpx calls import_gpx with path", async () => {
+    mockInvoke.mockResolvedValue({ id: "g1", filePath: "/a.gpx", addedAt: 0, trackPoints: [], thumbnailPath: null });
+    await tauriCommands.importGpx("/a.gpx");
+    expect(mockInvoke).toHaveBeenCalledWith("import_gpx", { path: "/a.gpx" });
+  });
+
+  it("removeGpx calls remove_gpx with id", async () => {
+    mockInvoke.mockResolvedValue(undefined);
+    await tauriCommands.removeGpx("g1");
+    expect(mockInvoke).toHaveBeenCalledWith("remove_gpx", { id: "g1" });
+  });
+
+  it("saveGpxThumbnail calls save_gpx_thumbnail with id and data", async () => {
+    mockInvoke.mockResolvedValue("/thumbs/gpx_g1.jpg");
+    await tauriCommands.saveGpxThumbnail("g1", [1, 2, 3]);
+    expect(mockInvoke).toHaveBeenCalledWith("save_gpx_thumbnail", { id: "g1", data: [1, 2, 3] });
+  });
 });

@@ -2,6 +2,8 @@
   padding: var(--space-4);
   padding-top: calc(var(--topbar-height) + var(--space-4));
   padding-bottom: calc(var(--map-panel-height, 220px) + var(--space-4));
+  padding-left: var(--space-8);
+  padding-right: var(--space-8);
   min-height: 100%;
 }
 
@@ -26,4 +28,27 @@
 
 .dayBlock:last-child {
   margin-bottom: 0;
+}
+
+.gpxSection {
+  padding: var(--space-4) var(--space-4) var(--space-8);
+}
+
+.gpxSectionLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.gpxTiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.gpxTiles > * {
+  width: 180px;
 }

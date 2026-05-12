@@ -10,12 +10,7 @@ interface Props {
   isDragging: boolean;
   dropZone: DropZone | null;
   onClick: (e: React.MouseEvent) => void;
-  draggable?: boolean;
-  onDragStart?: (e: React.DragEvent) => void;
-  onDragEnd?: (e: React.DragEvent) => void;
-  onDragOver?: (e: React.DragEvent) => void;
-  onDragLeave?: (e: React.DragEvent) => void;
-  onDrop?: (e: React.DragEvent) => void;
+  onMouseDown?: (e: React.MouseEvent) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }
 
@@ -26,12 +21,7 @@ export function PhotoTile({
   isDragging,
   dropZone,
   onClick,
-  draggable,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  onDragLeave,
-  onDrop,
+  onMouseDown,
   onContextMenu,
 }: Props) {
   const src = tilePx > 400 ? photo.thumbnail.large : photo.thumbnail.small;
@@ -46,15 +36,11 @@ export function PhotoTile({
 
   return (
     <div
+      data-photo-id={photo.id}
       className={tileClass}
       onClick={onClick}
+      onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
     >
       <div className={styles.content}>
         {photo.fileStatus === "missing" ? (
@@ -64,6 +50,9 @@ export function PhotoTile({
           </div>
         ) : (
           <img src={src} className={styles.img} loading="lazy" draggable={false} />
+        )}
+        {photo.currentMetadata.gpsLat != null && photo.currentMetadata.gpsLng != null && (
+          <span className={styles.locationPin}>📍</span>
         )}
         {photo.pendingChanges && <span className={styles.pendingDot} />}
         {isSelected && <div className={styles.selectedOverlay} />}

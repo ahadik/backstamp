@@ -1,30 +1,53 @@
 import type { Photo, Metadata } from "../state/SessionContext";
 import type { DropTarget } from "./useDragDrop";
 
+export interface CameraData {
+  cameraMake: string | null;
+  cameraModel: string | null;
+  lens: string | null;
+  filmVendor: string | null;
+  filmType: string | null;
+}
+
+export interface CameraConflict {
+  draggingIds: string[];
+  /** Camera data from the neighbor before the gap. null means "no camera data set". */
+  optionBefore: CameraData | null;
+  /** Camera data from the neighbor after the gap. null means "no camera data set". */
+  optionAfter: CameraData | null;
+}
+
+export interface InheritanceResult {
+  /** Per-photo metadata changes — always contains timestamp and GPS assignments.
+   *  Camera fields are ONLY included here when there is no conflict. */
+  changes: Map<string, Partial<Metadata>>;
+  /** Present only for gap drops when the two neighbors have different camera data. */
+  cameraConflict: CameraConflict | null;
+}
+
 export function computeInheritance(
   draggingPhotos: Photo[],
   target: DropTarget,
   targetPhoto: Photo | null,
   neighborBefore: Photo | null,
   neighborAfter: Photo | null,
-): Map<string, Partial<Metadata>> {
-  const result = new Map<string, Partial<Metadata>>();
+): InheritanceResult {
+  const changes = new Map<string, Partial<Metadata>>();
 
   if (target.kind === "photo") {
-    if (!targetPhoto) return result;
-    const changes: Partial<Metadata> = {
-      captureDate: targetPhoto.currentMetadata.captureDate,
-      captureTime: targetPhoto.currentMetadata.captureTime,
-      gpsLat: targetPhoto.currentMetadata.gpsLat,
-      gpsLng: targetPhoto.currentMetadata.gpsLng,
-      cameraMake: targetPhoto.currentMetadata.cameraMake,
-      cameraModel: targetPhoto.currentMetadata.cameraModel,
-      lens: targetPhoto.currentMetadata.lens,
-      filmVendor: targetPhoto.currentMetadata.filmVendor,
-      filmType: targetPhoto.currentMetadata.filmType,
-    };
-    for (const p of draggingPhotos) result.set(p.id, changes);
-    return result;
+    if (!targetPhoto) return { changes, cameraConflict: null };
+    const masterMeta = targetPhoto.currentMetadata;
+    const fields: (keyof Metadata)[] = [
+      "captureDate", "captureTime", "gpsLat", "gpsLng",
+      "cameraMake", "cameraModel", "lens", "filmVendor", "filmType",
+    ];
+    const photoChanges = Object.fromEntries(
+      fields
+        .filter((f) => masterMeta[f] !== null)
+        .map((f) => [f, masterMeta[f]])
+    ) as Partial<Metadata>;
+    for (const p of draggingPhotos) changes.set(p.id, photoChanges);
+    return { changes, cameraConflict: null };
   }
 
   // gap drop
@@ -32,12 +55,30 @@ export function computeInheritance(
 
   if (gap.dayKey === "no-date") {
     for (const p of draggingPhotos) {
-      result.set(p.id, { captureDate: null, captureTime: null });
+      changes.set(p.id, { captureDate: null, captureTime: null });
     }
-    return result;
+    return { changes, cameraConflict: null };
   }
 
-  const closerNeighbor = pickCloserNeighbor(neighborBefore, neighborAfter);
+  // Resolve camera data: detect conflicts or pick the available neighbor's data
+  const cameraA = extractCameraData(neighborBefore);
+  const cameraB = extractCameraData(neighborAfter);
+  let mergedCamera: CameraData | null = null;
+  let hasCameraConflict = false;
+
+  if (cameraDataEqual(cameraA, cameraB)) {
+    mergedCamera = cameraA; // both null → no change; both equal → inherit
+  } else if (cameraA === null) {
+    mergedCamera = cameraB; // only after-neighbor has data → inherit it
+  } else if (cameraB === null) {
+    mergedCamera = cameraA; // only before-neighbor has data → inherit it
+  } else {
+    hasCameraConflict = true; // both have data but differ → conflict
+  }
+
+  const cameraFields: (keyof CameraData)[] = [
+    "cameraMake", "cameraModel", "lens", "filmVendor", "filmType",
+  ];
 
   for (let i = 0; i < draggingPhotos.length; i++) {
     const p = draggingPhotos[i];
@@ -49,29 +90,61 @@ export function computeInheritance(
       gap.dayKey,
     );
     const gps = interpolateGps(neighborBefore, neighborAfter, i, draggingPhotos.length);
-    const changes: Partial<Metadata> = {
+    const photoChanges: Partial<Metadata> = {
       captureDate: t.captureDate,
       captureTime: t.captureTime,
-      cameraMake: closerNeighbor?.currentMetadata.cameraMake ?? null,
-      cameraModel: closerNeighbor?.currentMetadata.cameraModel ?? null,
-      lens: closerNeighbor?.currentMetadata.lens ?? null,
-      filmVendor: closerNeighbor?.currentMetadata.filmVendor ?? null,
-      filmType: closerNeighbor?.currentMetadata.filmType ?? null,
       ...gps,
     };
-    result.set(p.id, changes);
+    if (!hasCameraConflict && mergedCamera !== null) {
+      for (const field of cameraFields) {
+        if (mergedCamera[field] != null) {
+          (photoChanges as Record<string, unknown>)[field] = mergedCamera[field];
+        }
+      }
+    }
+    changes.set(p.id, photoChanges);
   }
 
-  return result;
+  if (hasCameraConflict) {
+    return {
+      changes,
+      cameraConflict: {
+        draggingIds: draggingPhotos.map((p) => p.id),
+        optionBefore: cameraA,
+        optionAfter: cameraB,
+      },
+    };
+  }
+
+  return { changes, cameraConflict: null };
 }
 
-function pickCloserNeighbor(
-  before: Photo | null,
-  after: Photo | null,
-): Photo | null {
-  if (!before) return after;
-  if (!after) return before;
-  return before;
+export function extractCameraData(photo: Photo | null): CameraData | null {
+  if (!photo) return null;
+  const m = photo.currentMetadata;
+  if (
+    m.cameraMake == null && m.cameraModel == null && m.lens == null &&
+    m.filmVendor == null && m.filmType == null
+  ) return null;
+  return {
+    cameraMake: m.cameraMake,
+    cameraModel: m.cameraModel,
+    lens: m.lens,
+    filmVendor: m.filmVendor,
+    filmType: m.filmType,
+  };
+}
+
+export function cameraDataEqual(a: CameraData | null, b: CameraData | null): boolean {
+  if (a === null && b === null) return true;
+  if (a === null || b === null) return false;
+  return (
+    a.cameraMake === b.cameraMake &&
+    a.cameraModel === b.cameraModel &&
+    a.lens === b.lens &&
+    a.filmVendor === b.filmVendor &&
+    a.filmType === b.filmType
+  );
 }
 
 function interpolateTimestamp(
@@ -137,14 +210,9 @@ function interpolateGps(
       gpsLng: bLng + (aLng - bLng) * t,
     };
   }
-
-  const neighbor =
-    before?.currentMetadata.gpsLat !== null ? before : after;
-  if (!neighbor) return {};
-  return {
-    gpsLat: neighbor.currentMetadata.gpsLat,
-    gpsLng: neighbor.currentMetadata.gpsLng,
-  };
+  if (bLat !== null && bLng !== null) return { gpsLat: bLat, gpsLng: bLng };
+  if (aLat !== null && aLng !== null) return { gpsLat: aLat, gpsLng: aLng };
+  return {};
 }
 
 function timeToSeconds(t: string): number {

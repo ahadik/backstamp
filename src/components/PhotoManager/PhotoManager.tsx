@@ -1,21 +1,27 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { FloatingControls } from "./FloatingControls/FloatingControls";
 import { PhotoGrid } from "./PhotoGrid/PhotoGrid";
 import { ImportModal } from "../ImportModal/ImportModal";
 import { DropImportOverlay } from "./DropImportOverlay";
+import { ConfirmDialog } from "../common/ConfirmDialog/ConfirmDialog";
 import { useSession } from "../../state/SessionContext";
 import { useCorpus } from "../../state/CorpusContext";
 import { useUI } from "../../state/UIContext";
-import type { Photo, Metadata } from "../../state/SessionContext";
+import type { Photo, Metadata, GpxFile } from "../../state/SessionContext";
+import type { TrackPoint } from "../../lib/tauri";
 import { tauriCommands } from "../../lib/tauri";
+import { countMatches, applyGpxAutoTag } from "../../lib/gpxMatching";
 import styles from "./PhotoManager.module.css";
 
 const SUPPORTED_EXTENSIONS = new Set([
   "jpg", "jpeg", "tif", "tiff", "heic",
   "dng", "cr3", "cr2", "nef", "arw", "raf", "orf", "rw2", "pef",
 ]);
+
+const GPX_EXTENSIONS = new Set(["gpx"]);
 
 interface RawPhotoData {
   id: string;
@@ -74,11 +80,17 @@ function mapRawPhoto(raw: RawPhotoData): Photo {
 }
 
 export function PhotoManager() {
-  const { dispatch: sessionDispatch } = useSession();
+  const { state: session, dispatch: sessionDispatch } = useSession();
   const { dispatch: corpusDispatch } = useCorpus();
-  const { dispatch: uiDispatch } = useUI();
+  const { state: uiState, dispatch: uiDispatch } = useUI();
 
   const [showDropOverlay, setShowDropOverlay] = useState(false);
+  const [pendingGpxImport, setPendingGpxImport] = useState<{
+    gpxFile: GpxFile;
+    matchCount: number;
+    totalCount: number;
+  } | null>(null);
+  const [gpxImportError, setGpxImportError] = useState<string | null>(null);
   const [importState, setImportState] = useState<{
     isOpen: boolean;
     done: number;
@@ -92,11 +104,85 @@ export function PhotoManager() {
     setImportState({ isOpen: false, done: 0, total: 0, skipped: 0, isComplete: false, errors: [] });
   }, []);
 
+  const fetchAndSaveGpxThumbnail = useCallback(async (
+    gpxId: string,
+    trackPoints: TrackPoint[],
+    mapboxToken: string
+  ): Promise<void> => {
+    try {
+      const geojson = encodeURIComponent(
+        JSON.stringify({
+          type: "Feature",
+          geometry: {
+            type: "LineString",
+            coordinates: trackPoints.map((p) => [p.lng, p.lat]),
+          },
+          properties: {},
+        })
+      );
+      const url = `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/geojson(${geojson})/auto/400x200?access_token=${mapboxToken}&padding=20`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Mapbox Static Images: ${resp.status}`);
+      const buffer = await resp.arrayBuffer();
+      const data = Array.from(new Uint8Array(buffer));
+      const savedPath = await tauriCommands.saveGpxThumbnail(gpxId, data);
+      sessionDispatch({ type: "UPDATE_GPX_THUMBNAIL", id: gpxId, thumbnailPath: savedPath });
+    } catch (err) {
+      console.error("[fetchAndSaveGpxThumbnail]", err);
+    }
+  }, [sessionDispatch]);
+
+  const handleGpxDrop = useCallback(async (path: string) => {
+    try {
+      const result = await tauriCommands.importGpx(path);
+      const gpxFile: GpxFile = {
+        id: result.id,
+        filePath: result.filePath,
+        addedAt: result.addedAt,
+        trackPoints: result.trackPoints,
+        thumbnailPath: null,
+      };
+      sessionDispatch({ type: "ADD_GPX", gpxFile });
+
+      const mapboxToken = uiState.mapboxToken;
+      if (mapboxToken && result.trackPoints.length > 0) {
+        fetchAndSaveGpxThumbnail(result.id, result.trackPoints, mapboxToken);
+      }
+
+      const { matching, total } = countMatches(session.photos, result.trackPoints);
+      setPendingGpxImport({ gpxFile, matchCount: matching, totalCount: total });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setGpxImportError(msg);
+    }
+  }, [sessionDispatch, session.photos, uiState.mapboxToken, fetchAndSaveGpxThumbnail]);
+
+  const handleGpxDropRef = useRef(handleGpxDrop);
+  handleGpxDropRef.current = handleGpxDrop;
+
+  const handleFinderDrop = useCallback((paths: string[]) => {
+    const photoPaths: string[] = [];
+    const gpxPaths: string[] = [];
+    for (const path of paths) {
+      const ext = path.split(".").pop()?.toLowerCase() ?? "";
+      if (SUPPORTED_EXTENSIONS.has(ext)) photoPaths.push(path);
+      else if (GPX_EXTENSIONS.has(ext)) gpxPaths.push(path);
+    }
+    if (photoPaths.length > 0) {
+      tauriCommands.importPhotos(photoPaths).catch((err) => console.error("[finderDrop]", err));
+    }
+    for (const gpxPath of gpxPaths) {
+      handleGpxDropRef.current(gpxPath);
+    }
+  }, []);
+
+  const handleFinderDropRef = useRef(handleFinderDrop);
+  handleFinderDropRef.current = handleFinderDrop;
+
   // Restore session + load corpus + load settings on startup
   useEffect(() => {
     async function init() {
       try {
-        // Load session
         const result = await tauriCommands.loadSession();
         if (result.photos.length > 0) {
           const photos: Photo[] = result.photos.map((p) => ({
@@ -114,19 +200,31 @@ export function PhotoManager() {
           sessionDispatch({ type: "IMPORT_PHOTOS", photos });
         }
         if (result.canRollback) {
-          // Reflect canRollback state from loaded session
           sessionDispatch({
             type: "APPLY_COMPLETE",
             updatedPhotos: [],
             canRollback: result.canRollback,
           });
         }
+        if (result.gpxFiles.length > 0) {
+          for (const g of result.gpxFiles) {
+            sessionDispatch({
+              type: "ADD_GPX",
+              gpxFile: {
+                id: g.id,
+                filePath: g.filePath,
+                addedAt: g.addedAt,
+                trackPoints: g.trackPoints,
+                thumbnailPath: g.thumbnailPath,
+              },
+            });
+          }
+        }
       } catch (err) {
         console.error("[PhotoManager] loadSession failed:", err);
       }
 
       try {
-        // Load corpus
         const corpus = await tauriCommands.loadCorpus();
         corpusDispatch({ type: "LOAD_CORPUS", corpus });
       } catch (err) {
@@ -134,7 +232,6 @@ export function PhotoManager() {
       }
 
       try {
-        // Load API key settings
         const [mapboxToken, claudeApiKey] = await Promise.all([
           tauriCommands.getSetting("mapbox_token"),
           tauriCommands.getSetting("claude_api_key"),
@@ -182,68 +279,41 @@ export function PhotoManager() {
     };
   }, [sessionDispatch]);
 
-  // Detect Finder file drags using DOM events. dragDropEnabled is false in tauri.conf.json
-  // so wry's native handler does not intercept drops, allowing HTML5 drag-drop to work.
+  // Handle Finder file drags. dragDropEnabled: true means onDragDropEvent fires with real
+  // file paths. When a Finder drag enters, we unmount PhotoGrid and show the overlay —
+  // this avoids any pointer-events conflict between the overlay and tile drag handlers.
   useEffect(() => {
-    let isFileDrag = false;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
 
-    function onDragEnter(e: DragEvent) {
-      const types = Array.from(e.dataTransfer?.types ?? []);
-      if (types.includes("Files") || types.includes("public.file-url")) {
-        isFileDrag = true;
-        setShowDropOverlay(true);
-      }
+    async function setup() {
+      const webview = getCurrentWebview();
+      const fn = await webview.onDragDropEvent((event) => {
+        const { type } = event.payload;
+        if (type === "enter" && event.payload.paths.length > 0) {
+          setShowDropOverlay(true);
+        } else if (type === "drop" && event.payload.paths.length > 0) {
+          setShowDropOverlay(false);
+          handleFinderDropRef.current(event.payload.paths);
+        } else if (type === "leave") {
+          setShowDropOverlay(false);
+        }
+      });
+      if (cancelled) fn();
+      else unlisten = fn;
     }
 
-    function onDragLeave(e: DragEvent) {
-      // relatedTarget is null only when the drag leaves the window entirely
-      if (isFileDrag && e.relatedTarget === null) {
-        isFileDrag = false;
-        setShowDropOverlay(false);
-      }
-    }
-
-    function onDragOver(e: DragEvent) {
-      if (isFileDrag) e.preventDefault();
-    }
-
-    function onDrop(e: DragEvent) {
-      if (!isFileDrag) return;
-      e.preventDefault();
-      isFileDrag = false;
-      setShowDropOverlay(false);
-      const files = Array.from(e.dataTransfer?.files ?? []);
-      // WKWebView on macOS exposes File.path for native app file drops
-      const paths = files
-        .map((f) => (f as File & { path?: string }).path ?? "")
-        .filter((p) => {
-          const ext = p.split(".").pop()?.toLowerCase() ?? "";
-          return SUPPORTED_EXTENSIONS.has(ext) && p.length > 0;
-        });
-      if (paths.length > 0) {
-        tauriCommands
-          .importPhotos(paths)
-          .catch((err) => console.error("[finderDrop]", err));
-      }
-    }
-
-    document.addEventListener("dragenter", onDragEnter);
-    document.addEventListener("dragleave", onDragLeave);
-    document.addEventListener("dragover", onDragOver);
-    document.addEventListener("drop", onDrop);
-
+    setup().catch(console.error);
     return () => {
-      document.removeEventListener("dragenter", onDragEnter);
-      document.removeEventListener("dragleave", onDragLeave);
-      document.removeEventListener("dragover", onDragOver);
-      document.removeEventListener("drop", onDrop);
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 
   return (
     <div className={styles.photoManager}>
       <FloatingControls />
-      <PhotoGrid />
+      {!showDropOverlay && <PhotoGrid />}
       <DropImportOverlay isVisible={showDropOverlay} />
       <ImportModal
         isOpen={importState.isOpen}
@@ -254,6 +324,41 @@ export function PhotoManager() {
         errors={importState.errors}
         onDismiss={handleDismiss}
       />
+      {pendingGpxImport && (
+        <ConfirmDialog
+          title={pendingGpxImport.matchCount === 0 ? "GPX Imported" : "Auto-Tag Locations from GPX?"}
+          message={
+            pendingGpxImport.matchCount === 0
+              ? "GPX file imported successfully. No photos have timestamps that fall within this track's time range."
+              : `${pendingGpxImport.matchCount} photo${pendingGpxImport.matchCount === 1 ? "" : "s"} have timestamps that overlap with this GPX track. Auto-tag their locations now?`
+          }
+          confirmLabel="Yes"
+          cancelLabel="No"
+          infoOnly={pendingGpxImport.matchCount === 0}
+          onConfirm={() => {
+            applyGpxAutoTag(
+              session.photos,
+              pendingGpxImport.gpxFile.trackPoints,
+              sessionDispatch
+            );
+            sessionDispatch({ type: "SELECT_GPX", id: pendingGpxImport.gpxFile.id });
+            setPendingGpxImport(null);
+          }}
+          onCancel={() => {
+            sessionDispatch({ type: "SELECT_GPX", id: pendingGpxImport.gpxFile.id });
+            setPendingGpxImport(null);
+          }}
+        />
+      )}
+      {gpxImportError && (
+        <ConfirmDialog
+          title="GPX Import Failed"
+          message={gpxImportError}
+          infoOnly
+          onConfirm={() => {}}
+          onCancel={() => setGpxImportError(null)}
+        />
+      )}
     </div>
   );
 }

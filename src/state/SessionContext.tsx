@@ -28,7 +28,7 @@ export interface GpxFile {
   id: string;
   filePath: string;
   addedAt: number;
-  trackPoints: Array<{ lat: number; lng: number; timestamp: string }>;
+  trackPoints: Array<{ lat: number; lng: number; timestamp: number }>;
   thumbnailPath: string | null;
 }
 
@@ -36,6 +36,7 @@ export interface SessionState {
   photos: Photo[];
   selectedIds: Set<string>;
   gpxFiles: GpxFile[];
+  selectedGpxId: string | null;
   applyInProgress: boolean;
   canRollback: boolean;
 }
@@ -49,6 +50,7 @@ type SessionAction =
   | { type: "SELECT_RANGE"; fromId: string; toId: string; orderedIds: string[] }
   | { type: "SELECT_ALL" }
   | { type: "DESELECT_ALL" }
+  | { type: "SELECT_GPX"; id: string }
   | { type: "SET_PENDING"; ids: string[]; changes: Partial<Metadata> }
   | { type: "CLEAR_PENDING"; ids: string[] }
   | { type: "APPLY_START" }
@@ -59,6 +61,7 @@ type SessionAction =
   | { type: "MARK_MISSING"; ids: string[] }
   | { type: "ADD_GPX"; gpxFile: GpxFile }
   | { type: "REMOVE_GPX"; id: string }
+  | { type: "UPDATE_GPX_THUMBNAIL"; id: string; thumbnailPath: string }
   | { type: "REORDER_PHOTOS"; orderedIds: string[] }
   | { type: "CLEAR_SESSION" };
 
@@ -80,6 +83,7 @@ export const initialState: SessionState = {
   photos: [],
   selectedIds: new Set(),
   gpxFiles: [],
+  selectedGpxId: null,
   applyInProgress: false,
   canRollback: false,
 };
@@ -112,17 +116,17 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           for (let i = lo; i <= hi; i++) ids.add(photoIds[i]);
         }
       }
-      return { ...state, selectedIds: ids };
+      return { ...state, selectedIds: ids, selectedGpxId: null };
     }
 
     case "SELECT_SINGLE":
-      return { ...state, selectedIds: new Set([action.id]) };
+      return { ...state, selectedIds: new Set([action.id]), selectedGpxId: null };
 
     case "TOGGLE_SELECT": {
       const ids = new Set(state.selectedIds);
       if (ids.has(action.id)) ids.delete(action.id);
       else ids.add(action.id);
-      return { ...state, selectedIds: ids };
+      return { ...state, selectedIds: ids, selectedGpxId: null };
     }
 
     case "SELECT_RANGE": {
@@ -133,14 +137,21 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       const [lo, hi] = [Math.min(fromIdx, toIdx), Math.max(fromIdx, toIdx)];
       const ids = new Set(state.selectedIds);
       for (let i = lo; i <= hi; i++) ids.add(orderedIds[i]);
-      return { ...state, selectedIds: ids };
+      return { ...state, selectedIds: ids, selectedGpxId: null };
     }
 
     case "SELECT_ALL":
-      return { ...state, selectedIds: new Set(state.photos.map((p) => p.id)) };
+      return { ...state, selectedIds: new Set(state.photos.map((p) => p.id)), selectedGpxId: null };
 
     case "DESELECT_ALL":
       return { ...state, selectedIds: new Set() };
+
+    case "SELECT_GPX":
+      return {
+        ...state,
+        selectedGpxId: state.selectedGpxId === action.id ? null : action.id,
+        selectedIds: new Set(),
+      };
 
     case "SET_PENDING": {
       const updated = state.photos.map((p) => {
@@ -206,11 +217,25 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       return { ...state, photos: updated };
     }
 
-    case "ADD_GPX":
+    case "ADD_GPX": {
+      if (state.gpxFiles.some((g) => g.id === action.gpxFile.id)) return state;
       return { ...state, gpxFiles: [...state.gpxFiles, action.gpxFile] };
+    }
 
     case "REMOVE_GPX":
-      return { ...state, gpxFiles: state.gpxFiles.filter((g) => g.id !== action.id) };
+      return {
+        ...state,
+        gpxFiles: state.gpxFiles.filter((g) => g.id !== action.id),
+        selectedGpxId: state.selectedGpxId === action.id ? null : state.selectedGpxId,
+      };
+
+    case "UPDATE_GPX_THUMBNAIL":
+      return {
+        ...state,
+        gpxFiles: state.gpxFiles.map((g) =>
+          g.id === action.id ? { ...g, thumbnailPath: action.thumbnailPath } : g
+        ),
+      };
 
     case "REORDER_PHOTOS": {
       const byId = new Map(state.photos.map((p) => [p.id, p]));

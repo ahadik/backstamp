@@ -323,11 +323,18 @@ fn insert_photo(
         .unwrap_or_default()
         .as_millis() as i64;
 
-    conn.execute(
+    let rows_inserted = conn.execute(
         "INSERT OR IGNORE INTO photos (id, file_path, file_hash, added_at) VALUES (?1, ?2, ?3, ?4)",
         params![id, file_path, file_hash, now],
     )
     .map_err(|e| format!("insert photo: {}", e))?;
+
+    // If the photo was already in the database (INSERT was ignored due to a duplicate
+    // file_path), skip all metadata inserts — they reference `id` which was never stored,
+    // and would trigger a foreign-key constraint failure.
+    if rows_inserted == 0 {
+        return Ok(());
+    }
 
     let fields: Vec<(&str, Option<String>)> = vec![
         ("capture_date", metadata.capture_date.clone()),
@@ -725,5 +732,77 @@ mod tests {
         let kws = extract_keywords(&json);
         assert!(kws.contains(&"cats".to_string()));
         assert!(kws.contains(&"dogs".to_string()));
+    }
+
+    // ── insert_photo duplicate-path guard ────────────────────────────────────
+    // Reproduces the FK constraint failure that occurred when INSERT OR IGNORE
+    // silently skipped a photo row that already existed (e.g. same file dropped
+    // twice), while the metadata INSERT still used the fresh UUID that was never
+    // stored, violating the FK on metadata_original.photo_id → photos.id.
+
+    fn make_db() -> Arc<Mutex<rusqlite::Connection>> {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::session::apply_schema(&conn).unwrap();
+        // Enable FK enforcement so the bug is detectable in tests even if the
+        // production connection happens to have it off.
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    fn empty_meta() -> Metadata {
+        Metadata {
+            capture_date: None,
+            capture_time: None,
+            utc_offset: None,
+            timezone: None,
+            gps_lat: None,
+            gps_lng: None,
+            camera_body: None,
+            lens: None,
+            film_vendor: None,
+            film_type: None,
+        }
+    }
+
+    #[test]
+    fn insert_photo_succeeds_for_new_photo() {
+        let db = make_db();
+        let result = insert_photo(&db, "id-1", "/photos/a.jpg", None, &empty_meta(), &[]);
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+    }
+
+    #[test]
+    fn insert_photo_duplicate_path_does_not_error() {
+        let db = make_db();
+        // First insert — must succeed
+        insert_photo(&db, "id-1", "/photos/a.jpg", None, &empty_meta(), &[]).unwrap();
+        // Second insert with same path but a fresh UUID — previously caused a FK
+        // violation because the photo row was ignored while metadata rows referenced
+        // the new id that was never inserted.
+        let result = insert_photo(&db, "id-2", "/photos/a.jpg", None, &empty_meta(), &[]);
+        assert!(result.is_ok(), "duplicate path must be silently skipped, got {:?}", result);
+    }
+
+    #[test]
+    fn insert_photo_with_metadata_duplicate_path_does_not_error() {
+        let db = make_db();
+        let meta = Metadata {
+            capture_date: Some("2024-03-15".to_string()),
+            capture_time: Some("14:30:00".to_string()),
+            utc_offset: Some("+09:00".to_string()),
+            ..empty_meta()
+        };
+        insert_photo(&db, "id-1", "/photos/b.jpg", None, &meta, &[]).unwrap();
+        // Same path, same metadata, different id — must not fail with FK error
+        let result = insert_photo(&db, "id-2", "/photos/b.jpg", None, &meta, &[]);
+        assert!(result.is_ok(), "duplicate with metadata must be silently skipped, got {:?}", result);
+    }
+
+    #[test]
+    fn insert_photo_different_paths_both_succeed() {
+        let db = make_db();
+        insert_photo(&db, "id-1", "/photos/a.jpg", None, &empty_meta(), &[]).unwrap();
+        let result = insert_photo(&db, "id-2", "/photos/b.jpg", None, &empty_meta(), &[]);
+        assert!(result.is_ok());
     }
 }

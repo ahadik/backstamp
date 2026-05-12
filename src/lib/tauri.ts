@@ -2,6 +2,20 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Metadata, GpxFile } from "../state/SessionContext";
 import type { CorpusState } from "../state/CorpusContext";
 
+export interface TrackPoint {
+  lat: number;
+  lng: number;
+  timestamp: number; // Unix epoch seconds (UTC)
+}
+
+export interface GpxImportResult {
+  id: string;
+  filePath: string;
+  addedAt: number;
+  trackPoints: TrackPoint[];
+  thumbnailPath: string | null;
+}
+
 export interface PhotoApplyChanges {
   captureDate?: string | null;
   captureTime?: string | null;
@@ -94,4 +108,11 @@ export const tauriCommands = {
 
   showPhotoContextMenu: (filePath: string, fileMissing: boolean) =>
     invoke<void>("show_photo_context_menu", { filePath, fileMissing }),
+
+  importGpx: (path: string) => invoke<GpxImportResult>("import_gpx", { path }),
+
+  removeGpx: (id: string) => invoke<void>("remove_gpx", { id }),
+
+  saveGpxThumbnail: (id: string, data: number[]) =>
+    invoke<string>("save_gpx_thumbnail", { id, data }),
 };

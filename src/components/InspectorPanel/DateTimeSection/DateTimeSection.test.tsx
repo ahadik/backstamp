@@ -22,7 +22,7 @@ const baseMetadata: Metadata = {
 };
 
 const emptySessionState: SessionState = {
-  photos: [], selectedIds: new Set(), gpxFiles: [],
+  photos: [], selectedIds: new Set(), gpxFiles: [], selectedGpxId: null,
   applyInProgress: false, canRollback: false,
 };
 

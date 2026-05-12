@@ -24,41 +24,68 @@ function makeDayBlock(dateKey: string, photoIds: string[]): DayBlock {
   return { dateKey, label: dateKey, photos: photoIds.map(makePhoto) };
 }
 
-function mockDrag(opts: {
+function reactMouseEvent(opts: {
+  button?: number;
   clientX?: number;
-  relatedTarget?: Node | null;
-  dataIds?: string;
-  rectLeft?: number;
-  rectWidth?: number;
-  containsRelated?: boolean;
+  clientY?: number;
+  shiftKey?: boolean;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
 } = {}) {
-  const {
-    clientX = 50,
-    relatedTarget = null,
-    dataIds = "",
-    rectLeft = 0,
-    rectWidth = 100,
-    containsRelated = false,
-  } = opts;
-
   return {
-    clientX,
-    relatedTarget,
-    currentTarget: {
-      getBoundingClientRect: () => ({ left: rectLeft, width: rectWidth }),
-      contains: (_n: unknown) => containsRelated,
-    },
+    button: opts.button ?? 0,
+    clientX: opts.clientX ?? 50,
+    clientY: opts.clientY ?? 50,
+    shiftKey: opts.shiftKey ?? false,
+    metaKey: opts.metaKey ?? false,
+    ctrlKey: opts.ctrlKey ?? false,
     preventDefault: vi.fn(),
-    stopPropagation: vi.fn(),
-    dataTransfer: {
-      effectAllowed: "move",
-      dropEffect: "move",
-      getData: vi.fn().mockReturnValue(dataIds),
-      setData: vi.fn(),
-    },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
+
+function domMouseEvent(type: string, opts: { clientX?: number; clientY?: number } = {}) {
+  return new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: opts.clientX ?? 50,
+    clientY: opts.clientY ?? 50,
+  });
+}
+
+// Create a fake tile element for elementFromPoint mocking
+function makeTileEl(photoId: string, relX = 0.5): HTMLElement {
+  const el = document.createElement("div");
+  el.dataset.photoId = photoId;
+  const width = 100;
+  const left = 0;
+  el.getBoundingClientRect = () => ({
+    left,
+    width,
+    top: 0,
+    height: 100,
+    right: left + width,
+    bottom: 100,
+    x: left,
+    y: 0,
+    toJSON: () => ({}),
+  });
+  // clientX that hits this element at the given relX
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (el as any)._hitX = left + relX * width;
+  return el;
+}
+
+// jsdom doesn't implement elementFromPoint — define it so vi.spyOn can mock it.
+beforeAll(() => {
+  if (!document.elementFromPoint) {
+    Object.defineProperty(document, "elementFromPoint", {
+      value: () => null,
+      configurable: true,
+      writable: true,
+    });
+  }
+});
 
 const THREE_IDS = ["p1", "p2", "p3"];
 const DEFAULT_BLOCKS = [makeDayBlock("2024-03-15", THREE_IDS)];
@@ -78,8 +105,38 @@ function setup(overrides: {
     onSelectSingle,
     ...overrides,
   };
-  const { result } = renderHook(() => useDragDrop(params));
-  return { result, onDrop, onSelectSingle };
+  const { result, unmount } = renderHook(() => useDragDrop(params));
+  return { result, onDrop, onSelectSingle, unmount };
+}
+
+// Helper: simulate a full drag from mousedown → mousemove (start) → mousemove → mouseup
+function simulateDrag(opts: {
+  sourceId: string;
+  targetEl: HTMLElement;
+  startX?: number;
+  startY?: number;
+  endX?: number;
+  endY?: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  result: any;
+}) {
+  const { sourceId, targetEl, result, startX = 10, startY = 10, endX = 50, endY = 50 } = opts;
+
+  vi.spyOn(document, "elementFromPoint").mockReturnValue(targetEl);
+  // querySelector returns null — ghost creation is skipped in jsdom, drag state still updates
+  vi.spyOn(document, "querySelector").mockReturnValue(null);
+
+  act(() => {
+    result.current.dragHandlers(sourceId).onMouseDown(reactMouseEvent({ clientX: startX, clientY: startY }));
+  });
+  // Move beyond 5px threshold to start drag
+  act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: startX + 10, clientY: startY + 10 })); });
+  // Move to target
+  act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: endX, clientY: endY })); });
+  // Release
+  act(() => { document.dispatchEvent(domMouseEvent("mouseup", { clientX: endX, clientY: endY })); });
+
+  vi.restoreAllMocks();
 }
 
 // ─── initial state ────────────────────────────────────────────────────────────
@@ -95,155 +152,104 @@ describe("useDragDrop — initial state", () => {
   });
 });
 
-// ─── dragHandlers ─────────────────────────────────────────────────────────────
+// ─── onMouseDown ──────────────────────────────────────────────────────────────
 
-describe("useDragDrop — dragHandlers.onDragStart", () => {
-  it("uses all selected IDs when the dragged photo is selected", () => {
+describe("useDragDrop — dragHandlers.onMouseDown", () => {
+  it("ignores non-primary button clicks", () => {
+    const { result } = setup();
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ button: 2 })));
+    // No drag pending — no state change, no move needed
+    act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 100, clientY: 100 })); });
+    expect(result.current.dragState.draggingIds).toHaveLength(0);
+  });
+
+  it("ignores shift+click (reserved for range selection)", () => {
+    const { result } = setup();
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ shiftKey: true })));
+    act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 100, clientY: 100 })); });
+    expect(result.current.dragState.draggingIds).toHaveLength(0);
+  });
+
+  it("ignores cmd+click (reserved for toggle selection)", () => {
+    const { result } = setup();
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ metaKey: true })));
+    act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 100, clientY: 100 })); });
+    expect(result.current.dragState.draggingIds).toHaveLength(0);
+  });
+
+  it("prevents default to suppress text selection during drag", () => {
+    const { result } = setup();
+    const e = reactMouseEvent();
+    act(() => result.current.dragHandlers("p1").onMouseDown(e));
+    expect(e.preventDefault).toHaveBeenCalled();
+  });
+});
+
+// ─── drag threshold ───────────────────────────────────────────────────────────
+
+describe("useDragDrop — drag threshold", () => {
+  it("does not start drag until mouse moves more than 5px", () => {
+    const { result } = setup();
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ clientX: 10, clientY: 10 })));
+    // Move only 3px — below threshold
+    act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 13, clientY: 10 })); });
+    expect(result.current.dragState.draggingIds).toHaveLength(0);
+  });
+
+  it("starts drag once mouse moves more than 5px", () => {
+    vi.spyOn(document, "querySelector").mockReturnValue(null);
+    const { result } = setup();
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ clientX: 10, clientY: 10 })));
+    act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 20, clientY: 10 })); });
+    expect(result.current.dragState.draggingIds).toContain("p1");
+    vi.restoreAllMocks();
+  });
+
+  it("uses all selected IDs when dragged photo is selected", () => {
+    vi.spyOn(document, "querySelector").mockReturnValue(null);
     const { result } = setup({ selectedIds: new Set(["p1", "p2"]) });
-    act(() => result.current.dragHandlers("p1").onDragStart(mockDrag()));
-    expect(result.current.dragState.draggingIds).toHaveLength(2);
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ clientX: 0, clientY: 0 })));
+    act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 20, clientY: 0 })); });
     expect(result.current.dragState.draggingIds).toContain("p1");
     expect(result.current.dragState.draggingIds).toContain("p2");
+    vi.restoreAllMocks();
   });
 
-  it("uses only the clicked photo when it is not selected", () => {
-    const { result, onSelectSingle } = setup({ selectedIds: new Set(["p2"]) });
-    act(() => result.current.dragHandlers("p1").onDragStart(mockDrag()));
+  it("uses only the dragged photo when it is not in the selection", () => {
+    vi.spyOn(document, "querySelector").mockReturnValue(null);
+    const { result } = setup({ selectedIds: new Set(["p2"]) });
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ clientX: 0, clientY: 0 })));
+    act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 20, clientY: 0 })); });
     expect(result.current.dragState.draggingIds).toEqual(["p1"]);
-    expect(onSelectSingle).toHaveBeenCalledWith("p1");
-  });
-
-  it("does not call onSelectSingle when the photo is already selected", () => {
-    const { result, onSelectSingle } = setup({ selectedIds: new Set(["p1"]) });
-    act(() => result.current.dragHandlers("p1").onDragStart(mockDrag()));
-    expect(onSelectSingle).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 });
 
-describe("useDragDrop — dragHandlers.onDragEnd", () => {
-  it("resets all drag state", () => {
-    const { result } = setup({ selectedIds: new Set(["p1"]) });
-    act(() => result.current.dragHandlers("p1").onDragStart(mockDrag()));
-    act(() => result.current.dragHandlers("p1").onDragEnd());
-    expect(result.current.dragState).toEqual({
-      draggingIds: [],
-      overTileId: null,
-      overZone: null,
-    });
-  });
-});
+// ─── drop target construction ─────────────────────────────────────────────────
 
-// ─── tileDropProps.onDragOver — zone detection ───────────────────────────────
-
-describe("useDragDrop — onDragOver zone detection", () => {
-  it("classifies the left 20% as gap-before", () => {
-    const { result } = setup();
-    // relX = 10/100 = 0.10 < 0.2
-    act(() => result.current.tileDropProps("p2").onDragOver(mockDrag({ clientX: 10, rectWidth: 100 })));
-    expect(result.current.dragState.overZone).toBe("gap-before");
-    expect(result.current.dragState.overTileId).toBe("p2");
-  });
-
-  it("classifies the center as on-photo", () => {
-    const { result } = setup();
-    // relX = 50/100 = 0.5
-    act(() => result.current.tileDropProps("p2").onDragOver(mockDrag({ clientX: 50, rectWidth: 100 })));
-    expect(result.current.dragState.overZone).toBe("on-photo");
-  });
-
-  it("classifies the right 20% as gap-after", () => {
-    const { result } = setup();
-    // relX = 90/100 = 0.90 > 0.8
-    act(() => result.current.tileDropProps("p2").onDragOver(mockDrag({ clientX: 90, rectWidth: 100 })));
-    expect(result.current.dragState.overZone).toBe("gap-after");
-  });
-
-  it("boundary: relX exactly 0.2 is on-photo", () => {
-    const { result } = setup();
-    act(() => result.current.tileDropProps("p2").onDragOver(mockDrag({ clientX: 20, rectWidth: 100 })));
-    expect(result.current.dragState.overZone).toBe("on-photo");
-  });
-
-  it("boundary: relX exactly 0.8 is on-photo", () => {
-    const { result } = setup();
-    act(() => result.current.tileDropProps("p2").onDragOver(mockDrag({ clientX: 80, rectWidth: 100 })));
-    expect(result.current.dragState.overZone).toBe("on-photo");
-  });
-});
-
-// ─── tileDropProps.onDragLeave ────────────────────────────────────────────────
-
-describe("useDragDrop — onDragLeave", () => {
-  it("clears overTileId when relatedTarget is outside the tile", () => {
-    const { result } = setup();
-    act(() => result.current.tileDropProps("p2").onDragOver(mockDrag({ clientX: 50 })));
-    act(() => result.current.tileDropProps("p2").onDragLeave(
-      mockDrag({ relatedTarget: null, containsRelated: false })
-    ));
-    expect(result.current.dragState.overTileId).toBeNull();
-    expect(result.current.dragState.overZone).toBeNull();
-  });
-
-  it("keeps overTileId when relatedTarget is a child inside the tile", () => {
-    const { result } = setup();
-    act(() => result.current.tileDropProps("p2").onDragOver(mockDrag({ clientX: 50 })));
-    const childNode = {} as Node;
-    act(() => result.current.tileDropProps("p2").onDragLeave(
-      mockDrag({ relatedTarget: childNode, containsRelated: true })
-    ));
-    expect(result.current.dragState.overTileId).toBe("p2");
-  });
-});
-
-// ─── tileDropProps.onDrop — Finder guard ─────────────────────────────────────
-
-describe("useDragDrop — onDrop Finder guard", () => {
-  it("does not call onDrop when there are no in-app IDs (Finder file drag)", () => {
+describe("useDragDrop — drop target construction", () => {
+  it("produces { kind: 'photo' } when dropping on the center of a tile", () => {
     const { result, onDrop } = setup();
-    // Empty getData return + empty ref = Finder drop
-    act(() => result.current.tileDropProps("p2").onDrop(mockDrag({ clientX: 50, dataIds: "" })));
-    expect(onDrop).not.toHaveBeenCalled();
+    const targetEl = makeTileEl("p2", 0.5);
+    simulateDrag({ sourceId: "p1", targetEl, result });
+    expect(onDrop).toHaveBeenCalledWith(["p1"], { kind: "photo", photoId: "p2" });
   });
 
-  it("does not prevent event propagation for Finder drops (so document handler fires)", () => {
-    const { result } = setup();
-    const e = mockDrag({ clientX: 50, dataIds: "" });
-    act(() => result.current.tileDropProps("p2").onDrop(e));
-    expect(e.preventDefault).not.toHaveBeenCalled();
-    expect(e.stopPropagation).not.toHaveBeenCalled();
-  });
-});
-
-// ─── tileDropProps.onDrop — target construction ──────────────────────────────
-
-describe("useDragDrop — onDrop target construction", () => {
-  it("produces { kind: 'photo' } when dropping on center", () => {
+  it("produces gap-before when dropping on the left 20% of a tile", () => {
     const { result, onDrop } = setup();
-    act(() => result.current.tileDropProps("p2").onDrop(
-      mockDrag({ clientX: 50, dataIds: "x" })
-    ));
-    expect(onDrop).toHaveBeenCalledWith(["x"], { kind: "photo", photoId: "p2" });
-  });
-
-  it("produces gap-before with correct neighbors for a middle photo", () => {
-    const { result, onDrop } = setup();
-    // p2 is at index 1 → gap-before: { beforeId: "p1", afterId: "p2" }
-    act(() => result.current.tileDropProps("p2").onDrop(
-      mockDrag({ clientX: 5, dataIds: "x" })
-    ));
-    expect(onDrop).toHaveBeenCalledWith(["x"], {
+    const targetEl = makeTileEl("p2", 0.1); // relX = 0.1 < 0.2
+    simulateDrag({ sourceId: "p1", targetEl, result, endX: 10, endY: 50 });
+    expect(onDrop).toHaveBeenCalledWith(["p1"], {
       kind: "gap",
       gap: { beforeId: "p1", afterId: "p2", dayKey: "2024-03-15" },
     });
   });
 
-  it("produces gap-after with correct neighbors for a middle photo", () => {
+  it("produces gap-after when dropping on the right 20% of a tile", () => {
     const { result, onDrop } = setup();
-    // p2 is at index 1 → gap-after: { beforeId: "p2", afterId: "p3" }
-    act(() => result.current.tileDropProps("p2").onDrop(
-      mockDrag({ clientX: 95, dataIds: "x" })
-    ));
-    expect(onDrop).toHaveBeenCalledWith(["x"], {
+    const targetEl = makeTileEl("p2", 0.9); // relX = 0.9 > 0.8
+    simulateDrag({ sourceId: "p1", targetEl, result, endX: 90, endY: 50 });
+    expect(onDrop).toHaveBeenCalledWith(["p1"], {
       kind: "gap",
       gap: { beforeId: "p2", afterId: "p3", dayKey: "2024-03-15" },
     });
@@ -251,10 +257,9 @@ describe("useDragDrop — onDrop target construction", () => {
 
   it("gap-before on the first photo has beforeId: null", () => {
     const { result, onDrop } = setup();
-    act(() => result.current.tileDropProps("p1").onDrop(
-      mockDrag({ clientX: 5, dataIds: "x" })
-    ));
-    expect(onDrop).toHaveBeenCalledWith(["x"], {
+    const targetEl = makeTileEl("p1", 0.1);
+    simulateDrag({ sourceId: "p2", targetEl, result, endX: 10, endY: 50 });
+    expect(onDrop).toHaveBeenCalledWith(["p2"], {
       kind: "gap",
       gap: { beforeId: null, afterId: "p1", dayKey: "2024-03-15" },
     });
@@ -262,36 +267,67 @@ describe("useDragDrop — onDrop target construction", () => {
 
   it("gap-after on the last photo has afterId: null", () => {
     const { result, onDrop } = setup();
-    act(() => result.current.tileDropProps("p3").onDrop(
-      mockDrag({ clientX: 95, dataIds: "x" })
-    ));
-    expect(onDrop).toHaveBeenCalledWith(["x"], {
+    const targetEl = makeTileEl("p3", 0.9);
+    simulateDrag({ sourceId: "p1", targetEl, result, endX: 90, endY: 50 });
+    expect(onDrop).toHaveBeenCalledWith(["p1"], {
       kind: "gap",
       gap: { beforeId: "p3", afterId: null, dayKey: "2024-03-15" },
     });
   });
 
-  it("parses multiple comma-separated IDs from dataTransfer", () => {
+  it("does not call onDrop when dropping a single photo onto itself", () => {
     const { result, onDrop } = setup();
-    act(() => result.current.tileDropProps("p2").onDrop(
-      mockDrag({ clientX: 50, dataIds: "p1,p2,p3" })
-    ));
-    expect(onDrop).toHaveBeenCalledWith(
-      ["p1", "p2", "p3"],
-      expect.objectContaining({ kind: "photo" }),
-    );
+    const targetEl = makeTileEl("p1", 0.5); // same photo as source
+    simulateDrag({ sourceId: "p1", targetEl, result });
+    expect(onDrop).not.toHaveBeenCalled();
   });
 
-  it("clears drag state after a successful drop", () => {
+  it("does not call onDrop when released over empty space (no tile found)", () => {
+    const { result, onDrop } = setup();
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(null);
+    vi.spyOn(document, "querySelector").mockReturnValue(null);
+
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ clientX: 10, clientY: 10 })));
+    act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 25, clientY: 10 })); });
+    act(() => { document.dispatchEvent(domMouseEvent("mouseup", { clientX: 25, clientY: 10 })); });
+
+    expect(onDrop).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("resets drag state after a successful drop", () => {
     const { result } = setup();
-    act(() => result.current.tileDropProps("p2").onDrop(
-      mockDrag({ clientX: 50, dataIds: "x" })
-    ));
+    const targetEl = makeTileEl("p2", 0.5);
+    simulateDrag({ sourceId: "p1", targetEl, result });
     expect(result.current.dragState).toEqual({
       draggingIds: [],
       overTileId: null,
       overZone: null,
     });
+  });
+});
+
+// ─── dragCompletedRef ─────────────────────────────────────────────────────────
+
+describe("useDragDrop — dragCompletedRef", () => {
+  it("is set to true after a drag completes", () => {
+    const { result } = setup();
+    vi.spyOn(document, "querySelector").mockReturnValue(null);
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(null);
+
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ clientX: 0, clientY: 0 })));
+    act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 20, clientY: 0 })); });
+    act(() => { document.dispatchEvent(domMouseEvent("mouseup", { clientX: 20, clientY: 0 })); });
+
+    expect(result.current.dragCompletedRef.current).toBe(true);
+    vi.restoreAllMocks();
+  });
+
+  it("is not set when the mouse is released before the drag threshold", () => {
+    const { result } = setup();
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ clientX: 0, clientY: 0 })));
+    act(() => { document.dispatchEvent(domMouseEvent("mouseup", { clientX: 2, clientY: 0 })); });
+    expect(result.current.dragCompletedRef.current).toBe(false);
   });
 });
 
@@ -307,11 +343,10 @@ describe("useDragDrop — day key in gap target", () => {
       orderedIds: ["a", "b", "c", "d"],
       dayBlocks: blocks,
     });
-    act(() => result.current.tileDropProps("c").onDrop(
-      mockDrag({ clientX: 5, dataIds: "x" })
-    ));
+    const targetEl = makeTileEl("c", 0.1);
+    simulateDrag({ sourceId: "a", targetEl, result, endX: 10 });
     expect(onDrop).toHaveBeenCalledWith(
-      ["x"],
+      ["a"],
       expect.objectContaining({
         kind: "gap",
         gap: expect.objectContaining({ dayKey: "2024-02-01" }),
@@ -325,11 +360,10 @@ describe("useDragDrop — day key in gap target", () => {
       orderedIds: ["a", "orphan"],
       dayBlocks: blocks,
     });
-    act(() => result.current.tileDropProps("orphan").onDrop(
-      mockDrag({ clientX: 5, dataIds: "x" })
-    ));
+    const targetEl = makeTileEl("orphan", 0.1);
+    simulateDrag({ sourceId: "a", targetEl, result, endX: 10 });
     expect(onDrop).toHaveBeenCalledWith(
-      ["x"],
+      ["a"],
       expect.objectContaining({
         gap: expect.objectContaining({ dayKey: "no-date" }),
       }),

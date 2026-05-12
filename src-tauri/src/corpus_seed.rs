@@ -197,7 +197,129 @@ const FILM_TYPES: &[(&str, &str)] = &[
     ("Svema", "Foto 400"),
 ];
 
+// ── Camera data ───────────────────────────────────────────────────────────────
+
+const CAMERA_MAKES: &[&str] = &[
+    "Canon", "Fujifilm", "Hasselblad", "Leica", "Nikon",
+    "Olympus", "OM System", "Sony",
+];
+
+/// (make, model)
+const CAMERA_MODELS: &[(&str, &str)] = &[
+    // Canon — digital mirrorless
+    ("Canon", "EOS R5"),
+    ("Canon", "EOS R5 Mark II"),
+    ("Canon", "EOS R6 Mark II"),
+    ("Canon", "EOS R8"),
+    ("Canon", "EOS R50"),
+    // Canon — film SLR
+    ("Canon", "A-1"),
+    ("Canon", "AE-1"),
+    ("Canon", "AE-1 Program"),
+    ("Canon", "F-1"),
+    ("Canon", "New F-1"),
+
+    // Fujifilm — digital X-series
+    ("Fujifilm", "X-T5"),
+    ("Fujifilm", "X-T4"),
+    ("Fujifilm", "X100VI"),
+    ("Fujifilm", "X100V"),
+    ("Fujifilm", "X-Pro3"),
+    ("Fujifilm", "X-S20"),
+    // Fujifilm — digital GFX medium format
+    ("Fujifilm", "GFX 100S"),
+    ("Fujifilm", "GFX 100S II"),
+    ("Fujifilm", "GFX 50S II"),
+
+    // Hasselblad
+    ("Hasselblad", "X2D 100C"),
+    ("Hasselblad", "907X 50C"),
+
+    // Leica — digital
+    ("Leica", "M11"),
+    ("Leica", "M11-P"),
+    ("Leica", "Q3"),
+    // Leica — film
+    ("Leica", "M6"),
+    ("Leica", "M7"),
+    ("Leica", "M-A"),
+
+    // Nikon — digital mirrorless
+    ("Nikon", "Z6 III"),
+    ("Nikon", "Z8"),
+    ("Nikon", "Z9"),
+    ("Nikon", "Z50 II"),
+    ("Nikon", "Zf"),
+    ("Nikon", "Zfc"),
+    // Nikon — film SLR
+    ("Nikon", "F3"),
+    ("Nikon", "F100"),
+    ("Nikon", "FM2"),
+    ("Nikon", "FM2n"),
+    ("Nikon", "FE2"),
+    ("Nikon", "FA"),
+
+    // Olympus / OM System
+    ("Olympus", "OM-1"),
+    ("Olympus", "OM-10"),
+    ("OM System", "OM-1 Mark II"),
+    ("OM System", "OM-5"),
+
+    // Sony
+    ("Sony", "A7R V"),
+    ("Sony", "A7 IV"),
+    ("Sony", "A7C II"),
+    ("Sony", "A7C R"),
+    ("Sony", "ZV-E10 II"),
+];
+
+const LENSES: &[&str] = &[
+    // Canon RF
+    "Canon RF 50mm f/1.8 STM",
+    "Canon RF 35mm f/1.8 Macro IS STM",
+    "Canon RF 85mm f/2 Macro IS STM",
+    // Nikon Z
+    "Nikon Z 50mm f/1.8 S",
+    "Nikon Z 35mm f/1.8 S",
+    // Sony FE
+    "Sony FE 50mm f/1.8",
+    "Sony FE 35mm f/1.8",
+    // Fujifilm XF
+    "Fujifilm XF 35mm f/1.4 R",
+    "Fujifilm XF 23mm f/2 R WR",
+    "Fujifilm XF 18-55mm f/2.8-4 R LM OIS",
+    // Leica M
+    "Leica Summicron-M 35mm f/2 ASPH",
+    "Leica Summicron-M 50mm f/2",
+    "Voigtländer Nokton 35mm f/1.4",
+];
+
 // ── Public API ────────────────────────────────────────────────────────────────
+
+pub fn seed_camera_corpus(conn: &Connection) -> rusqlite::Result<()> {
+    for make in CAMERA_MAKES {
+        conn.execute(
+            "INSERT OR IGNORE INTO corpus (category, value, is_builtin, use_count)
+             VALUES ('camera_make', ?1, 1, 0)",
+            params![make],
+        )?;
+    }
+    for (make, model) in CAMERA_MODELS {
+        conn.execute(
+            "INSERT OR IGNORE INTO corpus (category, value, is_builtin, use_count, vendor)
+             VALUES ('camera_model', ?1, 1, 0, ?2)",
+            params![model, make],
+        )?;
+    }
+    for lens in LENSES {
+        conn.execute(
+            "INSERT OR IGNORE INTO corpus (category, value, is_builtin, use_count)
+             VALUES ('lens', ?1, 1, 0)",
+            params![lens],
+        )?;
+    }
+    Ok(())
+}
 
 pub fn seed_film_corpus(conn: &Connection) -> rusqlite::Result<()> {
     for vendor in FILM_VENDORS {
@@ -317,6 +439,96 @@ mod tests {
             )
             .unwrap();
         assert_eq!(vendor_count as usize, FILM_VENDORS.len());
+    }
+
+    #[test]
+    fn seeds_all_camera_makes() {
+        let conn = in_memory_db();
+        seed_camera_corpus(&conn).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM corpus WHERE category = 'camera_make'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count as usize, CAMERA_MAKES.len());
+    }
+
+    #[test]
+    fn seeds_all_camera_models() {
+        let conn = in_memory_db();
+        seed_camera_corpus(&conn).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM corpus WHERE category = 'camera_model'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count as usize, CAMERA_MODELS.len());
+    }
+
+    #[test]
+    fn seeds_all_lenses() {
+        let conn = in_memory_db();
+        seed_camera_corpus(&conn).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM corpus WHERE category = 'lens'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count as usize, LENSES.len());
+    }
+
+    #[test]
+    fn all_models_have_vendor_set() {
+        let conn = in_memory_db();
+        seed_camera_corpus(&conn).unwrap();
+        let orphans: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM corpus WHERE category = 'camera_model' AND vendor IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphans, 0);
+    }
+
+    #[test]
+    fn all_model_vendors_exist_in_makes() {
+        let conn = in_memory_db();
+        seed_camera_corpus(&conn).unwrap();
+        let missing: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM corpus m
+                 WHERE m.category = 'camera_model'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM corpus mk
+                     WHERE mk.category = 'camera_make' AND mk.value = m.vendor
+                 )",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(missing, 0, "some camera models reference a make not in CAMERA_MAKES");
+    }
+
+    #[test]
+    fn seed_camera_is_idempotent() {
+        let conn = in_memory_db();
+        seed_camera_corpus(&conn).unwrap();
+        seed_camera_corpus(&conn).unwrap();
+        let make_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM corpus WHERE category = 'camera_make'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(make_count as usize, CAMERA_MAKES.len());
     }
 
     #[test]

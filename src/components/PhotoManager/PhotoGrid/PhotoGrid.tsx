@@ -4,8 +4,11 @@ import { useUI } from "../../../state/UIContext";
 import { groupPhotosByDay, flatOrderedIds } from "../../../state/selectors";
 import { useDragDrop } from "../../../hooks/useDragDrop";
 import { computeInheritance } from "../../../hooks/useMetadataInheritance";
+import type { CameraConflict } from "../../../hooks/useMetadataInheritance";
 import { tauriCommands } from "../../../lib/tauri";
+import { CameraConflictDialog } from "../../common/CameraConflictDialog/CameraConflictDialog";
 import { DayBlockHeader } from "./DayBlockHeader";
+import { GpxTile } from "./GpxTile";
 import { PhotoTile } from "./PhotoTile";
 import styles from "./PhotoGrid.module.css";
 import type { DropTarget } from "../../../hooks/useDragDrop";
@@ -16,8 +19,10 @@ export function PhotoGrid() {
   const { state: session, dispatch } = useSession();
   const { state: ui, dispatch: uiDispatch } = useUI();
   const containerRef = useRef<HTMLDivElement>(null);
+  const gpxSectionRef = useRef<HTMLDivElement>(null);
   const inspectorFocusedAtMouseDown = useRef(false);
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
+  const [cameraConflict, setCameraConflict] = useState<CameraConflict | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -62,7 +67,7 @@ export function PhotoGrid() {
         neighborAfter = gap.afterId ? photoById(gap.afterId) : null;
       }
 
-      const changes = computeInheritance(
+      const result = computeInheritance(
         draggingPhotos,
         target,
         targetPhoto,
@@ -70,11 +75,10 @@ export function PhotoGrid() {
         neighborAfter,
       );
 
-      for (const [id, meta] of changes) {
+      for (const [id, meta] of result.changes) {
         dispatch({ type: "SET_PENDING", ids: [id], changes: meta });
       }
 
-      // Reorder: move dragging photos to their new position in the list
       const withoutDragging = orderedIds.filter((id) => !draggingIds.includes(id));
       let insertIdx: number;
 
@@ -104,6 +108,10 @@ export function PhotoGrid() {
       tauriCommands
         .reorderPhotos(newOrder)
         .catch((err) => console.error("[reorderPhotos]", err));
+
+      if (result.cameraConflict) {
+        setCameraConflict(result.cameraConflict);
+      }
     },
     [orderedIds, photoById, dispatch]
   );
@@ -113,7 +121,7 @@ export function PhotoGrid() {
     [dispatch]
   );
 
-  const { dragState, dragHandlers, tileDropProps } = useDragDrop({
+  const { dragState, dragHandlers, dragCompletedRef } = useDragDrop({
     orderedIds,
     selectedIds: session.selectedIds,
     dayBlocks: blocks,
@@ -122,6 +130,11 @@ export function PhotoGrid() {
   });
 
   function handleTileClick(photoId: string, e: React.MouseEvent) {
+    // mouseup after a drag fires a click event on the source tile — suppress it.
+    if (dragCompletedRef.current) {
+      dragCompletedRef.current = false;
+      return;
+    }
     if (e.shiftKey && lastClickedId) {
       dispatch({ type: "SELECT_RANGE", fromId: lastClickedId, toId: photoId, orderedIds });
     } else if (e.metaKey || e.ctrlKey) {
@@ -135,6 +148,12 @@ export function PhotoGrid() {
   function inspectorHasFocus() {
     return !!document.getElementById("inspector-panel")?.contains(document.activeElement);
   }
+
+  useEffect(() => {
+    if (session.selectedGpxId && gpxSectionRef.current) {
+      gpxSectionRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [session.selectedGpxId]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -165,6 +184,17 @@ export function PhotoGrid() {
         dispatch({ type: "DESELECT_ALL" });
       }}
     >
+      {cameraConflict && (
+        <CameraConflictDialog
+          conflict={cameraConflict}
+          onResolve={(choice) => {
+            if (choice !== null) {
+              dispatch({ type: "SET_PENDING", ids: cameraConflict.draggingIds, changes: choice });
+            }
+            setCameraConflict(null);
+          }}
+        />
+      )}
       {session.photos.length === 0 ? (
         <div className={styles.empty}>
           <span>No photos imported</span>
@@ -198,12 +228,30 @@ export function PhotoGrid() {
                       );
                     }}
                     {...dragHandlers(photo.id)}
-                    {...tileDropProps(photo.id)}
                   />
                 ))}
               </div>
             </div>
           ))}
+          {session.gpxFiles.length > 0 && (
+            <div ref={gpxSectionRef} className={styles.gpxSection}>
+              <div className={styles.gpxSectionLabel}>GPX Files</div>
+              <div className={styles.gpxTiles}>
+                {session.gpxFiles.map((gpx) => (
+                  <GpxTile
+                    key={gpx.id}
+                    gpxFile={gpx}
+                    isSelected={session.selectedGpxId === gpx.id}
+                    onSelect={(id) => dispatch({ type: "SELECT_GPX", id })}
+                    onRemove={(id) => {
+                      tauriCommands.removeGpx(id).catch(console.error);
+                      dispatch({ type: "REMOVE_GPX", id });
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

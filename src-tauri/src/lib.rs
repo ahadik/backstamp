@@ -1,5 +1,4 @@
 mod commands;
-mod corpus;
 mod corpus_seed;
 mod exiftool;
 mod gpx;
@@ -7,7 +6,7 @@ pub mod session;
 pub mod thumbnail;
 pub mod write_metadata;
 
-use commands::{context_menu, corpus as corpus_commands, metadata, photos, session as session_commands, settings, thumbnails, timezone};
+use commands::{context_menu, corpus as corpus_commands, gpx as gpx_commands, metadata, photos, session as session_commands, settings, thumbnails, timezone};
 use exiftool::ExiftoolProcess;
 use rusqlite::Connection;
 use std::path::PathBuf;
@@ -98,6 +97,9 @@ pub fn run() {
             settings::set_setting,
             timezone::resolve_timezone,
             context_menu::show_photo_context_menu,
+            gpx_commands::import_gpx,
+            gpx_commands::remove_gpx,
+            gpx_commands::save_gpx_thumbnail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

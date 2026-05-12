@@ -93,6 +93,7 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
 18. As a general principle, if a photo has meta-data set, it is never over-written to being “unset” (such as through drag and dropping) unless done-so explicitly in the right-hand Inspector panel.
 19. If I select multiple photos that have different values for any meta-data, that section of the Inspector Panel says “Multiple Values” where there are multiple values. Where values match, those values are rendered.
     1. If I change the value for something that says “Multiple Values” that overwrites all of the unique values with the new single value. A confirmation dialog asks “Are you sure you want to change X values with this new value?”
+    2. The Location section is an exception to the “Multiple Values” text pattern: when multiple photos are selected with different locations, the map shows a pin for each selected photo rather than displaying “Multiple Values” text. See the Location section for details.
 20. Whenever I set new data for selected photos in the right-hand Inspector Panel, the photo thumbnail receives a blue dot in the top right to indicate a pending change. In a separate control group (The Control Bar) above the Inspector panel, an Apply button becomes active when at least one photo has changes to be written. I must click the “Apply” button to write pending changes to the files.
 21. Right-clicking on a photo thumbnail opens a native macOS context menu for that photo.
     1. The menu contains the following items, in order:
@@ -140,11 +141,14 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
     1. If photos on either side have location, then the dropped photos inherit location half-way on the line drawn between the two locations
     2. If only one of the two photos has location, the dropped photos inherit that location.
     3. If neither of the two photos has location, then no location is set
-2. The Location section of the Inspector Panel shows a map with a pin in the middle that demonstrates where the location is.
+2. The Location section of the Inspector Panel shows a map that demonstrates where the selected photo(s) are located.
+    1. When one photo is selected, or multiple photos share the same location, a single pin is shown at that location.
+    2. When multiple photos are selected with different locations, a pin is shown for each selected photo's location. The map automatically fits its viewport to show all pins.
 3. With one or more photos selected I can set the location for those photos in the right-hand Inspector Panel.
-    1. I can drag and pan the map to update where the pin is.
-    2. I can type a location into a search field above the map. The field performs a live type-ahead search, showing a dropdown of suggestions as I type. I can select a result from the dropdown, or press enter to accept the top result. The map updates to the selected location.
-    3. The location value and the Time Zone value in the Inspector Panel must be consistent. If the IANA timezone implied by the set location does not match the Time Zone set in the Inspector Panel, an alert is shown inline in the Inspector Panel indicating the mismatch. No action is forced on the user; it is advisory only.
+    1. When a single location pin is shown, I can drag and pan the map to update where the pin is.
+    2. When multiple photos are selected with different locations (multi-pin view), clicking anywhere on the map places a single new pin at the clicked location and snaps all selected photos to that location, replacing their individual locations.
+    3. I can type a location into a search field above the map. The field performs a live type-ahead search, showing a dropdown of suggestions as I type. I can select a result from the dropdown, or press enter to accept the top result. The map updates to the selected location. When multiple photos are selected with different locations, setting a location via search snaps all selected photos to the new location.
+    4. The location value and the Time Zone value in the Inspector Panel must be consistent. If the IANA timezone implied by the set location does not match the Time Zone set in the Inspector Panel, an alert is shown inline in the Inspector Panel indicating the mismatch. No action is forced on the user; it is advisory only.
 4. Across the bottom of the Photo Manager area there is a horizontal Map panel that floats as an overlay above the photo grid. I can drag its top edge up or down to make it taller or shorter. Making it taller reveals more map and covers more of the photo grid below, but does not reduce the total scroll height of the grid.
     1. The Map Panel shows pins for where all photos are that are tagged with a location.
     2. When more than one photo is at a location, a bubble appears instead of a pin with a number inside indicating the count of photos at that location.

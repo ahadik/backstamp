@@ -55,6 +55,7 @@ function setup(sessionOverrides: Partial<SessionState> = {}, phase: ApplyPhase =
     photos: [],
     selectedIds: new Set(),
     gpxFiles: [],
+    selectedGpxId: null,
     applyInProgress: false,
     canRollback: false,
     ...sessionOverrides,

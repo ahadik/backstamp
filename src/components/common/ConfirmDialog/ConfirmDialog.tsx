@@ -7,6 +7,7 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   destructive?: boolean;
+  infoOnly?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -17,6 +18,7 @@ export function ConfirmDialog({
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   destructive = false,
+  infoOnly = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -29,15 +31,23 @@ export function ConfirmDialog({
         <h3 className={styles.title}>{title}</h3>
         <p className={styles.message}>{message}</p>
         <div className={styles.actions}>
-          <button className="btn btn-glass" onClick={onCancel}>
-            {cancelLabel}
-          </button>
-          <button
-            className={`btn ${destructive ? "btn-danger" : "btn-primary"}`}
-            onClick={onConfirm}
-          >
-            {confirmLabel}
-          </button>
+          {infoOnly ? (
+            <button className="btn btn-primary" onClick={onCancel}>
+              {cancelLabel === "Cancel" ? "OK" : cancelLabel}
+            </button>
+          ) : (
+            <>
+              <button className="btn btn-glass" onClick={onCancel}>
+                {cancelLabel}
+              </button>
+              <button
+                className={`btn ${destructive ? "btn-danger" : "btn-primary"}`}
+                onClick={onConfirm}
+              >
+                {confirmLabel}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

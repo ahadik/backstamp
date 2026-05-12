@@ -1,5 +1,16 @@
 import { sessionReducer, initialState } from "./SessionContext";
-import type { Photo, Metadata, SessionState } from "./SessionContext";
+import type { Photo, Metadata, SessionState, GpxFile } from "./SessionContext";
+
+function makeGpxFile(id: string, overrides: Partial<GpxFile> = {}): GpxFile {
+  return {
+    id,
+    filePath: `/gpx/${id}.gpx`,
+    addedAt: 1700000000,
+    trackPoints: [],
+    thumbnailPath: null,
+    ...overrides,
+  };
+}
 
 const nullMetadata: Metadata = {
   captureDate: null,
@@ -366,6 +377,50 @@ describe("sessionReducer", () => {
       // @ts-expect-error intentional unknown action
       const next = sessionReducer(initialState, { type: "__UNKNOWN__" });
       expect(next).toBe(initialState);
+    });
+  });
+
+  describe("ADD_GPX", () => {
+    it("appends a GPX file to gpxFiles", () => {
+      const gpxFile = makeGpxFile("g1");
+      const next = sessionReducer(initialState, { type: "ADD_GPX", gpxFile });
+      expect(next.gpxFiles).toHaveLength(1);
+      expect(next.gpxFiles[0].id).toBe("g1");
+    });
+
+    it("ignores duplicate GPX files with the same id", () => {
+      const gpxFile = makeGpxFile("g1");
+      const withOne = sessionReducer(initialState, { type: "ADD_GPX", gpxFile });
+      const withDup = sessionReducer(withOne, { type: "ADD_GPX", gpxFile });
+      expect(withDup.gpxFiles).toHaveLength(1);
+    });
+  });
+
+  describe("REMOVE_GPX", () => {
+    it("removes a GPX file by id", () => {
+      const state: SessionState = {
+        ...initialState,
+        gpxFiles: [makeGpxFile("g1"), makeGpxFile("g2")],
+      };
+      const next = sessionReducer(state, { type: "REMOVE_GPX", id: "g1" });
+      expect(next.gpxFiles).toHaveLength(1);
+      expect(next.gpxFiles[0].id).toBe("g2");
+    });
+  });
+
+  describe("UPDATE_GPX_THUMBNAIL", () => {
+    it("updates thumbnailPath for the matching GPX file", () => {
+      const state: SessionState = {
+        ...initialState,
+        gpxFiles: [makeGpxFile("g1"), makeGpxFile("g2")],
+      };
+      const next = sessionReducer(state, {
+        type: "UPDATE_GPX_THUMBNAIL",
+        id: "g1",
+        thumbnailPath: "/thumbs/gpx_g1.jpg",
+      });
+      expect(next.gpxFiles[0].thumbnailPath).toBe("/thumbs/gpx_g1.jpg");
+      expect(next.gpxFiles[1].thumbnailPath).toBeNull();
     });
   });
 });

@@ -95,6 +95,22 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         corpus_seed::seed_film_corpus(conn)?;
         conn.pragma_update(None, "user_version", 4i64)?;
     }
+    if version < 5 {
+        let has_track_pts: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('gpx_files') WHERE name = 'track_points'")?
+            .exists([])?;
+        if !has_track_pts {
+            conn.execute_batch(
+                "ALTER TABLE gpx_files ADD COLUMN track_points TEXT;
+                 ALTER TABLE gpx_files ADD COLUMN thumbnail_path TEXT;"
+            )?;
+        }
+        conn.pragma_update(None, "user_version", 5i64)?;
+    }
+    if version < 6 {
+        corpus_seed::seed_camera_corpus(conn)?;
+        conn.pragma_update(None, "user_version", 6i64)?;
+    }
     Ok(())
 }
 
@@ -145,9 +161,11 @@ CREATE TABLE IF NOT EXISTS apply_history (
 );
 
 CREATE TABLE IF NOT EXISTS gpx_files (
-    id        TEXT PRIMARY KEY,
-    file_path TEXT NOT NULL,
-    added_at  INTEGER NOT NULL
+    id             TEXT PRIMARY KEY,
+    file_path      TEXT NOT NULL,
+    added_at       INTEGER NOT NULL,
+    track_points   TEXT,
+    thumbnail_path TEXT
 );
 
 CREATE TABLE IF NOT EXISTS corpus (
