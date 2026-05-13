@@ -3,8 +3,17 @@ import { useSession } from "../../../state/SessionContext";
 import { deriveFieldValue } from "../../../lib/inspectorUtils";
 import { WORKING_TIMEZONES } from "../../../lib/timezones";
 import { ConfirmDialog } from "../../common/ConfirmDialog/ConfirmDialog";
+import { tauriCommands } from "../../../lib/tauri";
 import type { Photo, Metadata } from "../../../state/SessionContext";
 import styles from "./DateTimeSection.module.css";
+
+function persistPending(ids: string[], changes: Partial<Metadata>) {
+  const fields = Object.entries(changes).map(([field, value]) => ({
+    field,
+    value: value == null ? null : String(value),
+  }));
+  tauriCommands.setPendingChanges(ids, fields).catch(console.error);
+}
 
 /** Parse freeform time text to "HH:MM:SS", or null if unrecognised. */
 export function parseTimeInput(input: string): string | null {
@@ -79,6 +88,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
   const [isTimeFocused, setIsTimeFocused] = useState(false);
   const [localTime, setLocalTime] = useState("");
   const timeOriginalRef = useRef("");
+  const dateRef = useRef<HTMLInputElement>(null);
   const tzRef = useRef<HTMLDivElement>(null);
 
   const search = tzSearch.toLowerCase();
@@ -110,6 +120,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
 
   function dispatchChanges(changes: Partial<Metadata>) {
     dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
+    persistPending(selectedIds, changes);
   }
 
   function maybeConfirm(
@@ -125,9 +136,13 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
     }
   }
 
+  function handleDateFocus() {
+    try { dateRef.current?.showPicker(); } catch (_) {}
+  }
+
   function handleDateChange(e: React.ChangeEvent<HTMLInputElement>) {
     const value = e.target.value;
-    if (!value) return; // intermediate empty — browser is mid-edit, don't reset state
+    if (!value) return;
     const changes: Partial<Metadata> = { captureDate: value };
     const hasNoTime = selectedPhotos.every((p) => !p.currentMetadata.captureTime);
     if (hasNoTime) changes.captureTime = "00:00:00";
@@ -191,11 +206,9 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
         d.setDate(d.getDate() + dayDelta);
         newDate = d.toISOString().slice(0, 10);
       }
-      dispatch({
-        type: "SET_PENDING",
-        ids: [photo.id],
-        changes: { captureDate: newDate, captureTime: newTime },
-      });
+      const changes = { captureDate: newDate, captureTime: newTime };
+      dispatch({ type: "SET_PENDING", ids: [photo.id], changes });
+      persistPending([photo.id], changes);
     }
   }
 
@@ -207,8 +220,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
 
   const isEmpty = selectedPhotos.length === 0;
 
-  const dateInputValue =
-    captureDate && captureDate !== "multiple" ? captureDate : "";
+  const dateValue = captureDate && captureDate !== "multiple" ? captureDate : "";
 
 
   const timeRaw =
@@ -233,14 +245,17 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
               <span className={styles.label}>Date</span>
               <div className={styles.dateWrapper}>
                 <input
+                  ref={dateRef}
                   type="date"
-                  className={`input ${styles.dateInput}`}
-                  value={dateInputValue}
+                  className={`input ${styles.dateInput} ${!dateValue && captureDate !== "multiple" ? styles.dateInputEmpty : ""}`}
+                  value={dateValue}
+                  placeholder={captureDate === "multiple" ? "Multiple Values" : undefined}
+                  onFocus={handleDateFocus}
                   onChange={handleDateChange}
                   onBlur={handleDateBlur}
                 />
-                {!dateInputValue && (
-                  <span className={styles.datePlaceholder} aria-hidden>--/--/----</span>
+                {!dateValue && captureDate !== "multiple" && (
+                  <span className={styles.dateOverlay}>--/--/----</span>
                 )}
               </div>
             </div>

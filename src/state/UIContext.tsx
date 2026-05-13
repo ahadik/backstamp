@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useReducer } from "react";
+import React, { createContext, useContext, useReducer, useEffect, useRef } from "react";
+import { tauriCommands } from "../lib/tauri";
 
 export interface UIState {
   workingTimezone: string;  // IANA name, display-only
@@ -15,7 +16,8 @@ type UIAction =
   | { type: "SET_PANEL_WIDTH"; width: number }
   | { type: "SET_MAP_PANEL_HEIGHT"; height: number }
   | { type: "SET_MAPBOX_TOKEN"; token: string | null }
-  | { type: "SET_CLAUDE_API_KEY"; key: string | null };
+  | { type: "SET_CLAUDE_API_KEY"; key: string | null }
+  | { type: "RESTORE_UI"; workingTimezone: string; gridColumns: number; mapPanelHeight: number };
 
 const initialState: UIState = {
   workingTimezone: "America/Los_Angeles",
@@ -40,6 +42,13 @@ function uiReducer(state: UIState, action: UIAction): UIState {
       return { ...state, mapboxToken: action.token };
     case "SET_CLAUDE_API_KEY":
       return { ...state, claudeApiKey: action.key };
+    case "RESTORE_UI":
+      return {
+        ...state,
+        workingTimezone: action.workingTimezone,
+        gridColumns: action.gridColumns,
+        mapPanelHeight: action.mapPanelHeight,
+      };
     default:
       return state;
   }
@@ -54,6 +63,26 @@ const UIContext = createContext<UIContextValue | null>(null);
 
 export function UIProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(uiReducer, initialState);
+  const prevRef = useRef(state);
+
+  useEffect(() => {
+    const prev = prevRef.current;
+    if (prev.workingTimezone !== state.workingTimezone) {
+      tauriCommands.setSetting("ui.workingTimezone", state.workingTimezone).catch(console.error);
+    }
+    if (prev.gridColumns !== state.gridColumns) {
+      tauriCommands.setSetting("ui.gridColumns", String(state.gridColumns)).catch(console.error);
+    }
+    prevRef.current = state;
+  }, [state.workingTimezone, state.gridColumns]);
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      tauriCommands.setSetting("ui.mapPanelHeight", String(state.mapPanelHeight)).catch(console.error);
+    }, 500);
+    return () => clearTimeout(id);
+  }, [state.mapPanelHeight]);
+
   return (
     <UIContext.Provider value={{ state, dispatch }}>
       {children}

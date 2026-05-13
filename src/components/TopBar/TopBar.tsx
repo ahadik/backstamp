@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useSession } from "../../state/SessionContext";
+import { useUI } from "../../state/UIContext";
 import { tauriCommands } from "../../lib/tauri";
 import { buildApplyPayload } from "../../lib/applyUtils";
 import { ConfirmDialog } from "../common/ConfirmDialog/ConfirmDialog";
@@ -22,7 +23,7 @@ function mapLoadedPhoto(p: {
   thumbnailLarge: string;
   originalMetadata: Metadata;
   currentMetadata: Metadata;
-  pendingChanges: null;
+  pendingChanges: Partial<Metadata> | null;
 }): Photo {
   return {
     id: p.id,
@@ -34,17 +35,19 @@ function mapLoadedPhoto(p: {
     },
     originalMetadata: p.originalMetadata,
     currentMetadata: p.currentMetadata,
-    pendingChanges: null,
+    pendingChanges: p.pendingChanges ?? null,
   };
 }
 
 export function TopBar({ applyPhase, setApplyPhase, onOpenSettings }: TopBarProps) {
   const { state, dispatch } = useSession();
-  const { photos, selectedIds, canRollback, applyInProgress } = state;
+  const { dispatch: uiDispatch } = useUI();
+  const { photos, selectedIds, canRollback, applyInProgress, gpxFiles } = state;
 
   const [isRollingBack, setIsRollingBack] = useState(false);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const hasPending = photos.some((p) => p.pendingChanges !== null);
   const hasSelected = selectedIds.size > 0;
@@ -88,6 +91,17 @@ export function TopBar({ applyPhase, setApplyPhase, onOpenSettings }: TopBarProp
       setRollbackError(String(err));
     } finally {
       setIsRollingBack(false);
+    }
+  }
+
+  async function handleClearSession() {
+    setShowClearConfirm(false);
+    try {
+      await tauriCommands.clearSession();
+      dispatch({ type: "CLEAR_SESSION" });
+      uiDispatch({ type: "RESTORE_UI", workingTimezone: "America/Los_Angeles", gridColumns: 5, mapPanelHeight: 200 });
+    } catch (err) {
+      setRollbackError(String(err));
     }
   }
 
@@ -136,6 +150,13 @@ export function TopBar({ applyPhase, setApplyPhase, onOpenSettings }: TopBarProp
           </button>
           <button
             className="btn btn-glass"
+            disabled={photos.length === 0 && gpxFiles.length === 0}
+            onClick={() => setShowClearConfirm(true)}
+          >
+            Clear Session
+          </button>
+          <button
+            className="btn btn-glass"
             onClick={onOpenSettings}
             aria-label="Open settings"
           >
@@ -163,6 +184,17 @@ export function TopBar({ applyPhase, setApplyPhase, onOpenSettings }: TopBarProp
           destructive
           onConfirm={handleReset}
           onCancel={() => setShowResetConfirm(false)}
+        />
+      )}
+
+      {showClearConfirm && (
+        <ConfirmDialog
+          title="Clear Session?"
+          message="This will remove all imported photos, GPX files, and pending changes. Photos already written to disk via Apply are not affected."
+          confirmLabel="Clear Session"
+          destructive
+          onConfirm={handleClearSession}
+          onCancel={() => setShowClearConfirm(false)}
         />
       )}
     </>

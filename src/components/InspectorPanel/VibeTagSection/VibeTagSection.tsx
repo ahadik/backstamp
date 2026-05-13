@@ -3,6 +3,7 @@ import { useSession } from "../../../state/SessionContext";
 import { useUI } from "../../../state/UIContext";
 import { deriveFieldValue } from "../../../lib/inspectorUtils";
 import { runVibeTag } from "../../../lib/vibeTag";
+import { tauriCommands } from "../../../lib/tauri";
 import type { Photo, Metadata } from "../../../state/SessionContext";
 import type { MetadataProposal, VibeTagMessage } from "../../../lib/vibeTag";
 import styles from "./VibeTagSection.module.css";
@@ -80,7 +81,7 @@ export function VibeTagSection({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inputText, setInputText] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Clear conversation when selection changes
   useEffect(() => {
@@ -128,11 +129,13 @@ export function VibeTagSection({
   function handleAccept() {
     if (!proposal) return;
     const changes = proposalToChanges(proposal);
-    dispatch({
-      type: "SET_PENDING",
-      ids: selectedPhotos.map((p) => p.id),
-      changes,
-    });
+    const ids = selectedPhotos.map((p) => p.id);
+    dispatch({ type: "SET_PENDING", ids, changes });
+    const fields = Object.entries(changes).map(([field, value]) => ({
+      field,
+      value: value == null ? null : String(value),
+    }));
+    tauriCommands.setPendingChanges(ids, fields).catch(console.error);
     setProposal(null);
     setMessages([]);
   }
@@ -190,9 +193,8 @@ export function VibeTagSection({
             {error && <p className={styles.error}>{error}</p>}
 
             <div className={styles.inputRow}>
-              <input
+              <textarea
                 ref={inputRef}
-                type="text"
                 className={`input ${styles.chatInput}`}
                 placeholder={
                   loading

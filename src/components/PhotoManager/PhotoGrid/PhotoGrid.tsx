@@ -77,6 +77,11 @@ export function PhotoGrid() {
 
       for (const [id, meta] of result.changes) {
         dispatch({ type: "SET_PENDING", ids: [id], changes: meta });
+        const fields = Object.entries(meta).map(([field, value]) => ({
+          field,
+          value: value == null ? null : String(value),
+        }));
+        tauriCommands.setPendingChanges([id], fields).catch(console.error);
       }
 
       const withoutDragging = orderedIds.filter((id) => !draggingIds.includes(id));
@@ -190,6 +195,11 @@ export function PhotoGrid() {
           onResolve={(choice) => {
             if (choice !== null) {
               dispatch({ type: "SET_PENDING", ids: cameraConflict.draggingIds, changes: choice });
+              const fields = Object.entries(choice).map(([field, value]) => ({
+                field,
+                value: value == null ? null : String(value),
+              }));
+              tauriCommands.setPendingChanges(cameraConflict.draggingIds, fields).catch(console.error);
             }
             setCameraConflict(null);
           }}

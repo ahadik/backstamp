@@ -1,6 +1,34 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { vi, beforeEach, describe, it, expect } from "vitest";
 import { PhotoTile } from "./PhotoTile";
 import type { Photo, Metadata } from "../../../state/SessionContext";
+
+vi.mock("../../../state/SessionContext", () => ({
+  useSession: vi.fn(),
+}));
+
+vi.mock("../../../lib/tauri", () => ({
+  tauriCommands: {
+    removePhotos: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
+import { useSession } from "../../../state/SessionContext";
+import { tauriCommands } from "../../../lib/tauri";
+
+const mockDispatch = vi.fn();
+
+beforeEach(() => {
+  mockDispatch.mockClear();
+  vi.mocked(tauriCommands.removePhotos).mockClear();
+  vi.mocked(useSession).mockReturnValue({
+    state: {
+      photos: [], selectedIds: new Set(), gpxFiles: [], selectedGpxId: null,
+      applyInProgress: false, canRollback: false,
+    },
+    dispatch: mockDispatch,
+  });
+});
 
 const nullMeta: Metadata = {
   captureDate: null, captureTime: null, utcOffset: null, timezone: null,
@@ -77,6 +105,37 @@ describe("PhotoTile", () => {
       const { container } = render(<PhotoTile photo={photo} tilePx={200} {...defaultProps} />);
       const spans = container.querySelectorAll("span");
       expect(spans.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("missing file remove button", () => {
+    it("is not rendered for ok photos", () => {
+      render(<PhotoTile photo={makePhoto()} tilePx={200} {...defaultProps} />);
+      expect(screen.queryByTitle("Remove from session")).not.toBeInTheDocument();
+    });
+
+    it("is rendered for missing photos", () => {
+      render(<PhotoTile photo={makePhoto({ fileStatus: "missing" })} tilePx={200} {...defaultProps} />);
+      expect(screen.getByTitle("Remove from session")).toBeInTheDocument();
+    });
+
+    it("dispatches REMOVE_PHOTOS with the photo id on click", () => {
+      render(<PhotoTile photo={makePhoto({ fileStatus: "missing" })} tilePx={200} {...defaultProps} />);
+      fireEvent.click(screen.getByTitle("Remove from session"));
+      expect(mockDispatch).toHaveBeenCalledWith({ type: "REMOVE_PHOTOS", ids: ["test-id"] });
+    });
+
+    it("calls tauriCommands.removePhotos on click", () => {
+      render(<PhotoTile photo={makePhoto({ fileStatus: "missing" })} tilePx={200} {...defaultProps} />);
+      fireEvent.click(screen.getByTitle("Remove from session"));
+      expect(vi.mocked(tauriCommands.removePhotos)).toHaveBeenCalledWith(["test-id"]);
+    });
+
+    it("does not propagate click to the tile", () => {
+      const tileClick = vi.fn();
+      render(<PhotoTile photo={makePhoto({ fileStatus: "missing" })} tilePx={200} {...defaultProps} onClick={tileClick} />);
+      fireEvent.click(screen.getByTitle("Remove from session"));
+      expect(tileClick).not.toHaveBeenCalled();
     });
   });
 });

@@ -8,6 +8,52 @@ use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingField {
+    pub field: String,
+    pub value: Option<String>,
+}
+
+#[tauri::command]
+pub async fn set_pending_changes(
+    photo_ids: Vec<String>,
+    fields: Vec<PendingField>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
+    for photo_id in &photo_ids {
+        for f in &fields {
+            let db_field = camel_to_snake(&f.field);
+            conn.execute(
+                "INSERT INTO metadata_current (photo_id, field, value, is_pending)
+                 VALUES (?1, ?2, ?3, 1)
+                 ON CONFLICT(photo_id, field)
+                 DO UPDATE SET value = excluded.value, is_pending = 1",
+                rusqlite::params![photo_id, db_field, f.value],
+            )
+            .map_err(|e| format!("set_pending: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_pending_changes(
+    photo_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
+    for photo_id in &photo_ids {
+        conn.execute(
+            "UPDATE metadata_current SET is_pending = 0 WHERE photo_id = ?1",
+            rusqlite::params![photo_id],
+        )
+        .map_err(|e| format!("clear_pending: {}", e))?;
+    }
+    Ok(())
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct ApplyProgressEvent {

@@ -64,7 +64,7 @@ npm run test:watch      # watch mode
 npm run test:coverage   # coverage report
 ```
 
-Tests live alongside the source they cover (e.g. `SessionContext.test.ts` next to `SessionContext.tsx`). The suite covers state reducers, Tauri IPC argument shapes, and component rendering for `PhotoTile`, `PhotoGrid`, and `ImportModal`. Tauri IPC calls are mocked — no running desktop app is required.
+Tests live alongside the source they cover (e.g. `SessionContext.test.ts` next to `SessionContext.tsx`). The suite covers state reducers, Tauri IPC argument shapes, utility logic (apply payload building, GPX timestamp matching, timezone offset calculation, metadata field derivation, Claude proposal validation), and component rendering for `PhotoTile`, `PhotoGrid`, `ImportModal`, `ApplyModal`, `SettingsModal`, `DateTimeSection`, `CameraSection`, `MapPanel`, and `TopBar`. Tauri IPC calls are mocked — no running desktop app is required.
 
 **Rust (Cargo):**
 
@@ -87,48 +87,75 @@ Produces a signed `.app` bundle in `src-tauri/target/release/bundle/`. The `src-
 
 ```
 photo-manager/
-├── src/                            # React + TypeScript frontend
+├── src/                                    # React + TypeScript frontend
 │   ├── components/
-│   │   ├── TopBar/                 # Apply, Roll Back, Reset buttons
-│   │   ├── ImportModal/            # Import progress overlay
-│   │   │   └── ImportModal.test.tsx
+│   │   ├── TopBar/                         # Apply, Roll Back, Reset buttons + photo count
+│   │   ├── ApplyModal/                     # Two-phase apply progress overlay (applying → undoing)
+│   │   ├── ImportModal/                    # Import progress overlay with error list
+│   │   ├── SettingsModal/                  # Mapbox & Claude API key management
+│   │   ├── common/
+│   │   │   ├── CameraConflictDialog/       # Gap-drop camera data conflict resolution
+│   │   │   ├── ConfirmDialog/              # Generic confirmation overlay
+│   │   │   └── CorpusComboBox/             # Searchable corpus-backed dropdown (make/model/lens/film)
 │   │   ├── PhotoManager/
-│   │   │   ├── FloatingControls/   # Import Photos, Remove, Grid Size, Working TZ
-│   │   │   └── PhotoGrid/          # Thumbnail grid (PhotoTile per photo)
-│   │   │       ├── PhotoGrid.test.tsx
-│   │   │       └── PhotoTile.test.tsx
-│   │   ├── InspectorPanel/         # Date & Time, Camera, Location, Vibe Tag sections
-│   │   └── MapPanel/               # Full-width bottom map overlay
+│   │   │   ├── FloatingControls/           # Import Photos, Remove, Grid Size controls
+│   │   │   ├── SubBar/                     # Secondary action bar
+│   │   │   └── PhotoGrid/                  # Thumbnail grid
+│   │   │       ├── PhotoTile.tsx           # Individual photo tile with pending-change indicator
+│   │   │       ├── DayBlockHeader.tsx      # Sticky day group headers
+│   │   │       ├── GapDropZone.tsx         # Drag-and-drop insertion targets
+│   │   │       └── GpxTile.tsx             # GPX file tile with route thumbnail
+│   │   ├── InspectorPanel/
+│   │   │   ├── DateTimeSection/            # Date, time, timezone, hour-increment controls
+│   │   │   ├── CameraSection/              # Make, Model, Lens, Film corpus comboboxes
+│   │   │   ├── LocationSection/            # Mapbox mini-map, geocoding search, timezone mismatch alert
+│   │   │   └── VibeTagSection/             # Claude chat interface for natural-language tagging
+│   │   └── MapPanel/                       # Full-width Mapbox panel with photo clusters + GPX routes
+│   ├── hooks/
+│   │   ├── useDragDrop.ts                  # Drag-reorder state machine
+│   │   └── useMetadataInheritance.ts       # Gap-drop timestamp interpolation + GPS lerp
 │   ├── state/
-│   │   ├── SessionContext.tsx      # Photos, selection, pending changes
-│   │   ├── SessionContext.test.ts
-│   │   ├── CorpusContext.tsx       # Camera / lens / film option lists
-│   │   ├── CorpusContext.test.ts
-│   │   ├── UIContext.tsx           # Working timezone, grid size, map height
-│   │   └── UIContext.test.ts
+│   │   ├── SessionContext.tsx              # Photos, selection, pending changes, apply history
+│   │   ├── CorpusContext.tsx               # Camera / lens / film option lists with recent-use tracking
+│   │   ├── UIContext.tsx                   # Grid size, map height, working timezone, API keys
+│   │   └── selectors.ts                    # groupPhotosByDay() and flat ordering helpers
 │   ├── lib/
-│   │   ├── tauri.ts                # Typed wrappers for all Tauri IPC commands
-│   │   └── tauri.test.ts
-│   ├── test/                       # Test harness setup
-│   │   ├── setup.ts                # jest-dom + ResizeObserver mock
+│   │   ├── tauri.ts                        # Typed wrappers for all Tauri IPC commands
+│   │   ├── applyUtils.ts                   # Builds ApplyPayload with UTC offset computation
+│   │   ├── gpxMatching.ts                  # Track-point matching with timestamp interpolation
+│   │   ├── inspectorUtils.ts               # deriveFieldValue(), buildPendingChange()
+│   │   ├── timezone.ts                     # DST-correct UTC offset calculation
+│   │   ├── timezones.ts                    # IANA timezone list
+│   │   └── vibeTag.ts                      # Claude API client with tool-use loop + proposal validation
+│   ├── test/                               # Test harness setup
+│   │   ├── setup.ts                        # jest-dom + ResizeObserver mock
 │   │   └── smoke.test.ts
-│   └── styles/                     # Global CSS design system (tokens, layout, typography, components)
+│   └── styles/                             # Global CSS design system (tokens, layout, typography, components)
 │
-└── src-tauri/                      # Rust backend
+└── src-tauri/                              # Rust backend
     ├── resources/
-    │   ├── exiftool                # ExifTool CLI script (not committed — see setup)
-    │   └── lib/                    # ExifTool Perl library (not committed — see setup)
+    │   ├── exiftool                        # ExifTool CLI script (not committed — see setup)
+    │   └── lib/                            # ExifTool Perl library (not committed — see setup)
     ├── tests/
-    │   └── import_integration.rs   # Integration tests (DB schema, path key stability)
+    │   └── import_integration.rs           # Integration tests (DB schema, path key stability)
     └── src/
-        ├── commands/               # Tauri IPC handlers (session, photos, metadata, thumbnails)
-        │   └── photos.rs           # includes metadata parsing tests
-        ├── exiftool.rs             # ExifTool subprocess (-stay_open mode)
-        ├── thumbnail.rs            # Thumbnail generation + unit tests
-        ├── session.rs              # SQLite schema + init + unit tests
-        ├── lib.rs                  # AppState, plugin wiring, command registration
-        ├── gpx.rs                  # GPX parsing (stub)
-        └── corpus.rs               # Camera/lens/film corpus (stub)
+        ├── commands/                       # Tauri IPC handlers
+        │   ├── photos.rs                   # import_photos, remove_photos, reorder_photos
+        │   ├── session.rs                  # load_session, clear_session
+        │   ├── metadata.rs                 # apply_changes, apply_cancel, rollback, reset_photos
+        │   ├── thumbnails.rs               # get_thumbnail
+        │   ├── corpus.rs                   # load/add/remove/record corpus entries
+        │   ├── gpx.rs                      # import_gpx, remove_gpx, save_gpx_thumbnail
+        │   ├── timezone.rs                 # resolve_timezone (via tzf-rs v1)
+        │   ├── context_menu.rs             # show_photo_context_menu (native macOS)
+        │   └── settings.rs                 # get_setting, set_setting (SQLite-backed)
+        ├── exiftool.rs                     # ExifTool subprocess (-stay_open mode)
+        ├── write_metadata.rs               # Field-to-ExifTool tag translation, inline + XMP sidecar writes
+        ├── thumbnail.rs                    # SHA-256 keyed thumbnail generation (Lanczos3)
+        ├── session.rs                      # SQLite schema, migrations, init
+        ├── gpx.rs                          # GPX parsing + track-point extraction
+        ├── corpus_seed.rs                  # Seeded camera/lens/film data
+        └── lib.rs                          # AppState, plugin wiring, command registration
 ```
 
 ## Architecture
@@ -136,10 +163,11 @@ photo-manager/
 See [`product-requirements/technical-architecture.md`](product-requirements/technical-architecture.md) for the full technical design. Key decisions:
 
 - **Tauri v2** — native macOS window via WKWebView; Rust handles all file I/O
-- **ExifTool** (bundled) — the only tool with full coverage of all target RAW formats and EXIF/XMP/IPTC standards
-- **SQLite** (`rusqlite` with bundled feature) — session persistence, rollback history, corpus storage
-- **Mapbox** — map rendering, geocoding, and reverse geocoding (user-supplied API key)
-- **Claude API** (`claude-sonnet-4-6`) — natural language metadata entry via the Vibe Tag panel (user-supplied API key)
+- **ExifTool** (bundled) — the only tool with full coverage of all target RAW formats and EXIF/XMP/IPTC standards; runs in `-stay_open` mode for low-latency reads; writes via inline temp-file-rename (JPEG/HEIC) or XMP sidecar (RAW)
+- **SQLite** (`rusqlite` with bundled feature) — session persistence, rollback history, corpus storage, settings
+- **tzf-rs v1** — fast timezone-from-coordinates lookup (no network required)
+- **Mapbox GL JS** — map rendering, photo clustering, GPX route overlays, geocoding, and reverse geocoding (user-supplied API key)
+- **Claude API** (`claude-sonnet-4-6`) — natural language metadata entry via the Vibe Tag panel, with tool use for geocoding (user-supplied API key)
 - No external state library — React `useReducer` + `useContext` only
 
 ## Product requirements
@@ -154,13 +182,13 @@ Phased plans live in [`product-requirements/planning/`](product-requirements/pla
 |---|---|---|
 | 0 — Scaffold | [00-scaffold.md](product-requirements/planning/00-scaffold.md) | Complete |
 | 1 — Thumbnail generation & display | [01-thumbnails.md](product-requirements/planning/01-thumbnails.md) | Complete |
-| 2 — Testing infrastructure | [02-testing.md](product-requirements/planning/02-testing.md) | Complete |
-| 3 — Full import pipeline + metadata reading | — | Planned |
-| 4 — Photo grid: day blocks, selection, drag-and-drop | — | Planned |
-| 5 — Inspector Panel fields with live editing | — | Planned |
-| 6 — Apply / Rollback / Reset pipeline | — | Planned |
-| 7 — Map Panel (Mapbox) + Location section | — | Planned |
-| 8 — GPX import and auto-tagging | — | Planned |
-| 9 — Camera/Lens/Film corpus UI | — | Planned |
-| 10 — Vibe Tag / Claude integration | — | Planned |
-| 11 — Session persistence and restore | — | Planned |
+| 2 — Full import pipeline + metadata reading | — | Complete |
+| 3 — Photo grid: day blocks, selection, drag-and-drop | — | Complete |
+| 4 — Inspector Panel fields with live editing | — | Complete |
+| 5 — Apply / Rollback / Reset pipeline | — | In Progress |
+| 6 — Native macOS context menu | — | Complete |
+| 7 — Map Panel (Mapbox) + Location section | — | Complete |
+| 8 — GPX import and auto-tagging | — | Complete |
+| 9 — Camera/Lens/Film corpus UI | — | Complete |
+| 10 — Vibe Tag / Claude integration | — | Complete |
+| 11 — Session persistence and restore | — | Complete |

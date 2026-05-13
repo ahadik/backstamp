@@ -9,6 +9,14 @@ import type { Photo, Metadata } from "../../../state/SessionContext";
 import type { CorpusEntry } from "../../../state/CorpusContext";
 import styles from "./CameraSection.module.css";
 
+function persistPending(ids: string[], changes: Partial<Metadata>) {
+  const fields = Object.entries(changes).map(([field, value]) => ({
+    field,
+    value: value == null ? null : String(value),
+  }));
+  tauriCommands.setPendingChanges(ids, fields).catch(console.error);
+}
+
 interface CameraSectionProps {
   selectedPhotos: Photo[];
 }
@@ -73,6 +81,7 @@ export function CameraSection({ selectedPhotos }: CameraSectionProps) {
 
   function applyChanges(changes: Partial<Metadata>) {
     sessionDispatch({ type: "SET_PENDING", ids: selectedIds, changes });
+    persistPending(selectedIds, changes);
   }
 
   function handleMakeSelect(value: string) {

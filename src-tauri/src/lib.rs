@@ -88,6 +88,8 @@ pub fn run() {
             metadata::apply_cancel,
             metadata::rollback,
             metadata::reset_photos,
+            metadata::set_pending_changes,
+            metadata::clear_pending_changes,
             thumbnails::get_thumbnail,
             corpus_commands::load_corpus,
             corpus_commands::add_corpus_entry,

@@ -12,7 +12,8 @@ import { useSession } from "./state/SessionContext";
 import { useUI } from "./state/UIContext";
 import { tauriCommands } from "./lib/tauri";
 import type { ApplyPhase, ApplyError } from "./components/ApplyModal/ApplyModal";
-import type { Metadata, Photo } from "./state/SessionContext";
+import type { Metadata, Photo, GpxFile } from "./state/SessionContext";
+import type { TrackPoint } from "./lib/tauri";
 
 function mapLoadedPhoto(p: {
   id: string;
@@ -22,7 +23,7 @@ function mapLoadedPhoto(p: {
   thumbnailLarge: string;
   originalMetadata: Metadata;
   currentMetadata: Metadata;
-  pendingChanges: null;
+  pendingChanges: Partial<Metadata> | null;
 }): Photo {
   return {
     id: p.id,
@@ -34,7 +35,23 @@ function mapLoadedPhoto(p: {
     },
     originalMetadata: p.originalMetadata,
     currentMetadata: p.currentMetadata,
-    pendingChanges: null,
+    pendingChanges: p.pendingChanges ?? null,
+  };
+}
+
+function mapLoadedGpxFile(g: {
+  id: string;
+  filePath: string;
+  addedAt: number;
+  trackPoints: TrackPoint[];
+  thumbnailPath: string | null;
+}): GpxFile {
+  return {
+    id: g.id,
+    filePath: g.filePath,
+    addedAt: g.addedAt,
+    trackPoints: g.trackPoints,
+    thumbnailPath: g.thumbnailPath,
   };
 }
 
@@ -43,15 +60,41 @@ function App() {
   const { dispatch: uiDispatch } = useUI();
   const [applyPhase, setApplyPhase] = useState<ApplyPhase>({ type: "idle" });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(true);
 
   useEffect(() => {
-    tauriCommands.getSetting("mapbox_token").then((token) => {
-      if (token) uiDispatch({ type: "SET_MAPBOX_TOKEN", token });
-    });
-    tauriCommands.getSetting("claude_api_key").then((key) => {
-      if (key) uiDispatch({ type: "SET_CLAUDE_API_KEY", key });
-    });
-  }, [uiDispatch]);
+    async function hydrateSession() {
+      try {
+        const session = await tauriCommands.loadSession();
+        dispatch({
+          type: "RESTORE_SESSION",
+          photos: session.photos.map(mapLoadedPhoto),
+          gpxFiles: session.gpxFiles.map(mapLoadedGpxFile),
+          canRollback: session.canRollback,
+        });
+        uiDispatch({
+          type: "RESTORE_UI",
+          workingTimezone: session.workingTimezone,
+          gridColumns: session.gridColumns,
+          mapPanelHeight: session.mapPanelHeight,
+        });
+      } catch (err) {
+        console.error("[App] session restore failed:", err);
+      } finally {
+        setSessionLoading(false);
+      }
+
+      tauriCommands.getSetting("mapbox_token").then((token) => {
+        if (token) uiDispatch({ type: "SET_MAPBOX_TOKEN", token });
+      });
+      tauriCommands.getSetting("claude_api_key").then((key) => {
+        if (key) uiDispatch({ type: "SET_CLAUDE_API_KEY", key });
+      });
+    }
+
+    hydrateSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const pending = [
@@ -119,9 +162,17 @@ function App() {
     setSettingsOpen(true);
   }
 
+  if (sessionLoading) {
+    return (
+      <div className={styles.sessionLoader}>
+        <div className={styles.spinner} />
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
-      <PhotoManager />
+      <PhotoManager onOpenSettings={openSettings} />
       <div className={styles.rightColumn}>
         <TopBar
           applyPhase={applyPhase}
@@ -130,7 +181,7 @@ function App() {
         />
         <InspectorPanel onOpenSettings={openSettings} />
       </div>
-      <MapPanel />
+      <MapPanel onOpenSettings={openSettings} />
       {applyPhase.type !== "idle" && (
         <ApplyModal
           phase={applyPhase}

@@ -65,6 +65,38 @@ describe("uiReducer", () => {
     });
   });
 
+  describe("RESTORE_UI", () => {
+    it("sets workingTimezone", () => {
+      const next = uiReducer(uiInitialState, {
+        type: "RESTORE_UI", workingTimezone: "Europe/Paris", gridColumns: 5, mapPanelHeight: 200,
+      });
+      expect(next.workingTimezone).toBe("Europe/Paris");
+    });
+
+    it("sets gridColumns", () => {
+      const next = uiReducer(uiInitialState, {
+        type: "RESTORE_UI", workingTimezone: "America/Los_Angeles", gridColumns: 3, mapPanelHeight: 200,
+      });
+      expect(next.gridColumns).toBe(3);
+    });
+
+    it("sets mapPanelHeight", () => {
+      const next = uiReducer(uiInitialState, {
+        type: "RESTORE_UI", workingTimezone: "America/Los_Angeles", gridColumns: 5, mapPanelHeight: 350,
+      });
+      expect(next.mapPanelHeight).toBe(350);
+    });
+
+    it("preserves mapboxToken and claudeApiKey from current state", () => {
+      const withKeys = { ...uiInitialState, mapboxToken: "pk.test", claudeApiKey: "sk.test" };
+      const next = uiReducer(withKeys, {
+        type: "RESTORE_UI", workingTimezone: "UTC", gridColumns: 5, mapPanelHeight: 200,
+      });
+      expect(next.mapboxToken).toBe("pk.test");
+      expect(next.claudeApiKey).toBe("sk.test");
+    });
+  });
+
   describe("unknown action", () => {
     it("returns state unchanged", () => {
       // @ts-expect-error intentional unknown action

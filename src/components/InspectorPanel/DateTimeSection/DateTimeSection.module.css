@@ -42,27 +42,32 @@
   width: 100%;
 }
 
-.timeInput {
-  flex: 1;
-  min-width: 0;
+.dateInputEmpty {
+  opacity: 0;
 }
 
-.datePlaceholder {
+.dateInputEmpty:focus {
+  opacity: 1;
+}
+
+.dateWrapper:focus-within .dateOverlay {
+  display: none;
+}
+
+.dateOverlay {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
-  padding: var(--space-1) var(--space-2);
+  padding: 0 var(--space-2);
   font-size: 13px;
   color: var(--color-text-secondary);
   pointer-events: none;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
 }
 
-.dateWrapper:focus-within .datePlaceholder {
-  border-color: var(--color-accent);
+.timeInput {
+  flex: 1;
+  min-width: 0;
 }
 
 /* Timezone combobox */

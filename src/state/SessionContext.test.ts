@@ -40,6 +40,55 @@ function makePhoto(id: string, overrides: Partial<Photo> = {}): Photo {
 }
 
 describe("sessionReducer", () => {
+  describe("RESTORE_SESSION", () => {
+    it("sets photos from the action", () => {
+      const photos = [makePhoto("a"), makePhoto("b")];
+      const next = sessionReducer(initialState, {
+        type: "RESTORE_SESSION", photos, gpxFiles: [], canRollback: false,
+      });
+      expect(next.photos).toEqual(photos);
+    });
+
+    it("sets gpxFiles from the action", () => {
+      const gpxFiles = [makeGpxFile("g1")];
+      const next = sessionReducer(initialState, {
+        type: "RESTORE_SESSION", photos: [], gpxFiles, canRollback: false,
+      });
+      expect(next.gpxFiles).toEqual(gpxFiles);
+    });
+
+    it("sets canRollback from the action", () => {
+      const next = sessionReducer(initialState, {
+        type: "RESTORE_SESSION", photos: [], gpxFiles: [], canRollback: true,
+      });
+      expect(next.canRollback).toBe(true);
+    });
+
+    it("always clears selectedIds regardless of prior state", () => {
+      const withSelection = { ...initialState, selectedIds: new Set(["a", "b"]) };
+      const next = sessionReducer(withSelection, {
+        type: "RESTORE_SESSION", photos: [], gpxFiles: [], canRollback: false,
+      });
+      expect(next.selectedIds.size).toBe(0);
+    });
+
+    it("restores a photo with fileStatus missing", () => {
+      const photo = makePhoto("a", { fileStatus: "missing" });
+      const next = sessionReducer(initialState, {
+        type: "RESTORE_SESSION", photos: [photo], gpxFiles: [], canRollback: false,
+      });
+      expect(next.photos[0].fileStatus).toBe("missing");
+    });
+
+    it("restores a photo with non-null pendingChanges", () => {
+      const photo = makePhoto("a", { pendingChanges: { captureDate: "2024-03-15" } });
+      const next = sessionReducer(initialState, {
+        type: "RESTORE_SESSION", photos: [photo], gpxFiles: [], canRollback: false,
+      });
+      expect(next.photos[0].pendingChanges).toEqual({ captureDate: "2024-03-15" });
+    });
+  });
+
   describe("CLEAR_SESSION", () => {
     it("resets to initial state", () => {
       const state: SessionState = {

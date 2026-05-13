@@ -63,6 +63,7 @@ type SessionAction =
   | { type: "REMOVE_GPX"; id: string }
   | { type: "UPDATE_GPX_THUMBNAIL"; id: string; thumbnailPath: string }
   | { type: "REORDER_PHOTOS"; orderedIds: string[] }
+  | { type: "RESTORE_SESSION"; photos: Photo[]; gpxFiles: GpxFile[]; canRollback: boolean }
   | { type: "CLEAR_SESSION" };
 
 export const initialMetadata: Metadata = {
@@ -245,6 +246,15 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       });
       return { ...state, photos: reordered };
     }
+
+    case "RESTORE_SESSION":
+      return {
+        ...state,
+        photos: action.photos,
+        gpxFiles: action.gpxFiles,
+        canRollback: action.canRollback,
+        selectedIds: new Set(),
+      };
 
     case "CLEAR_SESSION":
       return { ...initialState };

@@ -39,10 +39,14 @@
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  text-align: center;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   background: var(--color-glass-bg);
   backdrop-filter: blur(var(--blur-glass));
   -webkit-backdrop-filter: blur(var(--blur-glass));

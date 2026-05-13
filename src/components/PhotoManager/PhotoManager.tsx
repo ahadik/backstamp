@@ -79,12 +79,17 @@ function mapRawPhoto(raw: RawPhotoData): Photo {
   };
 }
 
-export function PhotoManager() {
+interface PhotoManagerProps {
+  onOpenSettings: () => void;
+}
+
+export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
   const { state: session, dispatch: sessionDispatch } = useSession();
   const { dispatch: corpusDispatch } = useCorpus();
-  const { state: uiState, dispatch: uiDispatch } = useUI();
+  const { state: uiState } = useUI();
 
   const [showDropOverlay, setShowDropOverlay] = useState(false);
+  const [showGpxKeyPrompt, setShowGpxKeyPrompt] = useState(false);
   const [pendingGpxImport, setPendingGpxImport] = useState<{
     gpxFile: GpxFile;
     matchCount: number;
@@ -133,6 +138,10 @@ export function PhotoManager() {
   }, [sessionDispatch]);
 
   const handleGpxDrop = useCallback(async (path: string) => {
+    if (!uiState.mapboxToken) {
+      setShowGpxKeyPrompt(true);
+      return;
+    }
     try {
       const result = await tauriCommands.importGpx(path);
       const gpxFile: GpxFile = {
@@ -179,70 +188,11 @@ export function PhotoManager() {
   const handleFinderDropRef = useRef(handleFinderDrop);
   handleFinderDropRef.current = handleFinderDrop;
 
-  // Restore session + load corpus + load settings on startup
+  // Load corpus on mount (session/settings are hydrated by App.tsx)
   useEffect(() => {
-    async function init() {
-      try {
-        const result = await tauriCommands.loadSession();
-        if (result.photos.length > 0) {
-          const photos: Photo[] = result.photos.map((p) => ({
-            id: p.id,
-            filePath: p.filePath,
-            fileStatus: p.fileStatus,
-            thumbnail: {
-              small: convertFileSrc(p.thumbnailSmall),
-              large: convertFileSrc(p.thumbnailLarge),
-            },
-            originalMetadata: p.originalMetadata,
-            currentMetadata: p.currentMetadata,
-            pendingChanges: null,
-          }));
-          sessionDispatch({ type: "IMPORT_PHOTOS", photos });
-        }
-        if (result.canRollback) {
-          sessionDispatch({
-            type: "APPLY_COMPLETE",
-            updatedPhotos: [],
-            canRollback: result.canRollback,
-          });
-        }
-        if (result.gpxFiles.length > 0) {
-          for (const g of result.gpxFiles) {
-            sessionDispatch({
-              type: "ADD_GPX",
-              gpxFile: {
-                id: g.id,
-                filePath: g.filePath,
-                addedAt: g.addedAt,
-                trackPoints: g.trackPoints,
-                thumbnailPath: g.thumbnailPath,
-              },
-            });
-          }
-        }
-      } catch (err) {
-        console.error("[PhotoManager] loadSession failed:", err);
-      }
-
-      try {
-        const corpus = await tauriCommands.loadCorpus();
-        corpusDispatch({ type: "LOAD_CORPUS", corpus });
-      } catch (err) {
-        console.error("[PhotoManager] loadCorpus failed:", err);
-      }
-
-      try {
-        const [mapboxToken, claudeApiKey] = await Promise.all([
-          tauriCommands.getSetting("mapbox_token"),
-          tauriCommands.getSetting("claude_api_key"),
-        ]);
-        if (mapboxToken) uiDispatch({ type: "SET_MAPBOX_TOKEN", token: mapboxToken });
-        if (claudeApiKey) uiDispatch({ type: "SET_CLAUDE_API_KEY", key: claudeApiKey });
-      } catch (err) {
-        console.error("[PhotoManager] settings load failed:", err);
-      }
-    }
-    init();
+    tauriCommands.loadCorpus()
+      .then((corpus) => corpusDispatch({ type: "LOAD_CORPUS", corpus }))
+      .catch((err) => console.error("[PhotoManager] loadCorpus failed:", err));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -339,7 +289,14 @@ export function PhotoManager() {
             applyGpxAutoTag(
               session.photos,
               pendingGpxImport.gpxFile.trackPoints,
-              sessionDispatch
+              (action) => {
+                sessionDispatch(action);
+                const fields = Object.entries(action.changes).map(([field, value]) => ({
+                  field,
+                  value: value == null ? null : String(value),
+                }));
+                tauriCommands.setPendingChanges(action.ids, fields).catch(console.error);
+              }
             );
             sessionDispatch({ type: "SELECT_GPX", id: pendingGpxImport.gpxFile.id });
             setPendingGpxImport(null);
@@ -357,6 +314,18 @@ export function PhotoManager() {
           infoOnly
           onConfirm={() => {}}
           onCancel={() => setGpxImportError(null)}
+        />
+      )}
+      {showGpxKeyPrompt && (
+        <ConfirmDialog
+          title="Mapbox API Key Required"
+          message="A Mapbox API key is required to import GPX files. Route thumbnails are generated using the Mapbox Static Images API."
+          confirmLabel="Open Settings"
+          onConfirm={() => {
+            setShowGpxKeyPrompt(false);
+            onOpenSettings();
+          }}
+          onCancel={() => setShowGpxKeyPrompt(false)}
         />
       )}
     </div>

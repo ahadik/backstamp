@@ -8,12 +8,17 @@ vi.mock("../../state/SessionContext", () => ({
   useSession: vi.fn(),
 }));
 
+vi.mock("../../state/UIContext", () => ({
+  useUI: vi.fn(),
+}));
+
 vi.mock("../../lib/tauri", () => ({
   tauriCommands: {
     applyChanges: vi.fn().mockResolvedValue(undefined),
     rollback: vi.fn().mockResolvedValue({ canRollback: false, failedFiles: [] }),
     resetPhotos: vi.fn().mockResolvedValue({ failedFiles: [] }),
-    loadSession: vi.fn().mockResolvedValue({ photos: [], canRollback: false }),
+    loadSession: vi.fn().mockResolvedValue({ photos: [], gpxFiles: [], canRollback: false, workingTimezone: "America/Los_Angeles", gridColumns: 5, mapPanelHeight: 200 }),
+    clearSession: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -26,12 +31,29 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 vi.mock("../common/ConfirmDialog/ConfirmDialog", () => ({
-  ConfirmDialog: () => null,
+  ConfirmDialog: ({ title, confirmLabel, cancelLabel = "Cancel", onConfirm, onCancel }: any) => (
+    <div role="dialog">
+      <span>{title}</span>
+      <button onClick={onConfirm}>{confirmLabel}</button>
+      <button onClick={onCancel}>{cancelLabel}</button>
+    </div>
+  ),
 }));
 
 import { useSession } from "../../state/SessionContext";
+import { useUI } from "../../state/UIContext";
 
 const mockDispatch = vi.fn();
+const mockUiDispatch = vi.fn();
+
+const defaultUiState = {
+  workingTimezone: "America/Los_Angeles",
+  gridColumns: 5,
+  panelWidth: 800,
+  mapPanelHeight: 200,
+  mapboxToken: null,
+  claudeApiKey: null,
+};
 
 const nullMeta = {
   captureDate: null, captureTime: null, utcOffset: null, timezone: null,
@@ -61,11 +83,14 @@ function setup(sessionOverrides: Partial<SessionState> = {}, phase: ApplyPhase =
     ...sessionOverrides,
   };
   vi.mocked(useSession).mockReturnValue({ state: base, dispatch: mockDispatch });
+  vi.mocked(useUI).mockReturnValue({ state: defaultUiState, dispatch: mockUiDispatch });
   render(<TopBar applyPhase={phase} setApplyPhase={vi.fn()} onOpenSettings={vi.fn()} />);
 }
 
 beforeEach(() => {
   mockDispatch.mockClear();
+  mockUiDispatch.mockClear();
+  vi.mocked(tauriCommands.clearSession).mockClear();
 });
 
 // ── Photo count ───────────────────────────────────────────────────────────────
@@ -154,5 +179,50 @@ describe("TopBar — Reset button", () => {
   it("is disabled when applyInProgress is true", () => {
     setup({ photos: [makePhoto("a")], applyInProgress: true });
     expect(screen.getByRole("button", { name: /reset/i })).toBeDisabled();
+  });
+});
+
+// ── Clear Session button ──────────────────────────────────────────────────────
+
+import { fireEvent, waitFor, within } from "@testing-library/react";
+import { tauriCommands } from "../../lib/tauri";
+
+describe("TopBar — Clear Session button", () => {
+  it("is disabled when no photos and no GPX files", () => {
+    setup({ photos: [], gpxFiles: [] });
+    expect(screen.getByRole("button", { name: /clear session/i })).toBeDisabled();
+  });
+
+  it("is enabled when photos exist", () => {
+    setup({ photos: [makePhoto("a")] });
+    expect(screen.getByRole("button", { name: /clear session/i })).not.toBeDisabled();
+  });
+
+  it("is enabled when only GPX files exist", () => {
+    setup({ photos: [], gpxFiles: [{ id: "g1", filePath: "/g.gpx", addedAt: 0, trackPoints: [], thumbnailPath: null }] });
+    expect(screen.getByRole("button", { name: /clear session/i })).not.toBeDisabled();
+  });
+
+  it("shows confirmation dialog after click", () => {
+    setup({ photos: [makePhoto("a")] });
+    fireEvent.click(screen.getByRole("button", { name: /clear session/i }));
+    expect(screen.getByText(/clear session\?/i)).toBeInTheDocument();
+  });
+
+  it("calls clearSession and dispatches CLEAR_SESSION on confirm", async () => {
+    setup({ photos: [makePhoto("a")] });
+    fireEvent.click(screen.getByRole("button", { name: /clear session/i }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^clear session$/i }));
+    await waitFor(() => {
+      expect(vi.mocked(tauriCommands.clearSession)).toHaveBeenCalledTimes(1);
+      expect(mockDispatch).toHaveBeenCalledWith({ type: "CLEAR_SESSION" });
+    });
+  });
+
+  it("does NOT call clearSession when cancelled", () => {
+    setup({ photos: [makePhoto("a")] });
+    fireEvent.click(screen.getByRole("button", { name: /clear session/i }));
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    expect(vi.mocked(tauriCommands.clearSession)).not.toHaveBeenCalled();
   });
 });

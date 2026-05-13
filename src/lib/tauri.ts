@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Metadata, GpxFile } from "../state/SessionContext";
+import type { Metadata } from "../state/SessionContext";
 import type { CorpusState } from "../state/CorpusContext";
 
 export interface TrackPoint {
@@ -57,10 +57,19 @@ export interface SessionLoadResult {
     thumbnailLarge: string;
     originalMetadata: Metadata;
     currentMetadata: Metadata;
-    pendingChanges: null;
+    pendingChanges: Partial<Metadata> | null;
   }>;
-  gpxFiles: GpxFile[];
+  gpxFiles: Array<{
+    id: string;
+    filePath: string;
+    addedAt: number;
+    trackPoints: TrackPoint[];
+    thumbnailPath: string | null;
+  }>;
   canRollback: boolean;
+  workingTimezone: string;
+  gridColumns: number;
+  mapPanelHeight: number;
 }
 
 export const tauriCommands = {
@@ -102,6 +111,12 @@ export const tauriCommands = {
 
   setSetting: (key: string, value: string) =>
     invoke<void>("set_setting", { key, value }),
+
+  setPendingChanges: (photoIds: string[], fields: Array<{ field: string; value: string | null }>) =>
+    invoke<void>("set_pending_changes", { photoIds, fields }),
+
+  clearPendingChanges: (photoIds: string[]) =>
+    invoke<void>("clear_pending_changes", { photoIds }),
 
   resolveTimezone: (lat: number, lng: number) =>
     invoke<string>("resolve_timezone", { lat, lng }),

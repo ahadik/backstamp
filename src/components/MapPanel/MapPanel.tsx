@@ -146,7 +146,11 @@ function syncGpxLayers(map: mapboxgl.Map, gpxFiles: GpxFile[]) {
   }
 }
 
-export function MapPanel() {
+interface MapPanelProps {
+  onOpenSettings: () => void;
+}
+
+export function MapPanel({ onOpenSettings }: MapPanelProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const { state: session } = useSession();
@@ -277,9 +281,14 @@ export function MapPanel() {
         style={{ ["--panel-height" as string]: `${ui.mapPanelHeight}px` }}
       >
         <div className={styles.tokenPrompt}>
-          {mapError
-            ? `Map error: ${mapError}`
-            : "Add a Mapbox token in Settings to enable the map."}
+          <p>
+            {mapError
+              ? `Map error: ${mapError}`
+              : "A Mapbox API key is required to enable the map."}
+          </p>
+          <button className="btn btn-primary" onClick={onOpenSettings}>
+            Open Settings
+          </button>
         </div>
         <div className={styles.resizeZone} onMouseDown={handleDragStart} />
       </div>

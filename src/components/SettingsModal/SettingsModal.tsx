@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Anthropic from "@anthropic-ai/sdk";
 import { useUI } from "../../state/UIContext";
 import { tauriCommands } from "../../lib/tauri";
 import styles from "./SettingsModal.module.css";
@@ -16,22 +17,17 @@ function maskKey(key: string): string {
 
 async function testAnthropicKey(key: string): Promise<boolean> {
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1,
-        messages: [{ role: "user", content: "ping" }],
-      }),
+    const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
+    await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1,
+      messages: [{ role: "user", content: "ping" }],
     });
-    return res.status !== 401 && res.status !== 403;
-  } catch {
-    return false;
+    return true;
+  } catch (err) {
+    if (err instanceof Anthropic.AuthenticationError) return false;
+    // Non-auth errors (rate limit, model error, etc.) still mean the key is valid
+    return true;
   }
 }
 

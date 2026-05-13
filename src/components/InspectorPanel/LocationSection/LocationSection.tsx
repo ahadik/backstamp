@@ -86,11 +86,13 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
   const showMap = !isEmpty;
 
   function dispatchCoords(lat: number, lng: number) {
-    dispatch({
-      type: "SET_PENDING",
-      ids: selectedIds,
-      changes: { gpsLat: lat, gpsLng: lng },
-    });
+    const changes = { gpsLat: lat, gpsLng: lng };
+    dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
+    const fields = Object.entries(changes).map(([field, value]) => ({
+      field,
+      value: value == null ? null : String(value),
+    }));
+    tauriCommands.setPendingChanges(selectedIds, fields).catch(console.error);
     tauriCommands.resolveTimezone(lat, lng).then(setResolvedTz).catch(console.error);
   }
   dispatchCoordsRef.current = dispatchCoords;
@@ -371,7 +373,14 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                 confirmLabel="Yes"
                 cancelLabel="No"
                 onConfirm={() => {
-                  applyGpxAutoTag(selectedPhotos, gpxLocateDialog.allPoints, dispatch);
+                  applyGpxAutoTag(selectedPhotos, gpxLocateDialog.allPoints, (action) => {
+                    dispatch(action);
+                    const fields = Object.entries(action.changes).map(([field, value]) => ({
+                      field,
+                      value: value == null ? null : String(value),
+                    }));
+                    tauriCommands.setPendingChanges(action.ids, fields).catch(console.error);
+                  });
                   setGpxLocateDialog(null);
                 }}
                 onCancel={() => setGpxLocateDialog(null)}

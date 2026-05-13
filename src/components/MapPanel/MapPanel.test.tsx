@@ -73,6 +73,7 @@ function setupMocks(
   uiOverrides: Partial<UIState> = {},
 ) {
   const uiDispatch = vi.fn();
+  const onOpenSettings = vi.fn();
   vi.mocked(useSession).mockReturnValue({
     state: { ...emptySession, ...sessionOverrides },
     dispatch: vi.fn(),
@@ -81,7 +82,7 @@ function setupMocks(
     state: { ...defaultUI, ...uiOverrides },
     dispatch: uiDispatch,
   });
-  return { uiDispatch };
+  return { uiDispatch, onOpenSettings };
 }
 
 beforeEach(() => {
@@ -90,33 +91,46 @@ beforeEach(() => {
 
 describe("MapPanel", () => {
   it("shows token prompt when mapboxToken is null", () => {
-    setupMocks();
-    render(<MapPanel />);
+    const { onOpenSettings } = setupMocks();
+    render(<MapPanel onOpenSettings={onOpenSettings} />);
     expect(
-      screen.getByText("Add a Mapbox token in Settings to enable the map.")
+      screen.getByText("A Mapbox API key is required to enable the map.")
     ).toBeInTheDocument();
   });
 
+  it("shows Open Settings button in no-key state", () => {
+    const { onOpenSettings } = setupMocks();
+    render(<MapPanel onOpenSettings={onOpenSettings} />);
+    expect(screen.getByRole("button", { name: "Open Settings" })).toBeInTheDocument();
+  });
+
+  it("calls onOpenSettings when Open Settings button is clicked", () => {
+    const { onOpenSettings } = setupMocks();
+    render(<MapPanel onOpenSettings={onOpenSettings} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
   it("does not show token prompt when mapboxToken is set", () => {
-    setupMocks({}, { mapboxToken: "pk.test" });
-    render(<MapPanel />);
+    const { onOpenSettings } = setupMocks({}, { mapboxToken: "pk.test" });
+    render(<MapPanel onOpenSettings={onOpenSettings} />);
     expect(
-      screen.queryByText("Add a Mapbox token in Settings to enable the map.")
+      screen.queryByText("A Mapbox API key is required to enable the map.")
     ).not.toBeInTheDocument();
   });
 
   it("renders map container div when token is present", () => {
-    setupMocks({}, { mapboxToken: "pk.test" });
-    const { container } = render(<MapPanel />);
+    const { onOpenSettings } = setupMocks({}, { mapboxToken: "pk.test" });
+    const { container } = render(<MapPanel onOpenSettings={onOpenSettings} />);
     expect(container.querySelector("[class*='map']")).toBeInTheDocument();
   });
 
   describe("drag handle", () => {
     it("dispatches SET_MAP_PANEL_HEIGHT when dragging upward", () => {
-      const { uiDispatch } = setupMocks({}, { mapPanelHeight: 200 });
-      const { container } = render(<MapPanel />);
+      const { uiDispatch, onOpenSettings } = setupMocks({}, { mapPanelHeight: 200 });
+      const { container } = render(<MapPanel onOpenSettings={onOpenSettings} />);
       const dragHandle = container.querySelector(
-        "[class*='dragHandle']"
+        "[class*='resizeZone']"
       ) as HTMLElement;
       fireEvent.mouseDown(dragHandle, { clientY: 100 });
       fireEvent.mouseMove(window, { clientY: 70 });

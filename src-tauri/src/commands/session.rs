@@ -37,6 +37,51 @@ pub(crate) struct SessionLoadResult {
     photos: Vec<PhotoRow>,
     gpx_files: Vec<GpxRow>,
     can_rollback: bool,
+    working_timezone: String,
+    grid_columns: i64,
+    map_panel_height: f64,
+}
+
+fn snake_to_camel(s: &str) -> &str {
+    match s {
+        "capture_date" => "captureDate",
+        "capture_time" => "captureTime",
+        "utc_offset" => "utcOffset",
+        "timezone" => "timezone",
+        "gps_lat" => "gpsLat",
+        "gps_lng" => "gpsLng",
+        "camera_make" => "cameraMake",
+        "camera_model" => "cameraModel",
+        "lens" => "lens",
+        "film_vendor" => "filmVendor",
+        "film_type" => "filmType",
+        other => other,
+    }
+}
+
+fn load_pending_for(conn: &rusqlite::Connection, photo_id: &str) -> Option<serde_json::Value> {
+    let query = "SELECT field, value FROM metadata_current WHERE photo_id = ?1 AND is_pending = 1";
+    let pairs: Vec<(String, Option<String>)> = conn
+        .prepare(query)
+        .ok()?
+        .query_map(rusqlite::params![photo_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .ok()?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if pairs.is_empty() {
+        return None;
+    }
+    let mut map = serde_json::Map::new();
+    for (field, value) in pairs {
+        map.insert(
+            snake_to_camel(&field).to_string(),
+            value.map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    Some(serde_json::Value::Object(map))
 }
 
 fn load_metadata_for(
@@ -134,7 +179,7 @@ pub async fn load_session(state: State<'_, AppState>) -> Result<SessionLoadResul
                     .into_owned(),
                 original_metadata: load_metadata_for(&conn, &id, false),
                 current_metadata: load_metadata_for(&conn, &id, true),
-                pending_changes: None,
+                pending_changes: load_pending_for(&conn, &id),
                 id,
                 file_path,
             }
@@ -177,10 +222,29 @@ pub async fn load_session(state: State<'_, AppState>) -> Result<SessionLoadResul
         .map(|n| n > 0)
         .unwrap_or(false);
 
+    let working_timezone = conn
+        .query_row("SELECT value FROM settings WHERE key = 'ui.workingTimezone'", [], |r| r.get(0))
+        .unwrap_or_else(|_| "America/Los_Angeles".to_string());
+
+    let grid_columns: i64 = conn
+        .query_row("SELECT value FROM settings WHERE key = 'ui.gridColumns'", [], |r| r.get::<_, String>(0))
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5);
+
+    let map_panel_height: f64 = conn
+        .query_row("SELECT value FROM settings WHERE key = 'ui.mapPanelHeight'", [], |r| r.get::<_, String>(0))
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(200.0);
+
     Ok(SessionLoadResult {
         photos,
         gpx_files,
         can_rollback,
+        working_timezone,
+        grid_columns,
+        map_panel_height,
     })
 }
 
@@ -217,7 +281,7 @@ pub async fn clear_session(state: State<'_, AppState>) -> Result<(), String> {
          DELETE FROM metadata_original;
          DELETE FROM photos;
          DELETE FROM gpx_files;
-         DELETE FROM corpus WHERE is_builtin = 0;",
+         DELETE FROM settings WHERE key LIKE 'ui.%';",
     )
     .map_err(|e| format!("clear session: {}", e))?;
     drop(conn);

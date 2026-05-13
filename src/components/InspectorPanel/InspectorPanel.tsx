@@ -1,4 +1,5 @@
 import { useSession } from "../../state/SessionContext";
+import { useUI } from "../../state/UIContext";
 import { DateTimeSection } from "./DateTimeSection/DateTimeSection";
 import { CameraSection } from "./CameraSection/CameraSection";
 import { LocationSection } from "./LocationSection/LocationSection";
@@ -11,6 +12,7 @@ interface InspectorPanelProps {
 
 export function InspectorPanel({ onOpenSettings }: InspectorPanelProps) {
   const { state } = useSession();
+  const { state: uiState } = useUI();
 
   const selectedPhotos = state.photos.filter((p) =>
     state.selectedIds.has(p.id)
@@ -48,6 +50,13 @@ export function InspectorPanel({ onOpenSettings }: InspectorPanelProps) {
           onOpenSettings={onOpenSettings}
         />
       </div>
+      {uiState.mapboxToken && uiState.claudeApiKey && (
+        <div className={styles.footer}>
+          <button className={styles.manageKeysButton} onClick={onOpenSettings}>
+            Manage API Keys
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

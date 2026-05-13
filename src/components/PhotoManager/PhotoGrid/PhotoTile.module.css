@@ -33,6 +33,30 @@
   gap: var(--space-1);
 }
 
+.missingOverlay {
+  position: absolute;
+  bottom: var(--space-1);
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.missingRemoveBtn {
+  background: var(--color-danger);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-2);
+  font-size: 11px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.missingRemoveBtn:hover {
+  opacity: 0.85;
+}
+
 .locationPin {
   position: absolute;
   top: 4px;

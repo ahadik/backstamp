@@ -31,7 +31,7 @@ Available fields:
 - camera_model: body string e.g. "EOS R5"
 - lens: string
 - film: { vendor: string, type: string } e.g. { vendor: "Kodak", type: "Portra 400" }
-- location: call the geocode_location tool to resolve a place name to coordinates
+- location: { lat, lng, display_name } — you MUST call the geocode_location tool for any place name; include the returned iana_timezone as the timezone field
 
 Rules:
 - Only include fields the user's input explicitly addresses.
@@ -53,6 +53,75 @@ const GEOCODE_TOOL: Anthropic.Tool = {
     required: ["query"],
   },
 };
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^\d{2}:\d{2}:\d{2}$/;
+
+export function validateProposal(raw: unknown): MetadataProposal {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error("Claude returned an invalid response. Please try again.");
+  }
+  const p = raw as Record<string, unknown>;
+  const out: MetadataProposal = {};
+
+  if (p.capture_date !== undefined) {
+    if (typeof p.capture_date !== "string" || !DATE_RE.test(p.capture_date)) {
+      throw new Error(`Invalid capture_date: expected YYYY-MM-DD.`);
+    }
+    out.capture_date = p.capture_date;
+  }
+  if (p.capture_time !== undefined) {
+    if (typeof p.capture_time !== "string" || !TIME_RE.test(p.capture_time)) {
+      throw new Error(`Invalid capture_time: expected HH:MM:SS.`);
+    }
+    out.capture_time = p.capture_time;
+  }
+  if (p.timezone !== undefined) {
+    if (typeof p.timezone !== "string") throw new Error("Invalid timezone.");
+    out.timezone = p.timezone;
+  }
+  if (p.camera_make !== undefined) {
+    if (typeof p.camera_make !== "string") throw new Error("Invalid camera_make.");
+    out.camera_make = p.camera_make;
+  }
+  if (p.camera_model !== undefined) {
+    if (typeof p.camera_model !== "string") throw new Error("Invalid camera_model.");
+    if (out.camera_make !== undefined) {
+      out.camera_model = p.camera_model;
+    }
+  }
+  if (p.lens !== undefined) {
+    if (typeof p.lens !== "string") throw new Error("Invalid lens.");
+    out.lens = p.lens;
+  }
+  if (p.film !== undefined) {
+    const film = p.film as Record<string, unknown>;
+    if (
+      typeof film !== "object" || film === null ||
+      typeof film.vendor !== "string" ||
+      typeof film.type !== "string"
+    ) {
+      throw new Error("Invalid film value: expected { vendor, type }.");
+    }
+    out.film = { vendor: film.vendor, type: film.type };
+  }
+  if (p.location !== undefined) {
+    const loc = p.location as Record<string, unknown>;
+    if (
+      typeof loc !== "object" || loc === null ||
+      typeof loc.lat !== "number" ||
+      typeof loc.lng !== "number"
+    ) {
+      throw new Error("Invalid location: expected { lat, lng }.");
+    }
+    out.location = {
+      lat: loc.lat,
+      lng: loc.lng,
+      display_name: typeof loc.display_name === "string" ? loc.display_name : "",
+    };
+  }
+  return out;
+}
 
 async function geocodeQuery(
   query: string,
@@ -101,6 +170,9 @@ export async function runVibeTag(
     messages: apiMessages,
   });
 
+  let geocodedLocation: { lat: number; lng: number; display_name: string } | null = null;
+  let geocodedTimezone: string | null = null;
+
   // Handle tool use loop
   while (response.stop_reason === "tool_use") {
     const toolUseBlocks = response.content.filter(
@@ -113,6 +185,8 @@ export async function runVibeTag(
         const input = toolUse.input as { query: string };
         try {
           const result = await geocodeQuery(input.query, mapboxToken ?? "");
+          geocodedLocation = { lat: result.lat, lng: result.lng, display_name: result.display_name };
+          geocodedTimezone = result.iana_timezone;
           toolResults.push({
             type: "tool_result",
             tool_use_id: toolUse.id,
@@ -158,9 +232,20 @@ export async function runVibeTag(
 
   let proposal: MetadataProposal;
   try {
-    proposal = JSON.parse(jsonStr);
-  } catch {
-    throw new Error("Claude returned an invalid response. Please try again.");
+    proposal = validateProposal(JSON.parse(jsonStr));
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      throw new Error("Claude returned an invalid response. Please try again.");
+    }
+    throw err instanceof Error ? err : new Error("Claude returned an invalid response. Please try again.");
+  }
+
+  // If geocoding ran but Claude omitted the location/timezone from its JSON, inject them.
+  if (geocodedLocation && !proposal.location) {
+    proposal.location = geocodedLocation;
+  }
+  if (proposal.location && !proposal.timezone && geocodedTimezone) {
+    proposal.timezone = geocodedTimezone;
   }
 
   return proposal;
