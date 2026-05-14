@@ -4,8 +4,8 @@ use hex;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -375,9 +375,48 @@ fn insert_photo(
     Ok(())
 }
 
+/// XMP extensions to check, in order of preference.
+const XMP_EXTENSIONS: &[&str] = &["xmp", "XMP"];
+
+fn find_sidecar_for(raw_path: &Path) -> Option<PathBuf> {
+    let stem = raw_path.file_stem()?;
+    let dir = raw_path.parent()?;
+    for ext in XMP_EXTENSIONS {
+        let candidate = dir.join(stem).with_extension(ext);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarSearchResult {
+    found: HashMap<String, String>,
+    missing: Vec<String>,
+}
+
+/// Check whether XMP sidecar files exist alongside each RAW path.
+#[tauri::command]
+pub async fn find_xmp_sidecars(raw_paths: Vec<String>) -> SidecarSearchResult {
+    let mut found = HashMap::new();
+    let mut missing = Vec::new();
+    for raw_path in raw_paths {
+        match find_sidecar_for(Path::new(&raw_path)) {
+            Some(xmp) => {
+                found.insert(raw_path, xmp.to_string_lossy().into_owned());
+            }
+            None => missing.push(raw_path),
+        }
+    }
+    SidecarSearchResult { found, missing }
+}
+
 #[tauri::command]
 pub async fn import_photos(
     paths: Vec<String>,
+    sidecar_map: HashMap<String, String>,
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -423,12 +462,19 @@ pub async fn import_photos(
 
         for (i, (path_str, file_hash)) in to_import.iter().enumerate() {
             let file_path = Path::new(path_str);
+            let sidecar_path = sidecar_map.get(path_str).map(PathBuf::from);
             let done = i + 1;
 
             println!("[import] ({}/{}) starting: {}", done, total, path_str);
 
-            let result =
-                process_one_file(file_path, file_hash.as_deref(), &thumbnails_dir, &db, &exiftool);
+            let result = process_one_file(
+                file_path,
+                file_hash.as_deref(),
+                sidecar_path.as_deref(),
+                &thumbnails_dir,
+                &db,
+                &exiftool,
+            );
 
             match result {
                 Ok(photo) => {
@@ -468,6 +514,7 @@ pub async fn import_photos(
 fn process_one_file(
     file_path: &Path,
     file_hash: Option<&str>,
+    sidecar_path: Option<&Path>,
     thumbnails_dir: &std::path::Path,
     db: &Arc<Mutex<rusqlite::Connection>>,
     exiftool: &Arc<Mutex<crate::exiftool::ExiftoolProcess>>,
@@ -478,7 +525,12 @@ fn process_one_file(
     let thumb_paths = thumbnail::generate_thumbnails(file_path, thumbnails_dir, &mut et)?;
 
     println!("[import]   reading metadata...");
-    let metadata_json = et.read_metadata(file_path)?;
+    let metadata_json = if let Some(xmp) = sidecar_path {
+        println!("[import]   merging XMP sidecar: {}", xmp.display());
+        et.read_metadata_with_sidecar(file_path, xmp)?
+    } else {
+        et.read_metadata(file_path)?
+    };
     drop(et);
 
     println!("[import]   inserting into db...");

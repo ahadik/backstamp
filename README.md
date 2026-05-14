@@ -1,4 +1,4 @@
-# Photo Manager
+# Backstamp
 
 A native macOS app for bulk-editing photo metadata. Designed for film photographers and mirrorless camera users whose photos lack GPS, have wrong timestamps, or have no metadata at all. Built with Tauri + React + TypeScript.
 
@@ -86,7 +86,7 @@ Produces a signed `.app` bundle in `src-tauri/target/release/bundle/`. The `src-
 ## Project structure
 
 ```
-photo-manager/
+backstamp/
 ├── src/                                    # React + TypeScript frontend
 │   ├── components/
 │   │   ├── TopBar/                         # Apply, Roll Back, Reset buttons + photo count

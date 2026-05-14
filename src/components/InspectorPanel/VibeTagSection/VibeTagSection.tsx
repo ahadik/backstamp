@@ -211,11 +211,7 @@ export function VibeTagSection({
                 disabled={loading || !inputText.trim()}
                 onClick={handleSubmit}
               >
-                {loading ? (
-                  <span className={styles.spinner} />
-                ) : (
-                  "→"
-                )}
+                {loading ? <span className={styles.spinner} /> : "Tag It ✨"}
               </button>
             </div>
           </>

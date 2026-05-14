@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    photo_manager_lib::run()
+    backstamp_lib::run()
 }

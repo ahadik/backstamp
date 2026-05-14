@@ -1,4 +1,4 @@
-use photo_manager_lib::session;
+use backstamp_lib::session;
 use rusqlite::Connection;
 use tempfile::TempDir;
 

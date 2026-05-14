@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useSession } from "../../state/SessionContext";
 import { useUI } from "../../state/UIContext";
@@ -12,7 +12,6 @@ import styles from "./TopBar.module.css";
 interface TopBarProps {
   applyPhase: ApplyPhase;
   setApplyPhase: (phase: ApplyPhase) => void;
-  onOpenSettings: () => void;
 }
 
 function mapLoadedPhoto(p: {
@@ -39,7 +38,7 @@ function mapLoadedPhoto(p: {
   };
 }
 
-export function TopBar({ applyPhase, setApplyPhase, onOpenSettings }: TopBarProps) {
+export function TopBar({ applyPhase, setApplyPhase }: TopBarProps) {
   const { state, dispatch } = useSession();
   const { dispatch: uiDispatch } = useUI();
   const { photos, selectedIds, canRollback, applyInProgress, gpxFiles } = state;
@@ -48,6 +47,19 @@ export function TopBar({ applyPhase, setApplyPhase, onOpenSettings }: TopBarProp
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showUndoMenu, setShowUndoMenu] = useState(false);
+  const undoRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showUndoMenu) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (undoRef.current && !undoRef.current.contains(e.target as Node)) {
+        setShowUndoMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showUndoMenu]);
 
   const hasPending = photos.some((p) => p.pendingChanges !== null);
   const hasSelected = selectedIds.size > 0;
@@ -55,7 +67,6 @@ export function TopBar({ applyPhase, setApplyPhase, onOpenSettings }: TopBarProp
   const busy = applyInProgress || applyPhase.type !== "idle";
 
   const resetIds = hasSelected ? [...selectedIds] : photos.map((p) => p.id);
-  const resetLabel = hasSelected ? "Reset Selected" : "Reset All";
 
   async function handleApply() {
     const payload = buildApplyPayload(photos);
@@ -134,20 +145,44 @@ export function TopBar({ applyPhase, setApplyPhase, onOpenSettings }: TopBarProp
           >
             Apply
           </button>
-          <button
-            className="btn btn-glass"
-            disabled={!canRollback || busy || isRollingBack}
-            onClick={handleRollback}
-          >
-            {isRollingBack ? "Rolling Back…" : "Roll Back"}
-          </button>
-          <button
-            className="btn btn-glass"
-            disabled={!hasPhotos || busy}
-            onClick={() => setShowResetConfirm(true)}
-          >
-            {resetLabel}
-          </button>
+          <div className={styles.undoWrapper} ref={undoRef}>
+            <button
+              className="btn btn-glass"
+              disabled={(!canRollback && !hasPhotos) || busy || isRollingBack}
+              onClick={() => setShowUndoMenu((v) => !v)}
+            >
+              Undo ▾
+            </button>
+            {showUndoMenu && (
+              <div className={styles.undoDropdown}>
+                <button
+                  className={styles.undoItem}
+                  disabled={!canRollback || isRollingBack}
+                  onClick={() => { setShowUndoMenu(false); handleRollback(); }}
+                >
+                  <span className={styles.undoItemTitle}>
+                    {isRollingBack ? "Rolling Back…" : "Roll Back"}
+                  </span>
+                  <span className={styles.undoItemDesc}>
+                    Reset metadata for all photos to state at prior Apply. Changes written to disk.
+                  </span>
+                </button>
+                <div className={styles.undoDivider} />
+                <button
+                  className={styles.undoItem}
+                  disabled={!hasPhotos}
+                  onClick={() => { setShowUndoMenu(false); setShowResetConfirm(true); }}
+                >
+                  <span className={styles.undoItemTitle}>
+                    Reset {hasSelected ? "Selected" : "All"}
+                  </span>
+                  <span className={styles.undoItemDesc}>
+                    {hasSelected ? "Selected" : "All"} photos will be reset to the metadata present at import. No changes written to disk.
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
           <button
             className="btn btn-glass"
             disabled={photos.length === 0 && gpxFiles.length === 0}
@@ -155,13 +190,7 @@ export function TopBar({ applyPhase, setApplyPhase, onOpenSettings }: TopBarProp
           >
             Clear Session
           </button>
-          <button
-            className="btn btn-glass"
-            onClick={onOpenSettings}
-            aria-label="Open settings"
-          >
-            ⚙
-          </button>
+
         </div>
         {rollbackError && (
           <div className={styles.errorBanner}>

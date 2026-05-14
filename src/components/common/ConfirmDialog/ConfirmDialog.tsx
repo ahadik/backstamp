@@ -25,23 +25,23 @@ export function ConfirmDialog({
   return (
     <div className={styles.backdrop} onClick={onCancel}>
       <div
-        className={`inspector-card ${styles.dialog}`}
+        className={styles.dialog}
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className={styles.title}>{title}</h3>
         <p className={styles.message}>{message}</p>
         <div className={styles.actions}>
           {infoOnly ? (
-            <button className="btn btn-primary" onClick={onCancel}>
+            <button className="btn" onClick={onCancel}>
               {cancelLabel === "Cancel" ? "OK" : cancelLabel}
             </button>
           ) : (
             <>
-              <button className="btn btn-glass" onClick={onCancel}>
+              <button className="btn" onClick={onCancel}>
                 {cancelLabel}
               </button>
               <button
-                className={`btn ${destructive ? "btn-danger" : "btn-primary"}`}
+                className={`btn${destructive ? ` ${styles.destructive}` : ""}`}
                 onClick={onConfirm}
               >
                 {confirmLabel}

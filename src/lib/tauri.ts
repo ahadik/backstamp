@@ -72,12 +72,21 @@ export interface SessionLoadResult {
   mapPanelHeight: number;
 }
 
+export interface SidecarSearchResult {
+  found: Record<string, string>;
+  missing: string[];
+}
+
 export const tauriCommands = {
   loadSession: () => invoke<SessionLoadResult>("load_session"),
 
   clearSession: () => invoke<void>("clear_session"),
 
-  importPhotos: (paths: string[]) => invoke<void>("import_photos", { paths }),
+  importPhotos: (paths: string[], sidecarMap: Record<string, string> = {}) =>
+    invoke<void>("import_photos", { paths, sidecarMap }),
+
+  findXmpSidecars: (rawPaths: string[]) =>
+    invoke<SidecarSearchResult>("find_xmp_sidecars", { rawPaths }),
 
   removePhotos: (ids: string[]) => invoke<void>("remove_photos", { ids }),
 

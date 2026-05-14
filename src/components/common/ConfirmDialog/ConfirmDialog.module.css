@@ -1,38 +1,72 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.5);
   z-index: 200;
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .dialog {
-  padding: var(--space-5);
-  max-width: 360px;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5) var(--space-5) 0;
+  max-width: 280px;
   width: calc(100% - var(--space-8));
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
 }
 
 .title {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
   margin: 0 0 var(--space-2);
+  text-align: center;
 }
 
 .message {
-  font-size: 13px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   margin: 0 0 var(--space-4);
   line-height: 1.5;
+  text-align: center;
 }
 
 .actions {
   display: flex;
-  gap: var(--space-2);
-  justify-content: flex-end;
+  gap: 0;
+  justify-content: stretch;
+  border-top: 0.5px solid var(--color-border);
+  margin: 0 calc(-1 * var(--space-5));
+}
+
+.actions button {
+  flex: 1;
+  border-radius: 0 !important;
+  border: none !important;
+  border-right: 0.5px solid var(--color-border) !important;
+  background: transparent !important;
+  color: var(--color-accent) !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  padding: var(--space-3) var(--space-2) !important;
+  justify-content: center;
+}
+
+.actions button:last-child {
+  border-right: none !important;
+  font-weight: 600 !important;
+}
+
+.actions button:hover {
+  background: var(--color-glass-bg) !important;
+  filter: none !important;
+}
+
+.actions button.destructive {
+  color: var(--color-danger) !important;
 }

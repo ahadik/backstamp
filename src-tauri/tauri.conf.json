@@ -1,7 +1,7 @@
 {
-  "productName": "photo-manager",
+  "productName": "Backstamp",
   "version": "0.1.0",
-  "identifier": "com.alexhadik.photomanager",
+  "identifier": "com.alexhadik.backstamp",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Photo Manager",
+        "title": "Backstamp",
         "width": 1400,
         "height": 900,
         "minWidth": 1000,
@@ -24,7 +24,7 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/**", "$APPDATA/photo-manager/thumbnails/**"]
+        "scope": ["$APPDATA/**", "$APPDATA/backstamp/thumbnails/**"]
       }
     }
   },

@@ -21,6 +21,10 @@ const SUPPORTED_EXTENSIONS = new Set([
   "dng", "cr3", "cr2", "nef", "arw", "raf", "orf", "rw2", "pef",
 ]);
 
+const RAW_EXTENSIONS = new Set([
+  "dng", "cr3", "cr2", "nef", "arw", "raf", "orf", "rw2", "pef",
+]);
+
 const GPX_EXTENSIONS = new Set(["gpx"]);
 
 interface RawPhotoData {
@@ -90,6 +94,13 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
 
   const [showDropOverlay, setShowDropOverlay] = useState(false);
   const [showGpxKeyPrompt, setShowGpxKeyPrompt] = useState(false);
+  const [pendingSidecarSearch, setPendingSidecarSearch] = useState<{
+    rawsWithoutXmp: string[];
+    allRawPaths: string[];
+    sidecarMap: Record<string, string>;
+    gpxPaths: string[];
+  } | null>(null);
+  const [sidecarMissingNotice, setSidecarMissingNotice] = useState<string[] | null>(null);
   const [pendingGpxImport, setPendingGpxImport] = useState<{
     gpxFile: GpxFile;
     matchCount: number;
@@ -170,18 +181,48 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
   handleGpxDropRef.current = handleGpxDrop;
 
   const handleFinderDrop = useCallback((paths: string[]) => {
-    const photoPaths: string[] = [];
+    const rawPaths: string[] = [];
+    const regularPhotoPaths: string[] = [];
+    const xmpPaths: string[] = [];
     const gpxPaths: string[] = [];
+
     for (const path of paths) {
       const ext = path.split(".").pop()?.toLowerCase() ?? "";
-      if (SUPPORTED_EXTENSIONS.has(ext)) photoPaths.push(path);
+      if (RAW_EXTENSIONS.has(ext)) rawPaths.push(path);
+      else if (SUPPORTED_EXTENSIONS.has(ext)) regularPhotoPaths.push(path);
+      else if (ext === "xmp") xmpPaths.push(path);
       else if (GPX_EXTENSIONS.has(ext)) gpxPaths.push(path);
     }
-    if (photoPaths.length > 0) {
-      tauriCommands.importPhotos(photoPaths).catch((err) => console.error("[finderDrop]", err));
+
+    // Build sidecar map from XMP files dropped alongside RAW files.
+    // Match on full path minus extension (directory-aware, case-insensitive).
+    const sidecarMap: Record<string, string> = {};
+    const xmpByStem = new Map<string, string>();
+    for (const xmp of xmpPaths) {
+      const stem = xmp.replace(/\.[^./]+$/, "").toLowerCase();
+      xmpByStem.set(stem, xmp);
     }
-    for (const gpxPath of gpxPaths) {
-      handleGpxDropRef.current(gpxPath);
+
+    const rawsWithoutXmp: string[] = [];
+    for (const raw of rawPaths) {
+      const stem = raw.replace(/\.[^./]+$/, "").toLowerCase();
+      const match = xmpByStem.get(stem);
+      if (match) sidecarMap[raw] = match;
+      else rawsWithoutXmp.push(raw);
+    }
+
+    const allRawPaths = [...regularPhotoPaths, ...rawPaths];
+
+    if (rawsWithoutXmp.length > 0) {
+      // Pause and ask whether to search for sidecars on disk.
+      setPendingSidecarSearch({ rawsWithoutXmp, allRawPaths, sidecarMap, gpxPaths });
+    } else {
+      if (allRawPaths.length > 0) {
+        tauriCommands.importPhotos(allRawPaths, sidecarMap).catch((err) =>
+          console.error("[finderDrop]", err)
+        );
+      }
+      for (const gpxPath of gpxPaths) handleGpxDropRef.current(gpxPath);
     }
   }, []);
 
@@ -326,6 +367,48 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
             onOpenSettings();
           }}
           onCancel={() => setShowGpxKeyPrompt(false)}
+        />
+      )}
+      {pendingSidecarSearch && (
+        <ConfirmDialog
+          title="Search for XMP Sidecars?"
+          message={`${pendingSidecarSearch.rawsWithoutXmp.length} RAW file${pendingSidecarSearch.rawsWithoutXmp.length === 1 ? " was" : "s were"} dropped without an XMP sidecar. Search for sidecar files in the same folder${pendingSidecarSearch.rawsWithoutXmp.length === 1 ? "" : "s"}?`}
+          confirmLabel="Search"
+          cancelLabel="Import Without Sidecar"
+          onConfirm={() => {
+            const { rawsWithoutXmp, allRawPaths, sidecarMap, gpxPaths } = pendingSidecarSearch;
+            setPendingSidecarSearch(null);
+            (async () => {
+              const result = await tauriCommands.findXmpSidecars(rawsWithoutXmp);
+              const mergedMap = { ...sidecarMap, ...result.found };
+              if (result.missing.length > 0) setSidecarMissingNotice(result.missing);
+              if (allRawPaths.length > 0) {
+                tauriCommands.importPhotos(allRawPaths, mergedMap).catch((err) =>
+                  console.error("[finderDrop]", err)
+                );
+              }
+              for (const gpxPath of gpxPaths) handleGpxDropRef.current(gpxPath);
+            })();
+          }}
+          onCancel={() => {
+            const { allRawPaths, sidecarMap, gpxPaths } = pendingSidecarSearch;
+            setPendingSidecarSearch(null);
+            if (allRawPaths.length > 0) {
+              tauriCommands.importPhotos(allRawPaths, sidecarMap).catch((err) =>
+                console.error("[finderDrop]", err)
+              );
+            }
+            for (const gpxPath of gpxPaths) handleGpxDropRef.current(gpxPath);
+          }}
+        />
+      )}
+      {sidecarMissingNotice && (
+        <ConfirmDialog
+          title="XMP Sidecar Not Found"
+          message={`No XMP sidecar was found for ${sidecarMissingNotice.length} file${sidecarMissingNotice.length === 1 ? "" : "s"}. These files will be imported with their embedded camera metadata only. To include edits or additional metadata, write the EXIF data to disk using your photo management software (e.g. Lightroom, Capture One) before importing.`}
+          infoOnly
+          onConfirm={() => setSidecarMissingNotice(null)}
+          onCancel={() => setSidecarMissingNotice(null)}
         />
       )}
     </div>

@@ -159,6 +159,25 @@ impl ExiftoolProcess {
             .ok_or_else(|| "exiftool returned empty JSON array".to_string())
     }
 
+    /// Read metadata from `raw_path` and merge in XMP tags from `xmp_path`.
+    /// XMP sidecar values win for any overlapping keys (non-null values only).
+    pub fn read_metadata_with_sidecar(
+        &mut self,
+        raw_path: &std::path::Path,
+        xmp_path: &std::path::Path,
+    ) -> Result<serde_json::Value, String> {
+        let mut raw_json = self.read_metadata(raw_path)?;
+        let xmp_json = self.read_metadata(xmp_path)?;
+        if let (Some(raw_obj), Some(xmp_obj)) = (raw_json.as_object_mut(), xmp_json.as_object()) {
+            for (k, v) in xmp_obj {
+                if !v.is_null() {
+                    raw_obj.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        Ok(raw_json)
+    }
+
     pub fn stop(&mut self) {
         let _ = writeln!(self.stdin, "-stay_open\nFalse");
         let _ = self.stdin.flush();
