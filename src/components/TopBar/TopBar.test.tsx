@@ -53,6 +53,7 @@ const defaultUiState = {
   mapPanelHeight: 200,
   mapboxToken: null,
   claudeApiKey: null,
+  error: null,
 };
 
 const nullMeta = {

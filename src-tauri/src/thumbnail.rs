@@ -28,6 +28,8 @@ pub fn generate_thumbnails(
     }
 
     let img = load_source_image(file_path, exiftool)?;
+    let orientation = exiftool.read_orientation(file_path).unwrap_or(1);
+    let img = apply_orientation(img, orientation);
 
     let large_img = resize_to(&img, LARGE_PX, FilterType::Lanczos3);
     save_jpeg(&large_img, &large_path)?;
@@ -104,6 +106,19 @@ fn decode_file(file_path: &Path) -> Result<image::DynamicImage, String> {
         .map_err(|e| format!("guess format: {}", e))?
         .decode()
         .map_err(|e| format!("decode {}: {}", file_path.display(), e))
+}
+
+fn apply_orientation(img: image::DynamicImage, orientation: u32) -> image::DynamicImage {
+    match orientation {
+        2 => img.fliph(),
+        3 => img.rotate180(),
+        4 => img.flipv(),
+        5 => img.rotate90().fliph(),
+        6 => img.rotate90(),
+        7 => img.rotate270().fliph(),
+        8 => img.rotate270(),
+        _ => img,
+    }
 }
 
 fn resize_to(img: &image::DynamicImage, target_px: u32, filter: FilterType) -> image::DynamicImage {

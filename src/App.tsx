@@ -8,6 +8,7 @@ import { InspectorPanel } from "./components/InspectorPanel/InspectorPanel";
 import { MapPanel } from "./components/MapPanel/MapPanel";
 import { ApplyModal } from "./components/ApplyModal/ApplyModal";
 import { SettingsModal } from "./components/SettingsModal/SettingsModal";
+import { ErrorModal } from "./components/common/ErrorModal/ErrorModal";
 import { useSession } from "./state/SessionContext";
 import { useUI } from "./state/UIContext";
 import { tauriCommands } from "./lib/tauri";
@@ -98,7 +99,7 @@ function App() {
 
   useEffect(() => {
     const pending = [
-      listen<{ done: number; total: number; photoId: string; success: boolean; error: string | null }>(
+      listen<{ done: number; total: number; photoId: string; filePath: string; success: boolean; error: string | null }>(
         "apply:progress",
         ({ payload }) => {
           setApplyPhase((prev) => {
@@ -109,7 +110,7 @@ function App() {
                   ...prev.errors,
                   {
                     photoId: payload.photoId,
-                    filePath: state.photos.find((p) => p.id === payload.photoId)?.filePath ?? "",
+                    filePath: payload.filePath,
                     error: payload.error ?? "Unknown error",
                   },
                 ];
@@ -122,7 +123,7 @@ function App() {
         setApplyPhase({ type: "undoing", done: payload.done, total: payload.total });
       }),
 
-      listen<{ failedFiles: Array<{ photoId: string; error: string }> }>(
+      listen<{ failedFiles: Array<{ photoId: string; filePath: string; error: string }> }>(
         "apply:complete",
         async ({ payload }) => {
           try {
@@ -139,7 +140,7 @@ function App() {
           }
           const errors: ApplyError[] = payload.failedFiles.map((f) => ({
             photoId: f.photoId,
-            filePath: state.photos.find((p) => p.id === f.photoId)?.filePath ?? "",
+            filePath: f.filePath,
             error: f.error,
           }));
           setApplyPhase({ type: "complete", errors });
@@ -197,6 +198,7 @@ function App() {
         />
       )}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      <ErrorModal />
     </div>
   );
 }

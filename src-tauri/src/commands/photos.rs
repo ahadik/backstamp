@@ -24,7 +24,8 @@ pub struct Metadata {
     pub timezone: Option<String>,
     pub gps_lat: Option<f64>,
     pub gps_lng: Option<f64>,
-    pub camera_body: Option<String>,
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
     pub lens: Option<String>,
     pub film_vendor: Option<String>,
     pub film_type: Option<String>,
@@ -206,11 +207,8 @@ fn parse_metadata(json: &serde_json::Value) -> Metadata {
         .unwrap_or("")
         .trim()
         .to_string();
-    let camera_body = if make.is_empty() && model.is_empty() {
-        None
-    } else {
-        Some(format!("{} {}", make, model).trim().to_string())
-    };
+    let camera_make = if make.is_empty() { None } else { Some(make) };
+    let camera_model = if model.is_empty() { None } else { Some(model) };
 
     let lens = json
         .get("LensModel")
@@ -239,11 +237,12 @@ fn parse_metadata(json: &serde_json::Value) -> Metadata {
     Metadata {
         capture_date,
         capture_time,
+        timezone: utc_offset.clone(),
         utc_offset,
-        timezone: None,
         gps_lat,
         gps_lng,
-        camera_body,
+        camera_make,
+        camera_model,
         lens,
         film_vendor,
         film_type,
@@ -343,7 +342,8 @@ fn insert_photo(
         ("timezone", metadata.timezone.clone()),
         ("gps_lat", metadata.gps_lat.map(|v| v.to_string())),
         ("gps_lng", metadata.gps_lng.map(|v| v.to_string())),
-        ("camera_body", metadata.camera_body.clone()),
+        ("camera_make", metadata.camera_make.clone()),
+        ("camera_model", metadata.camera_model.clone()),
         ("lens", metadata.lens.clone()),
         ("film_vendor", metadata.film_vendor.clone()),
         ("film_type", metadata.film_type.clone()),
@@ -634,9 +634,10 @@ mod tests {
     }
 
     #[test]
-    fn joins_make_and_model() {
+    fn splits_make_and_model() {
         let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
-        assert_eq!(m.camera_body.as_deref(), Some("Canon EOS R5"));
+        assert_eq!(m.camera_make.as_deref(), Some("Canon"));
+        assert_eq!(m.camera_model.as_deref(), Some("EOS R5"));
     }
 
     #[test]
@@ -665,7 +666,8 @@ mod tests {
         assert!(m.capture_date.is_none());
         assert!(m.capture_time.is_none());
         assert!(m.utc_offset.is_none());
-        assert!(m.camera_body.is_none());
+        assert!(m.camera_make.is_none());
+        assert!(m.camera_model.is_none());
         assert!(m.lens.is_none());
         assert!(m.gps_lat.is_none());
         assert!(m.gps_lng.is_none());
@@ -749,10 +751,11 @@ mod tests {
     }
 
     #[test]
-    fn camera_body_is_none_when_both_make_and_model_missing() {
+    fn camera_make_and_model_are_none_when_both_missing() {
         let json = r#"[{"LensModel": "some lens"}]"#;
         let m = parse_exiftool_output(json).unwrap();
-        assert!(m.camera_body.is_none());
+        assert!(m.camera_make.is_none());
+        assert!(m.camera_model.is_none());
     }
 
     #[test]
@@ -809,7 +812,8 @@ mod tests {
             timezone: None,
             gps_lat: None,
             gps_lng: None,
-            camera_body: None,
+            camera_make: None,
+            camera_model: None,
             lens: None,
             film_vendor: None,
             film_type: None,

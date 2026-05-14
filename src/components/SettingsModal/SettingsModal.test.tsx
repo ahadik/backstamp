@@ -25,6 +25,7 @@ const baseUI: UIState = {
   mapPanelHeight: 200,
   mapboxToken: null,
   claudeApiKey: null,
+  error: null,
 };
 
 function setupMocks(uiOverrides: Partial<UIState> = {}) {

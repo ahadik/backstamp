@@ -254,34 +254,44 @@ fn write_sidecar(
     sidecar_path: &Path,
     tag_args: &[String],
 ) -> Result<(), String> {
+    let stem = sidecar_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("sidecar");
+    let dir = sidecar_path.parent().unwrap_or_else(|| Path::new("."));
+    let temp_path = dir.join(format!("{}_pmtmp.xmp", stem));
+    let temp_str = temp_path.to_string_lossy().into_owned();
     let sidecar_str = sidecar_path.to_string_lossy().into_owned();
     let raw_str = raw_path.to_string_lossy().into_owned();
 
-    let mut args: Vec<&str> = Vec::new();
+    let _ = std::fs::remove_file(&temp_path);
 
+    // When a sidecar exists, use it as the source so all existing XMP tags are
+    // preserved. When there is no sidecar yet, seed from the RAW file's embedded
+    // metadata. In both cases ExifTool writes to a temp file; we rename afterward
+    // to avoid reading from and writing to the same path simultaneously.
+    let source = if sidecar_path.exists() { &sidecar_str } else { &raw_str };
+
+    let mut args: Vec<&str> = Vec::new();
     for a in tag_args {
         args.push(a.as_str());
     }
-
-    if sidecar_path.exists() {
-        // Merge: start from existing sidecar, apply new tags, write back
-        args.push("-tagsfromfile");
-        args.push(sidecar_str.as_str());
-        args.push("-o");
-        args.push(sidecar_str.as_str());
-        args.push(sidecar_str.as_str());
-    } else {
-        // New sidecar: derive from RAW embedded metadata + new tags
-        args.push("-o");
-        args.push(sidecar_str.as_str());
-        args.push(raw_str.as_str());
-    }
+    args.push("-o");
+    args.push(temp_str.as_str());
+    args.push(source.as_str());
 
     let result = exiftool.run_command(&args)?;
     if result.to_lowercase().contains("error") {
+        let _ = std::fs::remove_file(&temp_path);
         return Err(result.trim().to_string());
     }
-    Ok(())
+    if !temp_path.exists() {
+        return Err(format!("ExifTool did not create sidecar at {}", temp_str));
+    }
+    std::fs::rename(&temp_path, sidecar_path).map_err(|e| {
+        let _ = std::fs::remove_file(&temp_path);
+        format!("rename sidecar failed: {}", e)
+    })
 }
 
 #[cfg(test)]

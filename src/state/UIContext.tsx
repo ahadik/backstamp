@@ -8,6 +8,7 @@ export interface UIState {
   mapPanelHeight: number;   // px
   mapboxToken: string | null;
   claudeApiKey: string | null;
+  error: string | null;
 }
 
 type UIAction =
@@ -17,6 +18,7 @@ type UIAction =
   | { type: "SET_MAP_PANEL_HEIGHT"; height: number }
   | { type: "SET_MAPBOX_TOKEN"; token: string | null }
   | { type: "SET_CLAUDE_API_KEY"; key: string | null }
+  | { type: "SET_ERROR"; error: string | null }
   | { type: "RESTORE_UI"; workingTimezone: string; gridColumns: number; mapPanelHeight: number };
 
 const initialState: UIState = {
@@ -26,6 +28,7 @@ const initialState: UIState = {
   mapPanelHeight: 200,
   mapboxToken: null,
   claudeApiKey: null,
+  error: null,
 };
 
 function uiReducer(state: UIState, action: UIAction): UIState {
@@ -42,6 +45,8 @@ function uiReducer(state: UIState, action: UIAction): UIState {
       return { ...state, mapboxToken: action.token };
     case "SET_CLAUDE_API_KEY":
       return { ...state, claudeApiKey: action.key };
+    case "SET_ERROR":
+      return { ...state, error: action.error };
     case "RESTORE_UI":
       return {
         ...state,

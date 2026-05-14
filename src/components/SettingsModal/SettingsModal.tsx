@@ -70,8 +70,8 @@ function KeyField({
     if (!isDirty) return;
     const trimmed = value.trim();
     if (trimmed) {
-      await tauriCommands.setSetting(settingKey, trimmed);
       onSaved(trimmed);
+      tauriCommands.setSetting(settingKey, trimmed).catch(console.error);
     } else {
       // User cleared the field — revert display without removing the saved key
       setValue(savedValue ?? "");
@@ -200,6 +200,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             onTest={testAnthropicKey}
             onSaved={(val) => dispatch({ type: "SET_CLAUDE_API_KEY", key: val })}
           />
+        </div>
+        <div className={styles.footer}>
+          <button className="btn btn-primary" onClick={onClose}>
+            Save
+          </button>
         </div>
       </div>
     </div>

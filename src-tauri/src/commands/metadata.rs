@@ -60,6 +60,7 @@ struct ApplyProgressEvent {
     done: usize,
     total: usize,
     photo_id: String,
+    file_path: String,
     success: bool,
     error: Option<String>,
 }
@@ -81,6 +82,7 @@ struct ApplyCompleteEvent {
 #[serde(rename_all = "camelCase")]
 struct FailedFile {
     photo_id: String,
+    file_path: String,
     error: String,
 }
 
@@ -330,6 +332,7 @@ pub async fn apply_changes(
                             done,
                             total,
                             photo_id: photo_id.clone(),
+                            file_path: file_path.clone(),
                             success: true,
                             error: None,
                         },
@@ -338,6 +341,7 @@ pub async fn apply_changes(
                 Err(err) => {
                     failed_files.push(FailedFile {
                         photo_id: photo_id.clone(),
+                        file_path: file_path.clone(),
                         error: err.clone(),
                     });
                     done += 1;
@@ -347,6 +351,7 @@ pub async fn apply_changes(
                             done,
                             total,
                             photo_id: photo_id.clone(),
+                            file_path: file_path.clone(),
                             success: false,
                             error: Some(err),
                         },
@@ -546,6 +551,7 @@ pub async fn rollback(
             Ok(()) => restored_ids.push(photo_id.clone()),
             Err(e) => failed_files.push(FailedFile {
                 photo_id: photo_id.clone(),
+                file_path: file_path.clone(),
                 error: e,
             }),
         }
@@ -669,6 +675,7 @@ pub async fn reset_photos(
                 Err(e) => {
                     failed_files.push(FailedFile {
                         photo_id: photo_id.clone(),
+                        file_path: file_path.clone(),
                         error: e,
                     });
                 }

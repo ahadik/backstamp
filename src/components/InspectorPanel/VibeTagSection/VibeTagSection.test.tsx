@@ -61,6 +61,7 @@ const baseUI: UIState = {
   mapPanelHeight: 200,
   mapboxToken: "pk.test",
   claudeApiKey: "sk-ant-test",
+  error: null,
 };
 
 function setupMocks(

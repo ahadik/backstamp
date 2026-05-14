@@ -55,14 +55,38 @@ export function getDateKey(photo: Photo, workingTimezone: string): string {
   }
 }
 
+function toUTCMillis(photo: Photo): number | null {
+  const { captureDate, captureTime, utcOffset } = photo.currentMetadata;
+  if (!captureDate || !captureTime || !utcOffset) return null;
+  try {
+    const d = new Date(`${captureDate}T${captureTime}${utcOffset}`);
+    return isNaN(d.getTime()) ? null : d.getTime();
+  } catch {
+    return null;
+  }
+}
+
 function comparePhotos(a: Photo, b: Photo): number {
-  const ta = a.currentMetadata.captureTime;
-  const tb = b.currentMetadata.captureTime;
-  if (ta === null && tb === null) return a.filePath < b.filePath ? -1 : 1;
-  if (ta === null) return 1;
-  if (tb === null) return -1;
-  if (ta !== tb) return ta < tb ? -1 : 1;
+  const ma = toUTCMillis(a);
+  const mb = toUTCMillis(b);
+  if (ma !== null && mb !== null) {
+    if (ma !== mb) return ma - mb;
+    return a.filePath < b.filePath ? -1 : a.filePath > b.filePath ? 1 : 0;
+  }
+  // Fallback: use date+time string so date contributes to order, not just time
+  const sa = toDateTimeString(a);
+  const sb = toDateTimeString(b);
+  if (sa === null && sb === null) return a.filePath < b.filePath ? -1 : 1;
+  if (sa === null) return 1;
+  if (sb === null) return -1;
+  if (sa !== sb) return sa < sb ? -1 : 1;
   return a.filePath < b.filePath ? -1 : a.filePath > b.filePath ? 1 : 0;
+}
+
+function toDateTimeString(photo: Photo): string | null {
+  const { captureDate, captureTime } = photo.currentMetadata;
+  if (!captureTime) return null;
+  return captureDate ? `${captureDate}T${captureTime}` : captureTime;
 }
 
 export function formatLabel(dateKey: string): string {

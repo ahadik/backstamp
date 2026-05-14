@@ -30,6 +30,7 @@ const defaultUIState: UIState = {
   mapPanelHeight: 200,
   mapboxToken: null,
   claudeApiKey: null,
+  error: null,
 };
 
 function setupMocks(

@@ -111,6 +111,58 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         corpus_seed::seed_camera_corpus(conn)?;
         conn.pragma_update(None, "user_version", 6i64)?;
     }
+    if version < 7 {
+        // Split legacy camera_body rows ("Make Model") into separate camera_make and
+        // camera_model rows. Uses a priority-ordered known-makes list to find where the
+        // make ends; if no known make matches, the whole value goes into camera_model.
+        const KNOWN_MAKES: &[&str] = &[
+            "Phase One", "Fujifilm", "Hasselblad", "Panasonic", "Olympus",
+            "Samsung", "Pentax", "Canon", "Nikon", "Sony", "Leica",
+            "Sigma", "Ricoh", "Apple", "Google", "Fuji",
+        ];
+        for table in &["metadata_original", "metadata_current"] {
+            let rows: Vec<(String, String)> = {
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT photo_id, value FROM {} WHERE field = 'camera_body'",
+                    table
+                ))?;
+                let collected: Vec<(String, String)> = stmt
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                collected
+            };
+            for (photo_id, body) in &rows {
+                let make = KNOWN_MAKES.iter().find(|&&m| {
+                    body.to_lowercase().starts_with(&m.to_lowercase())
+                });
+                let (camera_make, camera_model) = match make {
+                    Some(m) => {
+                        let model = body[m.len()..].trim().to_string();
+                        (Some(m.to_string()), if model.is_empty() { None } else { Some(model) })
+                    }
+                    None => (None, Some(body.clone())),
+                };
+                if let Some(ref v) = camera_make {
+                    conn.execute(
+                        &format!("INSERT OR REPLACE INTO {} (photo_id, field, value) VALUES (?1, ?2, ?3)", table),
+                        rusqlite::params![photo_id, "camera_make", v],
+                    )?;
+                }
+                if let Some(ref v) = camera_model {
+                    conn.execute(
+                        &format!("INSERT OR REPLACE INTO {} (photo_id, field, value) VALUES (?1, ?2, ?3)", table),
+                        rusqlite::params![photo_id, "camera_model", v],
+                    )?;
+                }
+                conn.execute(
+                    &format!("DELETE FROM {} WHERE photo_id = ?1 AND field = 'camera_body'", table),
+                    rusqlite::params![photo_id],
+                )?;
+            }
+        }
+        conn.pragma_update(None, "user_version", 7i64)?;
+    }
     Ok(())
 }
 

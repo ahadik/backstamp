@@ -107,6 +107,20 @@ describe("groupPhotosByDay", () => {
     expect(block.label).toMatch(/2024/);
   });
 
+  it("sorts by UTC moment when photos from different timezones share a bucket", () => {
+    // Both photos land in 2024-03-15 in America/New_York (UTC-4):
+    //   "first":  2024-03-15T20:00-05:00 → UTC 2024-03-16T01:00 → NY 21:00
+    //   "second": 2024-03-16T02:00+00:00 → UTC 2024-03-16T02:00 → NY 22:00
+    // Without UTC comparison, captureTime "02:00" < "20:00" reverses the order.
+    const photos = [
+      makePhoto("second", { captureDate: "2024-03-16", captureTime: "02:00:00", utcOffset: "+00:00" }),
+      makePhoto("first",  { captureDate: "2024-03-15", captureTime: "20:00:00", utcOffset: "-05:00" }),
+    ];
+    const block = groupPhotosByDay(photos, "America/New_York")[0];
+    expect(block.photos[0].id).toBe("first");
+    expect(block.photos[1].id).toBe("second");
+  });
+
   it("adjusts date when utcOffset shifts the calendar day into the working timezone", () => {
     // Photo taken at 2024-03-15T23:00:00+00:00 is 2024-03-15 in UTC
     // but 2024-03-15 19:00:00 in America/New_York (UTC-4 in March) — still same day

@@ -158,6 +158,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   const [mapError, setMapError] = useState<string | null>(null);
   const [resizing, setResizing] = useState(false);
   const isResizingRef = useRef(false);
+  const failedTokenRef = useRef<string | null>(null);
 
   const hasSelection = session.selectedIds.size > 0;
   const focusPhotos = hasSelection
@@ -182,8 +183,14 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   gpxFilesRef.current = session.gpxFiles;
 
   useEffect(() => {
-    if (!ui.mapboxToken || !mapContainer.current || map.current) return;
-    setMapError(null);
+    if (!ui.mapboxToken) return;
+    // If there's a stale error from a previous (bad) token, clear it so the map
+    // container re-renders. The effect will fire again once mapError becomes null.
+    if (mapError) {
+      if (ui.mapboxToken !== failedTokenRef.current) setMapError(null);
+      return;
+    }
+    if (!mapContainer.current || map.current) return;
     mapboxgl.accessToken = ui.mapboxToken;
     try {
       map.current = new mapboxgl.Map({
@@ -193,6 +200,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
         center: [0, 20],
       });
     } catch (err) {
+      failedTokenRef.current = ui.mapboxToken;
       setMapError(err instanceof Error ? err.message : String(err));
       return;
     }
@@ -219,7 +227,9 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
       map.current?.remove();
       map.current = null;
     };
-  }, [ui.mapboxToken]);
+  // mapError in deps so the effect re-runs after we clear a stale error
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ui.mapboxToken, mapError]);
 
   // Re-fit whenever selection or pin coordinates change
   useEffect(() => {
