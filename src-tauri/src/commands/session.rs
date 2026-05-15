@@ -1,4 +1,4 @@
-use crate::gpx::TrackPoint;
+use crate::gpx::{timezone_for_point, TrackPoint};
 use crate::thumbnail::path_key;
 use crate::AppState;
 use rusqlite::params;
@@ -29,6 +29,7 @@ pub(crate) struct GpxRow {
     added_at: i64,
     track_points: Vec<TrackPoint>,
     thumbnail_path: Option<String>,
+    timezone: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -214,7 +215,8 @@ pub async fn load_session(state: State<'_, AppState>) -> Result<SessionLoadResul
                 .as_deref()
                 .and_then(|j| serde_json::from_str(j).ok())
                 .unwrap_or_default();
-            GpxRow { id, file_path, added_at, track_points, thumbnail_path }
+            let timezone = track_points.first().and_then(|p| timezone_for_point(p.lat, p.lng));
+            GpxRow { id, file_path, added_at, track_points, thumbnail_path, timezone }
         })
         .collect()
     };

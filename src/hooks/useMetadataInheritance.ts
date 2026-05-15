@@ -80,6 +80,8 @@ export function computeInheritance(
     "cameraMake", "cameraModel", "lens", "filmVendor", "filmType",
   ];
 
+  const tz = resolveTimezone(neighborBefore, neighborAfter);
+
   for (let i = 0; i < draggingPhotos.length; i++) {
     const p = draggingPhotos[i];
     const t = interpolateTimestamp(
@@ -95,6 +97,7 @@ export function computeInheritance(
       captureTime: t.captureTime,
       ...gps,
     };
+    if (tz !== null) photoChanges.timezone = tz;
     if (!hasCameraConflict && mergedCamera !== null) {
       for (const field of cameraFields) {
         if (mergedCamera[field] != null) {
@@ -145,6 +148,10 @@ export function cameraDataEqual(a: CameraData | null, b: CameraData | null): boo
     a.filmVendor === b.filmVendor &&
     a.filmType === b.filmType
   );
+}
+
+function resolveTimezone(before: Photo | null, after: Photo | null): string | null {
+  return before?.currentMetadata.timezone ?? after?.currentMetadata.timezone ?? null;
 }
 
 function interpolateTimestamp(

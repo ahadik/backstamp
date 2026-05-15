@@ -126,12 +126,18 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
     mapboxToken: string
   ): Promise<void> => {
     try {
+      // Mapbox Static Images API has an ~8192-char URL limit. Downsample dense
+      // tracks (e.g. 1-point-per-second GPS logs) to stay well within it.
+      const MAX_POINTS = 100;
+      const sampled = trackPoints.length <= MAX_POINTS
+        ? trackPoints
+        : trackPoints.filter((_, i) => i % Math.ceil(trackPoints.length / MAX_POINTS) === 0);
       const geojson = encodeURIComponent(
         JSON.stringify({
           type: "Feature",
           geometry: {
             type: "LineString",
-            coordinates: trackPoints.map((p) => [p.lng, p.lat]),
+            coordinates: sampled.map((p) => [p.lng, p.lat]),
           },
           properties: {},
         })
@@ -161,6 +167,7 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
         addedAt: result.addedAt,
         trackPoints: result.trackPoints,
         thumbnailPath: null,
+        timezone: result.timezone,
       };
       sessionDispatch({ type: "ADD_GPX", gpxFile });
 
@@ -324,7 +331,7 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
               : `${pendingGpxImport.matchCount} photo${pendingGpxImport.matchCount === 1 ? "" : "s"} have timestamps that overlap with this GPX track. Auto-tag their locations now?`
           }
           confirmLabel="Yes"
-          cancelLabel="No"
+          cancelLabel={pendingGpxImport.matchCount === 0 ? "Cancel" : "No"}
           infoOnly={pendingGpxImport.matchCount === 0}
           onConfirm={() => {
             applyGpxAutoTag(

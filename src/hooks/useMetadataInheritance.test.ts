@@ -370,6 +370,78 @@ describe("computeInheritance — gap drop camera conflict detection", () => {
   });
 });
 
+describe("computeInheritance — gap drop timezone resolution", () => {
+  it("inherits timezone when both neighbors share the same timezone", () => {
+    const before = makePhoto("b", { captureTime: "10:00:00", timezone: "America/New_York" });
+    const after = makePhoto("a", { captureTime: "12:00:00", timezone: "America/New_York" });
+    const dragging = [makePhoto("x")];
+    const result = computeInheritance(
+      dragging,
+      { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
+      null, before, after,
+    );
+    expect(result.changes.get("x")?.timezone).toBe("America/New_York");
+  });
+
+  it("uses before (left) timezone when both neighbors have different timezones", () => {
+    const before = makePhoto("b", { captureTime: "10:00:00", timezone: "America/New_York" });
+    const after = makePhoto("a", { captureTime: "12:00:00", timezone: "Europe/Paris" });
+    const dragging = [makePhoto("x")];
+    const result = computeInheritance(
+      dragging,
+      { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
+      null, before, after,
+    );
+    expect(result.changes.get("x")?.timezone).toBe("America/New_York");
+  });
+
+  it("adopts after-neighbor timezone when only after has one", () => {
+    const before = makePhoto("b", { captureTime: "10:00:00" });
+    const after = makePhoto("a", { captureTime: "12:00:00", timezone: "Asia/Tokyo" });
+    const dragging = [makePhoto("x")];
+    const result = computeInheritance(
+      dragging,
+      { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
+      null, before, after,
+    );
+    expect(result.changes.get("x")?.timezone).toBe("Asia/Tokyo");
+  });
+
+  it("omits timezone from changes when neither neighbor has one", () => {
+    const before = makePhoto("b", { captureTime: "10:00:00" });
+    const after = makePhoto("a", { captureTime: "12:00:00" });
+    const dragging = [makePhoto("x")];
+    const result = computeInheritance(
+      dragging,
+      { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
+      null, before, after,
+    );
+    expect(result.changes.get("x")?.timezone).toBeUndefined();
+  });
+
+  it("adopts the sole neighbor timezone for a start-of-block gap", () => {
+    const after = makePhoto("a", { captureTime: "10:00:00", timezone: "Pacific/Auckland" });
+    const dragging = [makePhoto("x")];
+    const result = computeInheritance(
+      dragging,
+      { kind: "gap", gap: { beforeId: null, afterId: "a", dayKey: "2024-03-15" } },
+      null, null, after,
+    );
+    expect(result.changes.get("x")?.timezone).toBe("Pacific/Auckland");
+  });
+
+  it("adopts the sole neighbor timezone for an end-of-block gap", () => {
+    const before = makePhoto("b", { captureTime: "10:00:00", timezone: "America/Chicago" });
+    const dragging = [makePhoto("x")];
+    const result = computeInheritance(
+      dragging,
+      { kind: "gap", gap: { beforeId: "b", afterId: null, dayKey: "2024-03-15" } },
+      null, before, null,
+    );
+    expect(result.changes.get("x")?.timezone).toBe("America/Chicago");
+  });
+});
+
 describe("cameraDataEqual", () => {
   it("returns true when both are null", () => {
     expect(cameraDataEqual(null, null)).toBe(true);

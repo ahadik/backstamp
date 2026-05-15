@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import Anthropic from "@anthropic-ai/sdk";
 import { useUI } from "../../state/UIContext";
 import { tauriCommands } from "../../lib/tauri";
 import styles from "./SettingsModal.module.css";
@@ -17,17 +16,23 @@ function maskKey(key: string): string {
 
 async function testAnthropicKey(key: string): Promise<boolean> {
   try {
-    const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
-    await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1,
-      messages: [{ role: "user", content: "ping" }],
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1,
+        messages: [{ role: "user", content: "ping" }],
+      }),
     });
-    return true;
-  } catch (err) {
-    if (err instanceof Anthropic.AuthenticationError) return false;
-    // Non-auth errors (rate limit, model error, etc.) still mean the key is valid
-    return true;
+    // 401 = invalid key; other non-200 statuses (rate limit, etc.) still mean the key is valid
+    return res.status !== 401;
+  } catch {
+    return false;
   }
 }
 
@@ -37,6 +42,27 @@ async function testMapboxKey(key: string): Promise<boolean> {
       `https://api.mapbox.com/geocoding/v5/mapbox.places/test.json?access_token=${encodeURIComponent(key)}&limit=1`
     );
     return res.status === 200;
+  } catch {
+    return false;
+  }
+}
+
+async function testGoogleMapsKey(key: string): Promise<boolean> {
+  try {
+    const res = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": key,
+        "X-Goog-FieldMask": "suggestions.placePrediction.placeId",
+      },
+      body: JSON.stringify({ input: "New York" }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    // A valid key with Places API (New) enabled returns a suggestions array.
+    // An error field here means the API is not enabled on this key.
+    return !data.error && Array.isArray(data.suggestions);
   } catch {
     return false;
   }
@@ -183,12 +209,22 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         <div className={styles.body}>
           <KeyField
             label="Mapbox API Key"
-            hint="Required for the location map, place search, and GPX route thumbnails."
+            hint="Required for the location map and GPX route thumbnails. Also used as fallback for location search when no Google Maps key is set."
             placeholder="pk.eyJ1Ijoi…"
             savedValue={state.mapboxToken}
             settingKey="mapbox_token"
             onTest={testMapboxKey}
             onSaved={(val) => dispatch({ type: "SET_MAPBOX_TOKEN", token: val })}
+          />
+          <hr className="divider" />
+          <KeyField
+            label="Google Maps API Key"
+            hint="Optional. When set, used for location search and geocoding instead of Mapbox. Map rendering always uses Mapbox."
+            placeholder="AIza…"
+            savedValue={state.googleMapsKey}
+            settingKey="google_maps_key"
+            onTest={testGoogleMapsKey}
+            onSaved={(val) => dispatch({ type: "SET_GOOGLE_MAPS_KEY", key: val })}
           />
           <hr className="divider" />
           <KeyField

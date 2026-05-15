@@ -226,18 +226,25 @@ I am shooting film photos more often now, as well as taking pictures on a new mi
 ### Settings & API Keys
 
 1. The app has a Settings panel accessible via a gear icon or menu item in the top bar. It contains all user configuration that persists across sessions.
-2. Two external API keys are required for full functionality:
+2. External API keys required for full functionality:
     1. **Anthropic API key** — required for the Vibe Tag feature (Claude integration).
-    2. **Mapbox API key** — required for map rendering, location search, reverse geocoding, and GPX route thumbnails.
+    2. **Mapbox API key** — required for map rendering, GPX route thumbnails, and as the fallback for location search when no Google Maps key is provided. Users must supply their own Mapbox public token (`pk.*`).
+    3. **Google Maps API key** — optional. When provided, replaces Mapbox geocoding for location search (type-ahead suggestions and coordinate lookup). Map rendering always uses Mapbox regardless of whether this key is set.
 3. Each key is entered in a labelled text field. The field masks the key after entry (shows a truncated prefix and dots for the remainder). A "Show / Hide" toggle reveals the full key on demand.
 4. A "Test" button appears next to each key field. Clicking it makes a lightweight API call to verify the key is valid and returns a success or failure indicator inline.
 5. When a key is absent or invalid:
     1. **Anthropic key missing or invalid** — the Vibe Tag section in the Inspector Panel is replaced with a message explaining that an Anthropic API key is required, with a button that opens Settings directly to the key field.
     2. **Mapbox key missing or invalid** — the Map Panel, the mini-map in the Location section, and location type-ahead search are all replaced with a placeholder message explaining that a Mapbox API key is required, with the same direct-to-Settings button. GPX file import is also blocked and surfaces the same prompt.
-6. The app does not require either key to be set in order to open or use core photo management, date/time, and camera metadata features.
-7. Keys are stored securely and never written to disk in plaintext. They persist across sessions and survive session clears.
-8. A "Remove" action is available for each key to delete it from secure storage entirely.
-9. The Settings panel is a modal overlay that covers the full app window. It is not a state of the Inspector Panel and does not replace or affect any part of the main view. The Inspector Panel remains unchanged while Settings is open (though it is visually covered by the modal).
+    3. **Google Maps key absent** — location search falls back to Mapbox geocoding automatically. No degraded UI is shown; the fallback is seamless.
+    4. **Google Maps key present but invalid** — an inline error is shown in the location search field when a search fails. The user can clear the key in Settings to revert to Mapbox geocoding.
+6. Location search behavior:
+    1. When a Google Maps API key is set, location type-ahead search and coordinate lookup use the Google Maps Geocoding API.
+    2. When no Google Maps API key is set, location search falls back to the Mapbox Geocoding API (requires a valid Mapbox key).
+    3. In both cases, map rendering is always powered by Mapbox.
+7. The app does not require any key to be set in order to open or use core photo management, date/time, and camera metadata features.
+8. Keys are stored securely and never written to disk in plaintext. They persist across sessions and survive session clears.
+9. A "Remove" action is available for each key to delete it from secure storage entirely.
+10. The Settings panel is a modal overlay that covers the full app window. It is not a state of the Inspector Panel and does not replace or affect any part of the main view. The Inspector Panel remains unchanged while Settings is open (though it is visually covered by the modal).
 
 ### Compatibility & acceptance criteria
 

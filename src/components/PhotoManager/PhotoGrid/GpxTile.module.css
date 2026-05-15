@@ -32,12 +32,22 @@
 }
 
 .label {
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-2) 0;
   font-size: 11px;
   color: var(--color-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.timeRange {
+  padding: 2px var(--space-2) var(--space-1);
+  font-size: 10px;
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
 }
 
 .removeBtn {

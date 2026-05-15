@@ -29,6 +29,7 @@ const defaultUIState: UIState = {
   panelWidth: 800,
   mapPanelHeight: 200,
   mapboxToken: null,
+  googleMapsKey: null,
   claudeApiKey: null,
   error: null,
 };

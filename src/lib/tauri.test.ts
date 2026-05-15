@@ -32,6 +32,7 @@ describe("tauriCommands", () => {
     await tauriCommands.importPhotos(["/a.jpg", "/b.jpg"]);
     expect(mockInvoke).toHaveBeenCalledWith("import_photos", {
       paths: ["/a.jpg", "/b.jpg"],
+      sidecarMap: {},
     });
   });
 

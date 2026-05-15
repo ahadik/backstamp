@@ -33,6 +33,38 @@ src-tauri/resources/exiftool -ver
 
 ExifTool is a Perl script. It requires system Perl (`/usr/bin/perl`), which ships with all currently supported macOS versions. See the technical architecture doc for the full bundling story.
 
+## API Keys
+
+Backstamp uses three external API keys, all entered in **Settings** (gear icon in the top bar). Keys are stored in the system keychain and never written to disk in plaintext.
+
+### Mapbox (required)
+
+Required for map rendering, photo clustering, GPX route thumbnails, and location search fallback.
+
+1. Sign up or log in at [mapbox.com](https://www.mapbox.com).
+2. Go to **Account → Access tokens**.
+3. Copy the **Default public token** (starts with `pk.`), or create a new public token.
+4. Paste it into Backstamp → Settings → **Mapbox API Key**.
+
+### Google Maps (optional)
+
+When set, replaces Mapbox for location type-ahead search and coordinate lookup. Map rendering always uses Mapbox regardless.
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com) and create or select a project.
+2. Open **APIs & Services → Library** and enable **Places API (New)**.
+   - Do not enable the legacy "Places API" — Backstamp uses the newer v1 API.
+3. Open **APIs & Services → Credentials** and click **Create credentials → API key**.
+4. Click the pencil icon to edit the new key, then under **API restrictions** choose **Restrict key** and select **Places API (New)**. Save.
+   - HTTP referrer restrictions do not apply to a desktop app, so leave application restrictions set to **None**.
+5. Paste the key (starts with `AIza`) into Backstamp → Settings → **Google Maps API Key**.
+
+### Anthropic (required for Vibe Tag)
+
+Required for the Vibe Tag natural-language metadata entry panel.
+
+1. Go to [console.anthropic.com](https://console.anthropic.com) and create an API key.
+2. Paste it into Backstamp → Settings → **Anthropic API Key**.
+
 ## Setup
 
 ```sh
@@ -166,7 +198,8 @@ See [`product-requirements/technical-architecture.md`](product-requirements/tech
 - **ExifTool** (bundled) — the only tool with full coverage of all target RAW formats and EXIF/XMP/IPTC standards; runs in `-stay_open` mode for low-latency reads; writes via inline temp-file-rename (JPEG/HEIC) or XMP sidecar (RAW)
 - **SQLite** (`rusqlite` with bundled feature) — session persistence, rollback history, corpus storage, settings
 - **tzf-rs v1** — fast timezone-from-coordinates lookup (no network required)
-- **Mapbox GL JS** — map rendering, photo clustering, GPX route overlays, geocoding, and reverse geocoding (user-supplied API key)
+- **Mapbox GL JS** — map rendering, photo clustering, GPX route overlays, and location search fallback (user-supplied API key)
+- **Google Maps Places API (New)** — optional; replaces Mapbox for location type-ahead search and coordinate lookup when a Google Maps key is configured (user-supplied API key)
 - **Claude API** (`claude-sonnet-4-6`) — natural language metadata entry via the Vibe Tag panel, with tool use for geocoding (user-supplied API key)
 - No external state library — React `useReducer` + `useContext` only
 

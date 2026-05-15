@@ -13,8 +13,11 @@ import styles from "./LocationSection.module.css";
 const DEBOUNCE_MS = 300;
 
 interface GeocodingFeature {
-  properties: { full_address: string };
-  geometry: { coordinates: [number, number] };
+  label: string;
+  // Mapbox resolves coords eagerly; Google resolves lazily via placeId on select
+  lat?: number;
+  lng?: number;
+  placeId?: string;
 }
 
 interface LocationSectionProps {
@@ -26,6 +29,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
   const { state: session, dispatch } = useSession();
   const { state: uiState } = useUI();
   const mapboxToken = uiState.mapboxToken;
+  const googleMapsKey = uiState.googleMapsKey;
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -53,7 +57,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
   const gpsLng = deriveFieldValue(selectedPhotos, (m) => m.gpsLng);
   const timezone = deriveFieldValue(selectedPhotos, (m) => m.timezone);
 
-  const allTrackPoints = session.gpxFiles.flatMap((g) => g.trackPoints);
+  const allTrackPoints = session.gpxFiles.flatMap((g) => g.trackPoints).sort((a, b) => a.timestamp - b.timestamp);
   const timezones = new Set(
     selectedPhotos
       .map((p) => p.currentMetadata.timezone)
@@ -215,25 +219,52 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
 
   const fetchSuggestions = useCallback(
     async (query: string) => {
-      if (!query.trim() || !mapboxToken) {
+      if (!query.trim()) {
         setSuggestions([]);
         return;
       }
       try {
-        const url = new URL("https://api.mapbox.com/search/geocode/v6/forward");
-        url.searchParams.set("q", query);
-        url.searchParams.set("access_token", mapboxToken);
-        url.searchParams.set("limit", "5");
-        url.searchParams.set("autocomplete", "true");
-        const resp = await fetch(url.toString());
-        const data = await resp.json();
-        setSuggestions(data.features ?? []);
+        let features: GeocodingFeature[];
+        if (googleMapsKey) {
+          const resp = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Goog-Api-Key": googleMapsKey,
+              "X-Goog-FieldMask": "suggestions.placePrediction.placeId,suggestions.placePrediction.text.text",
+            },
+            body: JSON.stringify({ input: query }),
+          });
+          const data = await resp.json();
+          features = (data.suggestions ?? []).slice(0, 5).map(
+            (s: { placePrediction: { text: { text: string }; placeId: string } }) => ({
+              label: s.placePrediction.text.text,
+              placeId: s.placePrediction.placeId,
+            })
+          );
+        } else if (mapboxToken) {
+          const url = new URL("https://api.mapbox.com/search/geocode/v6/forward");
+          url.searchParams.set("q", query);
+          url.searchParams.set("access_token", mapboxToken);
+          url.searchParams.set("limit", "5");
+          url.searchParams.set("autocomplete", "true");
+          const resp = await fetch(url.toString());
+          const data = await resp.json();
+          features = (data.features ?? []).map((f: { properties: { full_address: string }; geometry: { coordinates: [number, number] } }) => ({
+            label: f.properties.full_address,
+            lat: f.geometry.coordinates[1],
+            lng: f.geometry.coordinates[0],
+          }));
+        } else {
+          features = [];
+        }
+        setSuggestions(features);
         setSuggestionsOpen(true);
       } catch {
         setSuggestions([]);
       }
     },
-    [mapboxToken]
+    [googleMapsKey, mapboxToken]
   );
 
   function handleSearchChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -249,11 +280,29 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
     }
   }
 
-  function handleSuggestionSelect(feature: GeocodingFeature) {
+  async function handleSuggestionSelect(feature: GeocodingFeature) {
     setSuggestionsOpen(false);
-    setSearchQuery(feature.properties.full_address);
-    const [lng, lat] = feature.geometry.coordinates;
-    dispatchCoords(lat, lng);
+    setSearchQuery(feature.label);
+    if (feature.lat !== undefined && feature.lng !== undefined) {
+      dispatchCoords(feature.lat, feature.lng);
+    } else if (feature.placeId && googleMapsKey) {
+      try {
+        const resp = await fetch(
+          `https://places.googleapis.com/v1/places/${feature.placeId}`,
+          {
+            headers: {
+              "X-Goog-Api-Key": googleMapsKey,
+              "X-Goog-FieldMask": "location",
+            },
+          }
+        );
+        const data = await resp.json();
+        const loc = data.location;
+        if (loc) dispatchCoords(loc.latitude, loc.longitude);
+      } catch {
+        // ignore — coords simply won't update
+      }
+    }
   }
 
   // Close suggestions on outside click
@@ -308,6 +357,9 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                 onChange={handleSearchChange}
                 onKeyDown={handleSearchKeyDown}
                 onFocus={() => suggestions.length > 0 && setSuggestionsOpen(true)}
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
               />
               {suggestionsOpen && suggestions.length > 0 && (
                 <div className={styles.suggestions}>
@@ -320,7 +372,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                         handleSuggestionSelect(f);
                       }}
                     >
-                      {f.properties.full_address}
+                      {f.label}
                     </button>
                   ))}
                 </div>

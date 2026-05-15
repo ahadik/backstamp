@@ -14,6 +14,7 @@ export interface GpxImportResult {
   addedAt: number;
   trackPoints: TrackPoint[];
   thumbnailPath: string | null;
+  timezone: string | null;
 }
 
 export interface PhotoApplyChanges {
@@ -65,6 +66,7 @@ export interface SessionLoadResult {
     addedAt: number;
     trackPoints: TrackPoint[];
     thumbnailPath: string | null;
+    timezone: string | null;
   }>;
   canRollback: boolean;
   workingTimezone: string;

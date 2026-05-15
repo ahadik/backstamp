@@ -30,7 +30,14 @@ export interface GpxFile {
   addedAt: number;
   trackPoints: Array<{ lat: number; lng: number; timestamp: number }>;
   thumbnailPath: string | null;
+  timezone: string | null;
 }
+
+export type MetadataSnapshot = Array<{
+  id: string;
+  currentMetadata: Metadata;
+  pendingChanges: Partial<Metadata> | null;
+}>;
 
 export interface SessionState {
   photos: Photo[];
@@ -39,6 +46,7 @@ export interface SessionState {
   selectedGpxId: string | null;
   applyInProgress: boolean;
   canRollback: boolean;
+  metadataHistory: MetadataSnapshot[];
 }
 
 type SessionAction =
@@ -64,7 +72,8 @@ type SessionAction =
   | { type: "UPDATE_GPX_THUMBNAIL"; id: string; thumbnailPath: string }
   | { type: "REORDER_PHOTOS"; orderedIds: string[] }
   | { type: "RESTORE_SESSION"; photos: Photo[]; gpxFiles: GpxFile[]; canRollback: boolean }
-  | { type: "CLEAR_SESSION" };
+  | { type: "CLEAR_SESSION" }
+  | { type: "UNDO_LAST_EDIT" };
 
 export const initialMetadata: Metadata = {
   captureDate: null,
@@ -87,7 +96,16 @@ export const initialState: SessionState = {
   selectedGpxId: null,
   applyInProgress: false,
   canRollback: false,
+  metadataHistory: [],
 };
+
+function diffMetadata(original: Metadata, current: Metadata): Partial<Metadata> | null {
+  const changes: Partial<Metadata> = {};
+  for (const key of Object.keys(original) as (keyof Metadata)[]) {
+    if (original[key] !== current[key]) (changes as Record<string, unknown>)[key] = current[key];
+  }
+  return Object.keys(changes).length > 0 ? changes : null;
+}
 
 export function sessionReducer(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
@@ -155,13 +173,22 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
 
     case "SET_PENDING": {
+      const snapshot: MetadataSnapshot = state.photos
+        .filter((p) => action.ids.includes(p.id))
+        .map((p) => ({
+          id: p.id,
+          currentMetadata: { ...p.currentMetadata },
+          pendingChanges: p.pendingChanges ? { ...p.pendingChanges } : null,
+        }));
       const updated = state.photos.map((p) => {
         if (!action.ids.includes(p.id)) return p;
         const pending = { ...(p.pendingChanges ?? {}), ...action.changes };
         const current = { ...p.currentMetadata, ...action.changes };
         return { ...p, pendingChanges: pending, currentMetadata: current };
       });
-      return { ...state, photos: updated };
+      const history = [...state.metadataHistory, snapshot];
+      if (history.length > 50) history.shift();
+      return { ...state, photos: updated, metadataHistory: history };
     }
 
     case "CLEAR_PENDING": {
@@ -185,7 +212,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case "ROLLBACK_COMPLETE": {
       const byId = new Map(action.restoredPhotos.map((p) => [p.id, p]));
       const updated = state.photos.map((p) => byId.get(p.id) ?? p);
-      return { ...state, photos: updated, canRollback: action.canRollback };
+      return { ...state, photos: updated, canRollback: action.canRollback, metadataHistory: [] };
     }
 
     case "RESET_PHOTOS": {
@@ -254,10 +281,26 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         gpxFiles: action.gpxFiles,
         canRollback: action.canRollback,
         selectedIds: new Set(),
+        metadataHistory: [],
       };
 
     case "CLEAR_SESSION":
       return { ...initialState };
+
+    case "UNDO_LAST_EDIT": {
+      if (state.metadataHistory.length === 0) return state;
+      const history = state.metadataHistory.slice(0, -1);
+      const snapshot = state.metadataHistory[state.metadataHistory.length - 1];
+      const byId = new Map(snapshot.map((s) => [s.id, s]));
+      const updated = state.photos.map((p) => {
+        const saved = byId.get(p.id);
+        if (!saved) return p;
+        const currentMetadata = { ...saved.currentMetadata };
+        const pendingChanges = diffMetadata(p.originalMetadata, currentMetadata);
+        return { ...p, currentMetadata, pendingChanges };
+      });
+      return { ...state, photos: updated, metadataHistory: history };
+    }
 
     default:
       return state;

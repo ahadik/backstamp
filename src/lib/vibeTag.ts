@@ -17,6 +17,10 @@ export interface VibeTagMessage {
   content: string;
 }
 
+export interface VibeTagDevData {
+  rawResponses: Anthropic.Message[];
+}
+
 const SYSTEM_PROMPT_TEMPLATE = `You are a photo metadata assistant. Your only job is to interpret the user's description and return a JSON metadata proposal, or respond with the exact string "I couldn't figure out what you meant" if the input cannot be mapped to the available fields.
 
 Today's date: {{ISO_DATE}}
@@ -147,7 +151,7 @@ export async function runVibeTag(
   selectedPhotoCount: number,
   currentMetadataSummary: object,
   mapboxToken: string | null
-): Promise<MetadataProposal> {
+): Promise<{ proposal: MetadataProposal; devData: VibeTagDevData }> {
   const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
 
   const systemPrompt = SYSTEM_PROMPT_TEMPLATE.replace(
@@ -162,6 +166,8 @@ export async function runVibeTag(
     content: m.content,
   }));
 
+  const rawResponses: Anthropic.Message[] = [];
+
   let response = await client.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 1024,
@@ -169,6 +175,7 @@ export async function runVibeTag(
     tools: [GEOCODE_TOOL],
     messages: apiMessages,
   });
+  rawResponses.push(response);
 
   let geocodedLocation: { lat: number; lng: number; display_name: string } | null = null;
   let geocodedTimezone: string | null = null;
@@ -214,6 +221,7 @@ export async function runVibeTag(
         { role: "user", content: toolResults },
       ],
     });
+    rawResponses.push(response);
   }
 
   const textBlock = response.content.find(
@@ -248,5 +256,5 @@ export async function runVibeTag(
     proposal.timezone = geocodedTimezone;
   }
 
-  return proposal;
+  return { proposal, devData: { rawResponses } };
 }

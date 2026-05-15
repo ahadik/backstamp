@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useSession } from "../../state/SessionContext";
 import { useUI } from "../../state/UIContext";
+import { useDevLog } from "../../state/DevLogContext";
 import { tauriCommands } from "../../lib/tauri";
 import { buildApplyPayload } from "../../lib/applyUtils";
 import { ConfirmDialog } from "../common/ConfirmDialog/ConfirmDialog";
@@ -41,6 +42,7 @@ function mapLoadedPhoto(p: {
 export function TopBar({ applyPhase, setApplyPhase }: TopBarProps) {
   const { state, dispatch } = useSession();
   const { dispatch: uiDispatch } = useUI();
+  const { entries: devEntries, open: openDevLog } = useDevLog();
   const { photos, selectedIds, canRollback, applyInProgress, gpxFiles } = state;
 
   const [isRollingBack, setIsRollingBack] = useState(false);
@@ -65,6 +67,7 @@ export function TopBar({ applyPhase, setApplyPhase }: TopBarProps) {
   const hasSelected = selectedIds.size > 0;
   const hasPhotos = photos.length > 0;
   const busy = applyInProgress || applyPhase.type !== "idle";
+  const canUndoEdit = state.metadataHistory.length > 0;
 
   const resetIds = hasSelected ? [...selectedIds] : photos.map((p) => p.id);
 
@@ -136,6 +139,18 @@ export function TopBar({ applyPhase, setApplyPhase }: TopBarProps) {
           <span className={`text-sm ${styles.count}`}>
             {photos.length} {photos.length === 1 ? "photo" : "photos"}
           </span>
+          {import.meta.env.DEV && devEntries.length > 0 && (() => {
+            const latest = devEntries[devEntries.length - 1];
+            return (
+              <button
+                className={`${styles.devNotification} ${styles[latest.level]}`}
+                onClick={openDevLog}
+                title={`${devEntries.length} dev log ${devEntries.length === 1 ? "entry" : "entries"}`}
+              >
+                {latest.level === "error" ? "✕" : "⚠"}
+              </button>
+            );
+          })()}
         </div>
         <div className={styles.controls}>
           <button
@@ -148,13 +163,24 @@ export function TopBar({ applyPhase, setApplyPhase }: TopBarProps) {
           <div className={styles.undoWrapper} ref={undoRef}>
             <button
               className="btn btn-glass"
-              disabled={(!canRollback && !hasPhotos) || busy || isRollingBack}
+              disabled={(!canRollback && !hasPhotos && !canUndoEdit) || busy || isRollingBack}
               onClick={() => setShowUndoMenu((v) => !v)}
             >
               Undo ▾
             </button>
             {showUndoMenu && (
               <div className={styles.undoDropdown}>
+                <button
+                  className={styles.undoItem}
+                  disabled={!canUndoEdit || busy}
+                  onClick={() => { setShowUndoMenu(false); dispatch({ type: "UNDO_LAST_EDIT" }); }}
+                >
+                  <span className={styles.undoItemTitle}>Undo Last Edit</span>
+                  <span className={styles.undoItemDesc}>
+                    Revert the last metadata edit. Does not write changes to disk.
+                  </span>
+                </button>
+                <div className={styles.undoDivider} />
                 <button
                   className={styles.undoItem}
                   disabled={!canRollback || isRollingBack}

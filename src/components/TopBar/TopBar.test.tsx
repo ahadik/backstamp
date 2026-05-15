@@ -12,6 +12,10 @@ vi.mock("../../state/UIContext", () => ({
   useUI: vi.fn(),
 }));
 
+vi.mock("../../state/DevLogContext", () => ({
+  useDevLog: vi.fn(() => ({ entries: [], isOpen: false, open: vi.fn(), close: vi.fn(), clear: vi.fn() })),
+}));
+
 vi.mock("../../lib/tauri", () => ({
   tauriCommands: {
     applyChanges: vi.fn().mockResolvedValue(undefined),
@@ -52,6 +56,7 @@ const defaultUiState = {
   panelWidth: 800,
   mapPanelHeight: 200,
   mapboxToken: null,
+  googleMapsKey: null,
   claudeApiKey: null,
   error: null,
 };
@@ -138,48 +143,63 @@ describe("TopBar — Apply button", () => {
 // ── Roll Back button ──────────────────────────────────────────────────────────
 
 describe("TopBar — Roll Back button", () => {
+  function openUndoMenu() {
+    fireEvent.click(screen.getByRole("button", { name: /undo/i }));
+  }
+
   it("is disabled when canRollback is false", () => {
-    setup({ canRollback: false });
+    setup({ canRollback: false, photos: [makePhoto("a")] });
+    openUndoMenu();
     expect(screen.getByRole("button", { name: /roll back/i })).toBeDisabled();
   });
 
   it("is enabled when canRollback is true", () => {
     setup({ canRollback: true });
+    openUndoMenu();
     expect(screen.getByRole("button", { name: /roll back/i })).not.toBeDisabled();
   });
 
   it("is disabled when applyInProgress is true, even if canRollback", () => {
     setup({ canRollback: true, applyInProgress: true });
-    expect(screen.getByRole("button", { name: /roll back/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /undo/i })).toBeDisabled();
   });
 });
 
 // ── Reset button ─────────────────────────────────────────────────────────────
 
 describe("TopBar — Reset button", () => {
+  function openUndoMenu() {
+    fireEvent.click(screen.getByRole("button", { name: /undo/i }));
+  }
+
   it("is disabled when there are no photos", () => {
     setup({ photos: [] });
-    expect(screen.getByRole("button", { name: /reset/i })).toBeDisabled();
+    // Undo button itself is disabled when no photos and canRollback is false
+    expect(screen.getByRole("button", { name: /undo/i })).toBeDisabled();
   });
 
   it("is enabled when photos exist", () => {
     setup({ photos: [makePhoto("a")] });
-    expect(screen.getByRole("button", { name: /reset/i })).not.toBeDisabled();
+    openUndoMenu();
+    expect(screen.getByRole("button", { name: /reset all/i })).not.toBeDisabled();
   });
 
   it("says 'Reset All' when no selection", () => {
     setup({ photos: [makePhoto("a")], selectedIds: new Set() });
+    openUndoMenu();
     expect(screen.getByRole("button", { name: /reset all/i })).toBeTruthy();
   });
 
   it("says 'Reset Selected' when photos are selected", () => {
     setup({ photos: [makePhoto("a")], selectedIds: new Set(["a"]) });
+    openUndoMenu();
     expect(screen.getByRole("button", { name: /reset selected/i })).toBeTruthy();
   });
 
   it("is disabled when applyInProgress is true", () => {
     setup({ photos: [makePhoto("a")], applyInProgress: true });
-    expect(screen.getByRole("button", { name: /reset/i })).toBeDisabled();
+    // Undo button itself is disabled when busy, preventing access to Reset
+    expect(screen.getByRole("button", { name: /undo/i })).toBeDisabled();
   });
 });
 

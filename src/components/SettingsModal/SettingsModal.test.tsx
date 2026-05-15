@@ -24,6 +24,7 @@ const baseUI: UIState = {
   panelWidth: 800,
   mapPanelHeight: 200,
   mapboxToken: null,
+  googleMapsKey: null,
   claudeApiKey: null,
   error: null,
 };
@@ -140,7 +141,8 @@ describe("test button", () => {
     setupMocks({ claudeApiKey: "sk-ant-bad" });
     render(<SettingsModal onClose={onClose} />);
     const testBtns = screen.getAllByRole("button", { name: /^test$/i });
-    await act(async () => { fireEvent.click(testBtns[1]); });
+    // index 2 = Anthropic key Test button (Mapbox=0, Google Maps=1, Anthropic=2)
+    await act(async () => { fireEvent.click(testBtns[2]); });
     await waitFor(() => expect(screen.getByText("✗ Invalid")).toBeInTheDocument());
   });
 

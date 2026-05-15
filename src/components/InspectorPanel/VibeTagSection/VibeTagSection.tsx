@@ -5,7 +5,7 @@ import { deriveFieldValue } from "../../../lib/inspectorUtils";
 import { runVibeTag } from "../../../lib/vibeTag";
 import { tauriCommands } from "../../../lib/tauri";
 import type { Photo, Metadata } from "../../../state/SessionContext";
-import type { MetadataProposal, VibeTagMessage } from "../../../lib/vibeTag";
+import type { MetadataProposal, VibeTagMessage, VibeTagDevData } from "../../../lib/vibeTag";
 import styles from "./VibeTagSection.module.css";
 
 interface VibeTagSectionProps {
@@ -81,6 +81,8 @@ export function VibeTagSection({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inputText, setInputText] = useState("");
+  const [devData, setDevData] = useState<VibeTagDevData | null>(null);
+  const [devOpen, setDevOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Clear conversation when selection changes
@@ -89,6 +91,8 @@ export function VibeTagSection({
     setProposal(null);
     setError(null);
     setInputText("");
+    setDevData(null);
+    setDevOpen(false);
   }, [state.selectedIds]);
 
   async function handleSubmit() {
@@ -105,7 +109,7 @@ export function VibeTagSection({
 
     try {
       const summary = buildMetadataSummary(selectedPhotos);
-      const result = await runVibeTag(
+      const { proposal: result, devData: newDevData } = await runVibeTag(
         claudeApiKey,
         updatedMessages,
         selectedPhotos.length,
@@ -113,6 +117,7 @@ export function VibeTagSection({
         mapboxToken
       );
       setProposal(result);
+      if (import.meta.env.DEV) setDevData(newDevData);
       setMessages([
         ...updatedMessages,
         { role: "assistant", content: JSON.stringify(result) },
@@ -215,6 +220,22 @@ export function VibeTagSection({
               </button>
             </div>
           </>
+        )}
+
+        {import.meta.env.DEV && devData && (
+          <div className={styles.devSection}>
+            <button
+              className={styles.devToggle}
+              onClick={() => setDevOpen((v) => !v)}
+            >
+              Raw response {devOpen ? "▾" : "▸"}
+            </button>
+            {devOpen && (
+              <pre className={styles.devContent}>
+                {JSON.stringify(devData.rawResponses, null, 2)}
+              </pre>
+            )}
+          </div>
         )}
       </div>
     </div>

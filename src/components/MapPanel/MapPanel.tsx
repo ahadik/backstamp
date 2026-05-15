@@ -231,9 +231,10 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ui.mapboxToken, mapError]);
 
-  // Re-fit whenever selection or pin coordinates change
+  // Re-fit whenever selection or pin coordinates change, but only while something is selected
   useEffect(() => {
     if (!map.current?.isStyleLoaded()) return;
+    if (!hasSelection) return;
     const hasCoords = focusPhotos.some(
       (p) => p.currentMetadata.gpsLat != null && p.currentMetadata.gpsLng != null
     );

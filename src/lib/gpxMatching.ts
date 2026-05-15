@@ -69,9 +69,6 @@ export function matchToTrack(
       : null;
   }
   if (before && after) {
-    const distBefore = Math.abs(targetUtcSecs - before.timestamp);
-    const distAfter = Math.abs(after.timestamp - targetUtcSecs);
-    if (distBefore > toleranceSecs && distAfter > toleranceSecs) return null;
     const total = after.timestamp - before.timestamp;
     if (total === 0) return { lat: before.lat, lng: before.lng };
     const t = (targetUtcSecs - before.timestamp) / total;

@@ -7,6 +7,7 @@ export interface UIState {
   panelWidth: number;       // current photo grid panel width in px (updated by PhotoGrid)
   mapPanelHeight: number;   // px
   mapboxToken: string | null;
+  googleMapsKey: string | null;
   claudeApiKey: string | null;
   error: string | null;
 }
@@ -17,6 +18,7 @@ type UIAction =
   | { type: "SET_PANEL_WIDTH"; width: number }
   | { type: "SET_MAP_PANEL_HEIGHT"; height: number }
   | { type: "SET_MAPBOX_TOKEN"; token: string | null }
+  | { type: "SET_GOOGLE_MAPS_KEY"; key: string | null }
   | { type: "SET_CLAUDE_API_KEY"; key: string | null }
   | { type: "SET_ERROR"; error: string | null }
   | { type: "RESTORE_UI"; workingTimezone: string; gridColumns: number; mapPanelHeight: number };
@@ -27,6 +29,7 @@ const initialState: UIState = {
   panelWidth: 800,
   mapPanelHeight: 200,
   mapboxToken: null,
+  googleMapsKey: null,
   claudeApiKey: null,
   error: null,
 };
@@ -43,6 +46,8 @@ function uiReducer(state: UIState, action: UIAction): UIState {
       return { ...state, mapPanelHeight: Math.max(60, action.height) };
     case "SET_MAPBOX_TOKEN":
       return { ...state, mapboxToken: action.token };
+    case "SET_GOOGLE_MAPS_KEY":
+      return { ...state, googleMapsKey: action.key };
     case "SET_CLAUDE_API_KEY":
       return { ...state, claudeApiKey: action.key };
     case "SET_ERROR":

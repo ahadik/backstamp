@@ -9,6 +9,7 @@ import { MapPanel } from "./components/MapPanel/MapPanel";
 import { ApplyModal } from "./components/ApplyModal/ApplyModal";
 import { SettingsModal } from "./components/SettingsModal/SettingsModal";
 import { ErrorModal } from "./components/common/ErrorModal/ErrorModal";
+import { DevLogModal } from "./components/common/DevLogModal/DevLogModal";
 import { useSession } from "./state/SessionContext";
 import { useUI } from "./state/UIContext";
 import { tauriCommands } from "./lib/tauri";
@@ -46,6 +47,7 @@ function mapLoadedGpxFile(g: {
   addedAt: number;
   trackPoints: TrackPoint[];
   thumbnailPath: string | null;
+  timezone: string | null;
 }): GpxFile {
   return {
     id: g.id,
@@ -53,6 +55,7 @@ function mapLoadedGpxFile(g: {
     addedAt: g.addedAt,
     trackPoints: g.trackPoints,
     thumbnailPath: g.thumbnailPath,
+    timezone: g.timezone,
   };
 }
 
@@ -87,6 +90,9 @@ function App() {
 
       tauriCommands.getSetting("mapbox_token").then((token) => {
         if (token) uiDispatch({ type: "SET_MAPBOX_TOKEN", token });
+      });
+      tauriCommands.getSetting("google_maps_key").then((key) => {
+        if (key) uiDispatch({ type: "SET_GOOGLE_MAPS_KEY", key });
       });
       tauriCommands.getSetting("claude_api_key").then((key) => {
         if (key) uiDispatch({ type: "SET_CLAUDE_API_KEY", key });
@@ -199,6 +205,7 @@ function App() {
       )}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       <ErrorModal />
+      <DevLogModal />
     </div>
   );
 }

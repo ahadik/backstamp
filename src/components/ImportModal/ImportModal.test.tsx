@@ -34,8 +34,9 @@ describe("ImportModal", () => {
           onDismiss={vi.fn()}
         />,
       );
-      expect(screen.getByText("photo.heic: no preview")).toBeInTheDocument();
-      expect(screen.getByText("photo2.cr3: decode failed")).toBeInTheDocument();
+      const errorLog = document.querySelector("pre");
+      expect(errorLog?.textContent).toContain("photo.heic: no preview");
+      expect(errorLog?.textContent).toContain("photo2.cr3: decode failed");
     });
 
     it("does not show the Done button while import is in progress", () => {

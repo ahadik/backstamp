@@ -1,4 +1,4 @@
-use crate::gpx::{parse_gpx, ranges_overlap, timestamp_range, TrackPoint};
+use crate::gpx::{parse_gpx, ranges_overlap, timestamp_range, timezone_for_point, TrackPoint};
 use crate::AppState;
 use rusqlite::params;
 use serde::Serialize;
@@ -13,6 +13,7 @@ pub struct GpxFileData {
     pub added_at: i64,
     pub track_points: Vec<TrackPoint>,
     pub thumbnail_path: Option<String>,
+    pub timezone: Option<String>,
 }
 
 /// Import a GPX file. Returns the parsed file data on success.
@@ -70,12 +71,15 @@ pub async fn import_gpx(
     )
     .map_err(|e| format!("insert gpx_files: {e}"))?;
 
+    let timezone = points.first().and_then(|p| timezone_for_point(p.lat, p.lng));
+
     Ok(GpxFileData {
         id,
         file_path: path,
         added_at,
         track_points: points,
         thumbnail_path: None,
+        timezone,
     })
 }
 

@@ -130,8 +130,8 @@ describe("runVibeTag", () => {
     mockCreate.mockResolvedValue(
       makeTextResponse('{"capture_date":"2025-03-15"}')
     );
-    const result = await runVibeTag("key", baseMessages, 1, {}, null);
-    expect(result).toEqual<MetadataProposal>({ capture_date: "2025-03-15" });
+    const { proposal } = await runVibeTag("key", baseMessages, 1, {}, null);
+    expect(proposal).toEqual<MetadataProposal>({ capture_date: "2025-03-15" });
   });
 
   it("throws with Claude's error string when Claude cannot interpret input", async () => {
@@ -154,8 +154,8 @@ describe("runVibeTag", () => {
     mockCreate.mockResolvedValue(
       makeTextResponse('```json\n{"capture_time":"14:30:00"}\n```')
     );
-    const result = await runVibeTag("key", baseMessages, 1, {}, null);
-    expect(result).toEqual<MetadataProposal>({ capture_time: "14:30:00" });
+    const { proposal } = await runVibeTag("key", baseMessages, 1, {}, null);
+    expect(proposal).toEqual<MetadataProposal>({ capture_time: "14:30:00" });
   });
 
   it("handles tool-use turn for geocoding and returns location in proposal", async () => {
@@ -197,18 +197,18 @@ describe("runVibeTag", () => {
         )
       );
 
-    const result = await runVibeTag("key", baseMessages, 1, {}, "pk.test");
+    const { proposal } = await runVibeTag("key", baseMessages, 1, {}, "pk.test");
 
     expect(tauriCommands.resolveTimezone).toHaveBeenCalledWith(
       fakeCoords.lat,
       fakeCoords.lng
     );
-    expect(result.location).toEqual({
+    expect(proposal.location).toEqual({
       lat: fakeCoords.lat,
       lng: fakeCoords.lng,
       display_name: fakeCoords.display_name,
     });
-    expect(result.timezone).toBe("America/Los_Angeles");
+    expect(proposal.timezone).toBe("America/Los_Angeles");
   });
 
   it("injects location from geocode result when Claude omits it from the JSON", async () => {
@@ -241,14 +241,14 @@ describe("runVibeTag", () => {
       // Claude calls the tool but forgets to include location in the final JSON
       .mockResolvedValueOnce(makeTextResponse(JSON.stringify({ capture_date: "2025-03-15" })));
 
-    const result = await runVibeTag("key", baseMessages, 1, {}, "pk.test");
+    const { proposal } = await runVibeTag("key", baseMessages, 1, {}, "pk.test");
 
-    expect(result.location).toEqual({
+    expect(proposal.location).toEqual({
       lat: fakeCoords.lat,
       lng: fakeCoords.lng,
       display_name: fakeCoords.display_name,
     });
-    expect(result.timezone).toBe("America/Los_Angeles");
-    expect(result.capture_date).toBe("2025-03-15");
+    expect(proposal.timezone).toBe("America/Los_Angeles");
+    expect(proposal.capture_date).toBe("2025-03-15");
   });
 });

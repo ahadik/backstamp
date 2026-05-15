@@ -1,6 +1,14 @@
 use gpx::{read, Gpx};
 use std::io::BufReader;
 use std::fs::File;
+use std::sync::OnceLock;
+use tzf_rs::DefaultFinder;
+
+static TZ_FINDER: OnceLock<DefaultFinder> = OnceLock::new();
+
+fn get_tz_finder() -> &'static DefaultFinder {
+    TZ_FINDER.get_or_init(DefaultFinder::new)
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TrackPoint {
@@ -31,6 +39,13 @@ pub fn parse_gpx(path: &str) -> Result<Vec<TrackPoint>, String> {
 
     points.sort_by_key(|p| p.timestamp);
     Ok(points)
+}
+
+/// Look up the IANA timezone name for a lat/lng coordinate.
+/// Returns None if the point falls outside all known timezone polygons (e.g. open ocean).
+pub fn timezone_for_point(lat: f64, lng: f64) -> Option<String> {
+    let name = get_tz_finder().get_tz_name(lng, lat);
+    if name.is_empty() { None } else { Some(name.to_string()) }
 }
 
 /// Return the [min_ts, max_ts] range for a set of track points, or None if empty.

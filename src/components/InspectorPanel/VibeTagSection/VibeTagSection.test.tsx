@@ -60,6 +60,7 @@ const baseUI: UIState = {
   panelWidth: 800,
   mapPanelHeight: 200,
   mapboxToken: "pk.test",
+  googleMapsKey: null,
   claudeApiKey: "sk-ant-test",
   error: null,
 };
@@ -127,7 +128,7 @@ describe("normal state", () => {
   it("send button is disabled when input is empty", () => {
     setupMocks();
     render(<VibeTagSection selectedPhotos={[makePhoto()]} onOpenSettings={onOpenSettings} />);
-    expect(screen.getByRole("button", { name: "→" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Tag It ✨" })).toBeDisabled();
   });
 
   it("pressing Enter on empty input does not call runVibeTag", () => {
@@ -144,7 +145,7 @@ describe("submit flow", () => {
   const mockProposal: MetadataProposal = { capture_date: "2025-03-15" };
 
   it("calls runVibeTag with correct args on Enter", async () => {
-    vi.mocked(runVibeTag).mockResolvedValue(mockProposal);
+    vi.mocked(runVibeTag).mockResolvedValue({ proposal: mockProposal, devData: { rawResponses: [] } });
     setupMocks();
     render(<VibeTagSection selectedPhotos={[makePhoto()]} onOpenSettings={onOpenSettings} />);
     const input = screen.getByRole("textbox");
@@ -162,7 +163,7 @@ describe("submit flow", () => {
   });
 
   it("shows loading state while request is in flight", async () => {
-    let resolve!: (v: MetadataProposal) => void;
+    let resolve!: (v: { proposal: MetadataProposal; devData: { rawResponses: [] } }) => void;
     vi.mocked(runVibeTag).mockReturnValue(new Promise((r) => { resolve = r; }));
     setupMocks();
     const { container } = render(<VibeTagSection selectedPhotos={[makePhoto()]} onOpenSettings={onOpenSettings} />);
@@ -172,11 +173,11 @@ describe("submit flow", () => {
     await waitFor(() => expect(screen.getByRole("textbox")).toBeDisabled());
     // While loading, spinner is shown inside the send button (no text "→")
     expect(container.querySelector("[class*='spinner']")).toBeInTheDocument();
-    resolve(mockProposal);
+    resolve({ proposal: mockProposal, devData: { rawResponses: [] } });
   });
 
   it("shows proposal summary with Accept and Follow Up after success", async () => {
-    vi.mocked(runVibeTag).mockResolvedValue(mockProposal);
+    vi.mocked(runVibeTag).mockResolvedValue({ proposal: mockProposal, devData: { rawResponses: [] } });
     setupMocks();
     render(<VibeTagSection selectedPhotos={[makePhoto()]} onOpenSettings={onOpenSettings} />);
     const input = screen.getByRole("textbox");
@@ -195,7 +196,7 @@ describe("submit flow", () => {
 describe("Accept", () => {
   it("dispatches SET_PENDING and clears proposal + messages", async () => {
     const mockProposal: MetadataProposal = { capture_date: "2025-03-15" };
-    vi.mocked(runVibeTag).mockResolvedValue(mockProposal);
+    vi.mocked(runVibeTag).mockResolvedValue({ proposal: mockProposal, devData: { rawResponses: [] } });
     const { sessionDispatch } = setupMocks();
     const photo = makePhoto();
     render(<VibeTagSection selectedPhotos={[photo]} onOpenSettings={onOpenSettings} />);
@@ -223,7 +224,7 @@ describe("Accept", () => {
 describe("Follow Up", () => {
   it("clears proposal but retains messages for next submit", async () => {
     const mockProposal: MetadataProposal = { capture_date: "2025-03-15" };
-    vi.mocked(runVibeTag).mockResolvedValue(mockProposal);
+    vi.mocked(runVibeTag).mockResolvedValue({ proposal: mockProposal, devData: { rawResponses: [] } });
     setupMocks();
     render(<VibeTagSection selectedPhotos={[makePhoto()]} onOpenSettings={onOpenSettings} />);
 
@@ -232,7 +233,7 @@ describe("Follow Up", () => {
     await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
     await waitFor(() => screen.getByRole("button", { name: /follow up/i }));
 
-    vi.mocked(runVibeTag).mockResolvedValue({ capture_time: "12:00:00" });
+    vi.mocked(runVibeTag).mockResolvedValue({ proposal: { capture_time: "12:00:00" }, devData: { rawResponses: [] } });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /follow up/i }));
     });
