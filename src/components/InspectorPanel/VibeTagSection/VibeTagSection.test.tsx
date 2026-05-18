@@ -52,6 +52,7 @@ const baseSession: SessionState = {
   selectedGpxId: null,
   applyInProgress: false,
   canRollback: false,
+  metadataHistory: [],
 };
 
 const baseUI: UIState = {

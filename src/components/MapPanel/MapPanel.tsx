@@ -104,20 +104,13 @@ function setupSources(map: mapboxgl.Map) {
   });
 }
 
-function getExistingGpxIds(map: mapboxgl.Map): string[] {
-  const style = map.getStyle();
-  if (!style?.sources) return [];
-  return Object.keys(style.sources)
-    .filter((k) => k.startsWith("gpx-"))
-    .map((k) => k.replace("gpx-", ""));
-}
-
-function syncGpxLayers(map: mapboxgl.Map, gpxFiles: GpxFile[]) {
+function syncGpxLayers(map: mapboxgl.Map, gpxFiles: GpxFile[], trackedIds: Set<string>) {
   const currentIds = new Set(gpxFiles.map((g) => g.id));
-  for (const id of getExistingGpxIds(map)) {
+  for (const id of [...trackedIds]) {
     if (!currentIds.has(id)) {
-      map.removeLayer(`gpx-line-${id}`);
-      map.removeSource(`gpx-${id}`);
+      if (map.getLayer(`gpx-line-${id}`)) map.removeLayer(`gpx-line-${id}`);
+      if (map.getSource(`gpx-${id}`)) map.removeSource(`gpx-${id}`);
+      trackedIds.delete(id);
     }
   }
   for (const gpx of gpxFiles) {
@@ -142,6 +135,7 @@ function syncGpxLayers(map: mapboxgl.Map, gpxFiles: GpxFile[]) {
           "line-opacity": 0.8,
         },
       });
+      trackedIds.add(gpx.id);
     }
   }
 }
@@ -159,6 +153,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   const [resizing, setResizing] = useState(false);
   const isResizingRef = useRef(false);
   const failedTokenRef = useRef<string | null>(null);
+  const gpxLayerIds = useRef(new Set<string>());
 
   const hasSelection = session.selectedIds.size > 0;
   const focusPhotos = hasSelection
@@ -219,13 +214,14 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
       (map.current!.getSource("photos") as mapboxgl.GeoJSONSource).setData(
         buildPhotoGeoJSON(allPhotosRef.current)
       );
-      syncGpxLayers(map.current!, gpxFilesRef.current);
+      syncGpxLayers(map.current!, gpxFilesRef.current, gpxLayerIds.current);
       fitToPhotos(map.current!, focusPhotosRef.current);
     });
     return () => {
       ro.disconnect();
       map.current?.remove();
       map.current = null;
+      gpxLayerIds.current.clear();
     };
   // mapError in deps so the effect re-runs after we clear a stale error
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -252,7 +248,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
 
   useEffect(() => {
     if (!map.current?.isStyleLoaded()) return;
-    syncGpxLayers(map.current, session.gpxFiles);
+    syncGpxLayers(map.current, session.gpxFiles, gpxLayerIds.current);
   }, [session.gpxFiles]);
 
   useEffect(() => {

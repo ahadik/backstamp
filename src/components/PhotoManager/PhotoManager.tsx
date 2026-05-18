@@ -339,11 +339,13 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
               pendingGpxImport.gpxFile.trackPoints,
               (action) => {
                 sessionDispatch(action);
-                const fields = Object.entries(action.changes).map(([field, value]) => ({
-                  field,
-                  value: value == null ? null : String(value),
-                }));
-                tauriCommands.setPendingChanges(action.ids, fields).catch(console.error);
+                for (const { id, changes } of action.updates) {
+                  const fields = Object.entries(changes).map(([field, value]) => ({
+                    field,
+                    value: value == null ? null : String(value),
+                  }));
+                  tauriCommands.setPendingChanges([id], fields).catch(console.error);
+                }
               }
             );
             sessionDispatch({ type: "SELECT_GPX", id: pendingGpxImport.gpxFile.id });

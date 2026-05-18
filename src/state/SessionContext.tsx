@@ -60,6 +60,7 @@ type SessionAction =
   | { type: "DESELECT_ALL" }
   | { type: "SELECT_GPX"; id: string }
   | { type: "SET_PENDING"; ids: string[]; changes: Partial<Metadata> }
+  | { type: "SET_PENDING_BATCH"; updates: Array<{ id: string; changes: Partial<Metadata> }> }
   | { type: "CLEAR_PENDING"; ids: string[] }
   | { type: "APPLY_START" }
   | { type: "APPLY_COMPLETE"; updatedPhotos: Photo[]; canRollback: boolean }
@@ -184,6 +185,28 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         if (!action.ids.includes(p.id)) return p;
         const pending = { ...(p.pendingChanges ?? {}), ...action.changes };
         const current = { ...p.currentMetadata, ...action.changes };
+        return { ...p, pendingChanges: pending, currentMetadata: current };
+      });
+      const history = [...state.metadataHistory, snapshot];
+      if (history.length > 50) history.shift();
+      return { ...state, photos: updated, metadataHistory: history };
+    }
+
+    case "SET_PENDING_BATCH": {
+      const ids = new Set(action.updates.map((u) => u.id));
+      const snapshot: MetadataSnapshot = state.photos
+        .filter((p) => ids.has(p.id))
+        .map((p) => ({
+          id: p.id,
+          currentMetadata: { ...p.currentMetadata },
+          pendingChanges: p.pendingChanges ? { ...p.pendingChanges } : null,
+        }));
+      const changesMap = new Map(action.updates.map((u) => [u.id, u.changes]));
+      const updated = state.photos.map((p) => {
+        const changes = changesMap.get(p.id);
+        if (!changes) return p;
+        const pending = { ...(p.pendingChanges ?? {}), ...changes };
+        const current = { ...p.currentMetadata, ...changes };
         return { ...p, pendingChanges: pending, currentMetadata: current };
       });
       const history = [...state.metadataHistory, snapshot];

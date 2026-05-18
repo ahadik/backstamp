@@ -72,7 +72,13 @@ export function ApplyModal({ phase, onCancel, onDismiss }: ApplyModalProps) {
           </>
         )}
 
-        {phase.type === "undoing" && (
+        {phase.type === "undoing" && phase.total === 0 && (
+          <>
+            <h3 className={styles.title}>Rolling back…</h3>
+          </>
+        )}
+
+        {phase.type === "undoing" && phase.total > 0 && (
           <>
             <h3 className={styles.title}>
               Undoing {phase.done} of {phase.total} photos… (cannot cancel)

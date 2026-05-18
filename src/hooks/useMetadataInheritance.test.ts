@@ -165,6 +165,46 @@ describe("computeInheritance — gap drop between two dated photos", () => {
     expect(result.changes.get("x")?.captureTime).toBe("11:00:00");
   });
 
+  it("interpolates correctly across midnight when photos span two calendar days in their local timezone", () => {
+    // before: Jan 14 22:00 PST  → UTC Jan 15 06:00
+    // after:  Jan 15 02:00 PST  → UTC Jan 15 10:00
+    // Both appear in the same India-time day block (IST Jan 15), but their PST times span midnight.
+    // Midpoint UTC = Jan 15 08:00 → PST Jan 15 00:00
+    const before = makePhoto("b", { captureDate: "2024-01-14", captureTime: "22:00:00", utcOffset: "-08:00" });
+    const after = makePhoto("a", { captureDate: "2024-01-15", captureTime: "02:00:00", utcOffset: "-08:00" });
+    const dragging = [makePhoto("x")];
+    const result = computeInheritance(
+      dragging,
+      { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-01-15" } },
+      null,
+      before,
+      after,
+    );
+    expect(result.changes.get("x")?.captureDate).toBe("2024-01-15");
+    expect(result.changes.get("x")?.captureTime).toBe("00:00:00");
+    expect(result.changes.get("x")?.utcOffset).toBe("-08:00");
+  });
+
+  it("propagates utcOffset from neighbors so getDateKey can group the photo in the correct working-timezone day", () => {
+    // 23:00 PST Feb 15 = 07:00 UTC Feb 16 = 12:30 IST Feb 16
+    // Without utcOffset on the dropped photo, getDateKey returns captureDate as-is ("2024-02-15")
+    // and the photo appears in the wrong day block.
+    const before = makePhoto("b", { captureDate: "2024-02-15", captureTime: "21:00:00", utcOffset: "-08:00" });
+    const after = makePhoto("a", { captureDate: "2024-02-16", captureTime: "01:00:00", utcOffset: "-08:00" });
+    const dragging = [makePhoto("x")];
+    const result = computeInheritance(
+      dragging,
+      { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-02-16" } },
+      null,
+      before,
+      after,
+    );
+    // Midpoint UTC = Feb 16 05:00 → PST Feb 15 21:00 + 2h = Feb 15 23:00
+    expect(result.changes.get("x")?.captureDate).toBe("2024-02-15");
+    expect(result.changes.get("x")?.captureTime).toBe("23:00:00");
+    expect(result.changes.get("x")?.utcOffset).toBe("-08:00");
+  });
+
   it("interpolates GPS coordinates linearly", () => {
     const before = makePhoto("b", { gpsLat: 0, gpsLng: 0 });
     const after = makePhoto("a", { gpsLat: 2, gpsLng: 4 });

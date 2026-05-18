@@ -4,7 +4,7 @@ import { useSession } from "../../../state/SessionContext";
 import { useUI } from "../../../state/UIContext";
 import { deriveFieldValue } from "../../../lib/inspectorUtils";
 import { tauriCommands } from "../../../lib/tauri";
-import { wallClockToUtcSecs, countMatches, applyGpxAutoTag } from "../../../lib/gpxMatching";
+import { wallClockToUtcSecs, matchToTrack, countMatches, applyGpxAutoTag } from "../../../lib/gpxMatching";
 import { ConfirmDialog } from "../../common/ConfirmDialog/ConfirmDialog";
 import type { Photo } from "../../../state/SessionContext";
 import type { TrackPoint } from "../../../lib/tauri";
@@ -40,6 +40,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
   const [suggestions, setSuggestions] = useState<GeocodingFeature[]>([]);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [resolvedTz, setResolvedTz] = useState<string | null>(null);
+  const [resolvedTzByPhoto, setResolvedTzByPhoto] = useState<Record<string, string>>({});
   const [mapError, setMapError] = useState<string | null>(null);
   const [gpxLocateDialog, setGpxLocateDialog] = useState<{
     matchCount: number;
@@ -63,16 +64,13 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
       .map((p) => p.currentMetadata.timezone)
       .filter((tz): tz is string => tz != null)
   );
-  const gpxBoundsMin = allTrackPoints.length > 0 ? Math.min(...allTrackPoints.map((p) => p.timestamp)) : null;
-  const gpxBoundsMax = allTrackPoints.length > 0 ? Math.max(...allTrackPoints.map((p) => p.timestamp)) : null;
   const anyPhotoOverlapsGpx =
-    gpxBoundsMin !== null &&
-    gpxBoundsMax !== null &&
+    allTrackPoints.length > 0 &&
     selectedPhotos.some((photo) => {
       const { captureDate, captureTime, timezone } = photo.currentMetadata;
       if (!captureDate || !captureTime || !timezone) return false;
       const utcSecs = wallClockToUtcSecs(captureDate, captureTime, timezone);
-      return utcSecs >= gpxBoundsMin && utcSecs <= gpxBoundsMax;
+      return matchToTrack(allTrackPoints, utcSecs) !== null;
     });
 
   const gpxButtonEnabled =
@@ -101,12 +99,35 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
   }
   dispatchCoordsRef.current = dispatchCoords;
 
-  // Reset search state when selection changes
+  // Reset search state when selection changes; resolve timezone if coords already present
   useEffect(() => {
     setSearchQuery("");
     setSuggestions([]);
     setSuggestionsOpen(false);
     setResolvedTz(null);
+    setResolvedTzByPhoto({});
+    if (hasCoords) {
+      tauriCommands.resolveTimezone(gpsLat as number, gpsLng as number).then(setResolvedTz).catch(console.error);
+    } else if (multipleCoords) {
+      const photosWithCoords = selectedPhotos.filter(
+        (p) => p.currentMetadata.gpsLat != null && p.currentMetadata.gpsLng != null
+      );
+      Promise.all(
+        photosWithCoords.map((p) =>
+          tauriCommands
+            .resolveTimezone(p.currentMetadata.gpsLat!, p.currentMetadata.gpsLng!)
+            .then((tz) => [p.id, tz] as [string, string])
+            .catch(() => null)
+        )
+      ).then((results) => {
+        const map: Record<string, string> = {};
+        for (const r of results) {
+          if (r) map[r[0]] = r[1];
+        }
+        setResolvedTzByPhoto(map);
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIdsKey]);
 
   // Initialise map when photos are selected
@@ -322,6 +343,21 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
     timezone !== "multiple" &&
     resolvedTz !== timezone;
 
+  const tzSuggest = resolvedTz && !timezone;
+
+  const bulkResolvedTzValues = Object.values(resolvedTzByPhoto);
+  const bulkResolvedTzUnique = new Set(bulkResolvedTzValues);
+  const bulkResolvedTz =
+    multipleCoords && bulkResolvedTzValues.length > 0 && bulkResolvedTzUnique.size === 1
+      ? bulkResolvedTzValues[0]
+      : null;
+
+  const tzBulkSuggest =
+    bulkResolvedTz &&
+    selectedPhotos.some((p) => p.currentMetadata.timezone !== bulkResolvedTz);
+
+  const tzBulkHasExisting = selectedPhotos.some((p) => p.currentMetadata.timezone != null);
+
   if (!mapboxToken || mapError) {
     return (
       <div className={styles.section}>
@@ -391,11 +427,63 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
               </p>
             )}
 
+            {tzSuggest && (
+              <div className={styles.tzWarning}>
+                <p>
+                  No timezone set. Location suggests <strong>{resolvedTz}</strong>.
+                </p>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    const changes = { timezone: resolvedTz as string };
+                    dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
+                    const fields = [{ field: "timezone", value: resolvedTz as string }];
+                    tauriCommands.setPendingChanges(selectedIds, fields).catch(console.error);
+                  }}
+                >
+                  Use {resolvedTz}
+                </button>
+              </div>
+            )}
+
             {tzMismatch && (
-              <p className={styles.tzWarning}>
-                ⚠ Location suggests <strong>{resolvedTz}</strong> but timezone is set to{" "}
-                <strong>{timezone as string}</strong>.
-              </p>
+              <div className={styles.tzWarning}>
+                <p>
+                  ⚠ Location suggests <strong>{resolvedTz}</strong> but timezone is set to{" "}
+                  <strong>{timezone as string}</strong>.
+                </p>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    const changes = { timezone: resolvedTz as string };
+                    dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
+                    const fields = [{ field: "timezone", value: resolvedTz as string }];
+                    tauriCommands.setPendingChanges(selectedIds, fields).catch(console.error);
+                  }}
+                >
+                  Use {resolvedTz}
+                </button>
+              </div>
+            )}
+
+            {tzBulkSuggest && (
+              <div className={styles.tzWarning}>
+                <p>
+                  {tzBulkHasExisting ? "⚠ " : ""}All locations map to <strong>{bulkResolvedTz}</strong>
+                  {tzBulkHasExisting ? ", but some timezones are set differently." : ". No timezone set."}
+                </p>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    const changes = { timezone: bulkResolvedTz as string };
+                    dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
+                    const fields = [{ field: "timezone", value: bulkResolvedTz as string }];
+                    tauriCommands.setPendingChanges(selectedIds, fields).catch(console.error);
+                  }}
+                >
+                  Use {bulkResolvedTz}
+                </button>
+              </div>
             )}
 
             {anyPhotoOverlapsGpx && (
@@ -427,11 +515,13 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                 onConfirm={() => {
                   applyGpxAutoTag(selectedPhotos, gpxLocateDialog.allPoints, (action) => {
                     dispatch(action);
-                    const fields = Object.entries(action.changes).map(([field, value]) => ({
-                      field,
-                      value: value == null ? null : String(value),
-                    }));
-                    tauriCommands.setPendingChanges(action.ids, fields).catch(console.error);
+                    for (const { id, changes } of action.updates) {
+                      const fields = Object.entries(changes).map(([field, value]) => ({
+                        field,
+                        value: value == null ? null : String(value),
+                      }));
+                      tauriCommands.setPendingChanges([id], fields).catch(console.error);
+                    }
                   });
                   setGpxLocateDialog(null);
                 }}

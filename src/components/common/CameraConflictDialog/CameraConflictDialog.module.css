@@ -1,27 +1,31 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.5);
   z-index: 200;
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .dialog {
-  padding: var(--space-5);
-  max-width: 480px;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5) var(--space-5) 0;
+  max-width: 400px;
   width: calc(100% - var(--space-8));
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
 }
 
 .title {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
   margin: 0 0 var(--space-4);
+  text-align: center;
 }
 
 .options {
@@ -37,8 +41,16 @@
   align-items: flex-start;
   gap: var(--space-1);
   padding: var(--space-3);
-  height: auto;
   text-align: left;
+  background: var(--color-glass-bg);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+
+.option:hover {
+  filter: brightness(0.95);
 }
 
 .optionLabel {
@@ -51,9 +63,29 @@
   font-size: 11px;
   color: var(--color-text-secondary);
   word-break: break-word;
+  line-height: 1.4;
 }
 
 .footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: stretch;
+  border-top: 0.5px solid var(--color-border);
+  margin: 0 calc(-1 * var(--space-5));
+}
+
+.footer button {
+  flex: 1;
+  border-radius: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--color-accent) !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  padding: var(--space-3) var(--space-2) !important;
+  justify-content: center;
+}
+
+.footer button:hover {
+  background: var(--color-glass-bg) !important;
+  filter: none !important;
 }

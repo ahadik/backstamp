@@ -57,6 +57,7 @@ const emptySession: SessionState = {
   gpxFiles: [], selectedGpxId: null,
   applyInProgress: false,
   canRollback: false,
+  metadataHistory: [],
 };
 
 const defaultUI: UIState = {

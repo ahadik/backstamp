@@ -104,11 +104,12 @@ fn compute_file_hash(path: &Path) -> Result<String, String> {
     Ok(hex::encode(Sha256::digest(&bytes)))
 }
 
-/// Extract the UTC offset string from an XMP ISO 8601 datetime, e.g.
-/// "2024-03-15T14:30:00+09:00" → "+09:00", "...Z" → "+00:00".
+/// Extract the UTC offset string from a datetime string, e.g.
+/// "2024-03-15T14:30:00+09:00" → "+09:00", "2024:03:15 14:30:00-08:00" → "-08:00".
+/// Handles both ISO 8601 ('T' separator) and EXIF-hybrid (' ' separator) formats.
 fn extract_utc_offset_from_xmp(xmp_dt: &str) -> Option<String> {
-    let t_pos = xmp_dt.find('T')?;
-    let time_part = &xmp_dt[t_pos + 1..];
+    let sep_pos = xmp_dt.find('T').or_else(|| xmp_dt.find(' '))?;
+    let time_part = &xmp_dt[sep_pos + 1..];
     if time_part.ends_with('Z') {
         return Some("+00:00".to_string());
     }
@@ -183,7 +184,9 @@ fn parse_metadata(json: &serde_json::Value) -> Metadata {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(|s| if s == "Z" { "+00:00".to_string() } else { s.to_string() });
-        from_offset_tag.or_else(|| xmp_dt.and_then(extract_utc_offset_from_xmp))
+        from_offset_tag
+            .or_else(|| xmp_dt.and_then(extract_utc_offset_from_xmp))
+            .or_else(|| exif_dt.and_then(extract_utc_offset_from_xmp))
     };
 
     let gps_lat = parse_gps_coord(
@@ -217,8 +220,8 @@ fn parse_metadata(json: &serde_json::Value) -> Metadata {
         .map(|s| s.trim().to_string());
 
     let film_str = json
-        .get("XMP:FilmStock")
-        .or_else(|| json.get("XMP:Film"))
+        .get("FilmStock")
+        .or_else(|| json.get("Film"))
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.trim().to_string());
@@ -431,39 +434,45 @@ pub async fn import_photos(
             .filter(|p| is_supported(Path::new(p)))
             .collect();
 
-        // Phase 2: path dedup + content-hash dedup
-        // Computing hashes upfront gives an accurate `total` for the progress modal.
-        let mut to_import: Vec<(String, Option<String>)> = Vec::new();
+        // Phase 2: path dedup only (fast — DB lookups, no disk I/O).
+        // Hash dedup is deferred to per-file so import:start fires immediately.
+        let mut to_import: Vec<String> = Vec::new();
         let mut skipped: usize = 0;
 
         for path_str in extension_ok {
             if already_imported_by_path(&db, &path_str) {
                 skipped += 1;
-                continue;
-            }
-            match compute_file_hash(Path::new(&path_str)) {
-                Ok(hash) => {
-                    if already_imported_by_hash(&db, &hash) {
-                        skipped += 1;
-                    } else {
-                        to_import.push((path_str, Some(hash)));
-                    }
-                }
-                Err(_) => {
-                    // Unreadable file — attempt import anyway; error surfaces in process_one_file
-                    to_import.push((path_str, None));
-                }
+            } else {
+                to_import.push(path_str);
             }
         }
 
         let total = to_import.len();
-        println!("[import] {} to import, {} skipped as duplicates", total, skipped);
+        println!("[import] {} to consider, {} already imported by path", total, skipped);
         let _ = app_handle.emit("import:start", ImportStartPayload { total });
 
-        for (i, (path_str, file_hash)) in to_import.iter().enumerate() {
+        for (i, path_str) in to_import.iter().enumerate() {
             let file_path = Path::new(path_str);
-            let sidecar_path = sidecar_map.get(path_str).map(PathBuf::from);
+            let sidecar_path = sidecar_map.get(path_str.as_str()).map(PathBuf::from);
             let done = i + 1;
+
+            // Hash dedup per-file: read once here, reuse the hash in process_one_file.
+            let file_hash = match compute_file_hash(file_path) {
+                Ok(hash) => {
+                    if already_imported_by_hash(&db, &hash) {
+                        skipped += 1;
+                        println!("[import] ({}/{}) skipping hash duplicate: {}", done, total, path_str);
+                        let _ = app_handle.emit(
+                            "import:progress",
+                            ImportProgressPayload { done, total, photo: None, error: None },
+                        );
+                        continue;
+                    }
+                    Some(hash)
+                }
+                // Unreadable file — attempt import anyway; error surfaces in process_one_file
+                Err(_) => None,
+            };
 
             println!("[import] ({}/{}) starting: {}", done, total, path_str);
 
@@ -684,7 +693,7 @@ mod tests {
 
     #[test]
     fn parses_film_from_xmp_filmstock_splits_vendor_and_type() {
-        let json = r#"[{"XMP:FilmStock": "Kodak Portra 400"}]"#;
+        let json = r#"[{"FilmStock": "Kodak Portra 400"}]"#;
         let m = parse_exiftool_output(json).unwrap();
         assert_eq!(m.film_vendor.as_deref(), Some("Kodak"));
         assert_eq!(m.film_type.as_deref(), Some("Portra 400"));
@@ -692,7 +701,7 @@ mod tests {
 
     #[test]
     fn parses_film_from_xmp_film_when_filmstock_absent() {
-        let json = r#"[{"XMP:Film": "Fujifilm Velvia 50"}]"#;
+        let json = r#"[{"Film": "Fujifilm Velvia 50"}]"#;
         let m = parse_exiftool_output(json).unwrap();
         assert_eq!(m.film_vendor.as_deref(), Some("Fujifilm"));
         assert_eq!(m.film_type.as_deref(), Some("Velvia 50"));
@@ -700,7 +709,7 @@ mod tests {
 
     #[test]
     fn prefers_xmp_filmstock_over_xmp_film() {
-        let json = r#"[{"XMP:FilmStock": "Kodak Portra 400", "XMP:Film": "other"}]"#;
+        let json = r#"[{"FilmStock": "Kodak Portra 400", "Film": "other"}]"#;
         let m = parse_exiftool_output(json).unwrap();
         assert_eq!(m.film_vendor.as_deref(), Some("Kodak"));
         assert_eq!(m.film_type.as_deref(), Some("Portra 400"));

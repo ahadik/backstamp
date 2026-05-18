@@ -213,6 +213,10 @@ fn write_inline(
 
     let mut args: Vec<&str> = Vec::new();
 
+    // -m: treat minor errors (e.g. "Maker notes could not be parsed" on scanner
+    // TIFFs) as warnings rather than aborting the write. The unrecognised maker
+    // note bytes are still copied verbatim to the output file.
+    args.push("-m");
     for a in tag_args {
         args.push(a.as_str());
     }

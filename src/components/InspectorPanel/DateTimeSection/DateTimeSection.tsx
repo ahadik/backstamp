@@ -282,6 +282,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
                   onFocus={() => { setTzOpen(true); setTzSearch(""); }}
                   onChange={(e) => setTzSearch(e.target.value)}
                   readOnly={!tzOpen}
+                  autoComplete="off"
                 />
                 {tzOpen && (
                   <div className={styles.tzDropdown}>

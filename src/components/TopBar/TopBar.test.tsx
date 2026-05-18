@@ -86,6 +86,7 @@ function setup(sessionOverrides: Partial<SessionState> = {}, phase: ApplyPhase =
     selectedGpxId: null,
     applyInProgress: false,
     canRollback: false,
+    metadataHistory: [],
     ...sessionOverrides,
   };
   vi.mocked(useSession).mockReturnValue({ state: base, dispatch: mockDispatch });

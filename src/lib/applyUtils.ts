@@ -28,7 +28,7 @@ export function buildApplyPayload(photos: Photo[]): ApplyPayload {
         ? getUtcOffset(effectiveTimezone, new Date(effectiveDateStr))
         : null;
 
-    changes[photo.id] = { ...p, ...supplement, utcOffset };
+    changes[photo.id] = { ...p, ...supplement, ...(utcOffset !== null ? { utcOffset } : {}) };
   }
   return { changes };
 }

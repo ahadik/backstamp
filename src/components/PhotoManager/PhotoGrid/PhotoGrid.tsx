@@ -75,13 +75,17 @@ export function PhotoGrid() {
         neighborAfter,
       );
 
+      const batchUpdates: Array<{ id: string; changes: Partial<import("../../../state/SessionContext").Metadata> }> = [];
       for (const [id, meta] of result.changes) {
-        dispatch({ type: "SET_PENDING", ids: [id], changes: meta });
+        batchUpdates.push({ id, changes: meta });
         const fields = Object.entries(meta).map(([field, value]) => ({
           field,
           value: value == null ? null : String(value),
         }));
         tauriCommands.setPendingChanges([id], fields).catch(console.error);
+      }
+      if (batchUpdates.length > 0) {
+        dispatch({ type: "SET_PENDING_BATCH", updates: batchUpdates });
       }
 
       const withoutDragging = orderedIds.filter((id) => !draggingIds.includes(id));

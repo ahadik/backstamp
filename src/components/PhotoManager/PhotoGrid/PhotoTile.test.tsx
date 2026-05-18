@@ -24,7 +24,7 @@ beforeEach(() => {
   vi.mocked(useSession).mockReturnValue({
     state: {
       photos: [], selectedIds: new Set(), gpxFiles: [], selectedGpxId: null,
-      applyInProgress: false, canRollback: false,
+      applyInProgress: false, canRollback: false, metadataHistory: [],
     },
     dispatch: mockDispatch,
   });

@@ -490,98 +490,131 @@ pub async fn apply_cancel(state: State<'_, AppState>) -> Result<(), String> {
 pub async fn rollback(
     state: State<'_, AppState>,
 ) -> Result<RollbackResult, String> {
-    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
+    // Phase 1: load history from DB (fast, synchronous)
+    let (apply_id, by_photo) = {
+        let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
 
-    let apply_id: String = conn
-        .query_row(
-            "SELECT id FROM apply_ops ORDER BY applied_at DESC LIMIT 1",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|_| "No apply history to roll back".to_string())?;
-
-    // Load apply_history grouped by photo with file paths
-    let entries: Vec<(String, String, String, Option<String>)> = {
-        let mut stmt = conn
-            .prepare(
-                "SELECT ah.photo_id, p.file_path, ah.field, ah.value_before
-                 FROM apply_history ah
-                 JOIN photos p ON p.id = ah.photo_id
-                 WHERE ah.apply_id = ?1",
+        let apply_id: String = conn
+            .query_row(
+                "SELECT id FROM apply_ops ORDER BY applied_at DESC LIMIT 1",
+                [],
+                |r| r.get(0),
             )
-            .map_err(|e| format!("prepare rollback: {}", e))?;
-        let rows: Vec<_> = stmt.query_map(params![apply_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })
-        .map_err(|e| format!("query rollback: {}", e))?
-        .filter_map(|r| r.ok())
-        .collect();
-        rows
+            .map_err(|_| "No apply history to roll back".to_string())?;
+
+        let entries: Vec<(String, String, String, Option<String>)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT ah.photo_id, p.file_path, ah.field, ah.value_before
+                     FROM apply_history ah
+                     JOIN photos p ON p.id = ah.photo_id
+                     WHERE ah.apply_id = ?1",
+                )
+                .map_err(|e| format!("prepare rollback: {}", e))?;
+            let rows: Vec<_> = stmt.query_map(params![apply_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(|e| format!("query rollback: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+            rows
+        };
+
+        let mut by_photo: HashMap<String, (String, Vec<(String, Option<String>)>)> = HashMap::new();
+        for (photo_id, file_path, field, before) in &entries {
+            let entry = by_photo
+                .entry(photo_id.clone())
+                .or_insert_with(|| (file_path.clone(), vec![]));
+            entry.1.push((field.clone(), before.clone()));
+        }
+
+        println!("[rollback] apply_id={} photos={}", apply_id, by_photo.len());
+
+        (apply_id, by_photo)
     };
 
-    // Group by photo_id
-    let mut by_photo: HashMap<String, (String, Vec<(String, Option<String>)>)> = HashMap::new();
-    for (photo_id, file_path, field, before) in &entries {
-        let entry = by_photo
-            .entry(photo_id.clone())
-            .or_insert_with(|| (file_path.clone(), vec![]));
-        entry.1.push((field.clone(), before.clone()));
-    }
+    // Phase 2: write to disk via ExifTool (blocking — run off the async thread pool)
+    let exiftool = std::sync::Arc::clone(&state.exiftool);
+    let db = std::sync::Arc::clone(&state.db);
 
-    drop(conn); // release lock before ExifTool writes
+    let (failed_files, restored_ids) = tokio::task::spawn_blocking(move || {
+        let mut failed_files: Vec<FailedFile> = Vec::new();
+        let mut restored_ids: Vec<String> = Vec::new();
 
-    let mut failed_files: Vec<FailedFile> = Vec::new();
-    let mut restored_ids: Vec<String> = Vec::new();
+        for (photo_id, (file_path, fields)) in &by_photo {
+            let undo_write = history_to_photo_write(photo_id, file_path, fields);
+            let tag_args = crate::write_metadata::build_exiftool_args(&undo_write);
+            println!(
+                "[rollback] photo={} fields={} tag_args={}",
+                photo_id,
+                undo_write.fields.len(),
+                tag_args.len()
+            );
 
-    for (photo_id, (file_path, fields)) in &by_photo {
-        let undo_write = history_to_photo_write(photo_id, file_path, fields);
-        let result = {
-            let mut et = state
-                .exiftool
-                .lock()
-                .map_err(|e| format!("exiftool lock: {}", e))?;
-            crate::write_metadata::write_metadata(&mut et, &undo_write)
-        };
-        match result {
-            Ok(()) => restored_ids.push(photo_id.clone()),
-            Err(e) => failed_files.push(FailedFile {
-                photo_id: photo_id.clone(),
-                file_path: file_path.clone(),
-                error: e,
-            }),
-        }
-    }
+            if tag_args.is_empty() {
+                println!("[rollback] skipping photo {} — no writable fields", photo_id);
+                restored_ids.push(photo_id.clone());
+                continue;
+            }
 
-    // Restore SQLite for successfully written photos
-    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
-    for photo_id in &restored_ids {
-        if let Some((_, fields)) = by_photo.get(photo_id) {
-            for (field, before) in fields {
-                conn.execute(
-                    "INSERT INTO metadata_current (photo_id, field, value, is_pending)
-                     VALUES (?1, ?2, ?3, 0)
-                     ON CONFLICT(photo_id, field)
-                     DO UPDATE SET value = excluded.value, is_pending = 0",
-                    params![photo_id, field, before],
-                )
-                .map_err(|e| format!("restore metadata_current: {}", e))?;
-
-                conn.execute(
-                    "INSERT INTO metadata_original (photo_id, field, value)
-                     VALUES (?1, ?2, ?3)
-                     ON CONFLICT(photo_id, field)
-                     DO UPDATE SET value = excluded.value",
-                    params![photo_id, field, before],
-                )
-                .map_err(|e| format!("restore metadata_original: {}", e))?;
+            let result = {
+                match exiftool.lock() {
+                    Ok(mut et) => crate::write_metadata::write_metadata(&mut et, &undo_write),
+                    Err(e) => Err(format!("exiftool lock: {}", e)),
+                }
+            };
+            match result {
+                Ok(()) => {
+                    println!("[rollback] restored {}", photo_id);
+                    restored_ids.push(photo_id.clone());
+                }
+                Err(e) => {
+                    println!("[rollback] failed {}: {}", photo_id, e);
+                    failed_files.push(FailedFile {
+                        photo_id: photo_id.clone(),
+                        file_path: file_path.clone(),
+                        error: e,
+                    });
+                }
             }
         }
-    }
+
+        // Restore SQLite for successfully written photos
+        if let Ok(conn) = db.lock() {
+            for photo_id in &restored_ids {
+                if let Some((_, fields)) = by_photo.get(photo_id) {
+                    for (field, before) in fields {
+                        let _ = conn.execute(
+                            "INSERT INTO metadata_current (photo_id, field, value, is_pending)
+                             VALUES (?1, ?2, ?3, 0)
+                             ON CONFLICT(photo_id, field)
+                             DO UPDATE SET value = excluded.value, is_pending = 0",
+                            params![photo_id, field, before],
+                        );
+                        let _ = conn.execute(
+                            "INSERT INTO metadata_original (photo_id, field, value)
+                             VALUES (?1, ?2, ?3)
+                             ON CONFLICT(photo_id, field)
+                             DO UPDATE SET value = excluded.value",
+                            params![photo_id, field, before],
+                        );
+                    }
+                }
+            }
+        }
+
+        (failed_files, restored_ids)
+    })
+    .await
+    .map_err(|e| format!("rollback task: {}", e))?;
+
+    // Phase 3: clean up apply history
+    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
 
     conn.execute(
         "DELETE FROM apply_history WHERE apply_id = ?1",
@@ -595,6 +628,13 @@ pub async fn rollback(
     let remaining: i64 = conn
         .query_row("SELECT COUNT(*) FROM apply_ops", [], |r| r.get(0))
         .unwrap_or(0);
+
+    println!(
+        "[rollback] done: {} restored, {} failed, {} apply_ops remaining",
+        restored_ids.len(),
+        failed_files.len(),
+        remaining
+    );
 
     Ok(RollbackResult {
         can_rollback: remaining > 0,

@@ -38,7 +38,7 @@ export function computeInheritance(
     if (!targetPhoto) return { changes, cameraConflict: null };
     const masterMeta = targetPhoto.currentMetadata;
     const fields: (keyof Metadata)[] = [
-      "captureDate", "captureTime", "gpsLat", "gpsLng",
+      "captureDate", "captureTime", "utcOffset", "timezone", "gpsLat", "gpsLng",
       "cameraMake", "cameraModel", "lens", "filmVendor", "filmType",
     ];
     const photoChanges = Object.fromEntries(
@@ -81,6 +81,8 @@ export function computeInheritance(
   ];
 
   const tz = resolveTimezone(neighborBefore, neighborAfter);
+  const resolvedUtcOffset =
+    neighborBefore?.currentMetadata.utcOffset ?? neighborAfter?.currentMetadata.utcOffset ?? null;
 
   for (let i = 0; i < draggingPhotos.length; i++) {
     const p = draggingPhotos[i];
@@ -98,6 +100,7 @@ export function computeInheritance(
       ...gps,
     };
     if (tz !== null) photoChanges.timezone = tz;
+    if (resolvedUtcOffset !== null) photoChanges.utcOffset = resolvedUtcOffset;
     if (!hasCameraConflict && mergedCamera !== null) {
       for (const field of cameraFields) {
         if (mergedCamera[field] != null) {
@@ -154,6 +157,40 @@ function resolveTimezone(before: Photo | null, after: Photo | null): string | nu
   return before?.currentMetadata.timezone ?? after?.currentMetadata.timezone ?? null;
 }
 
+function photoToUTCMillis(photo: Photo): number | null {
+  const { captureDate, captureTime, utcOffset } = photo.currentMetadata;
+  if (!captureDate || !captureTime || !utcOffset) return null;
+  try {
+    const d = new Date(`${captureDate}T${captureTime}${utcOffset}`);
+    return isNaN(d.getTime()) ? null : d.getTime();
+  } catch {
+    return null;
+  }
+}
+
+function parseOffsetMinutes(utcOffset: string): number | null {
+  const m = utcOffset.match(/^([+-])(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  const sign = m[1] === "+" ? 1 : -1;
+  return sign * (parseInt(m[2]) * 60 + parseInt(m[3]));
+}
+
+function utcMillisToLocal(
+  ms: number,
+  utcOffset: string,
+): { captureDate: string; captureTime: string } | null {
+  const offsetMinutes = parseOffsetMinutes(utcOffset);
+  if (offsetMinutes === null) return null;
+  const d = new Date(ms + offsetMinutes * 60000);
+  const year = d.getUTCFullYear();
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const h = String(d.getUTCHours()).padStart(2, "0");
+  const min = String(d.getUTCMinutes()).padStart(2, "0");
+  const sec = String(d.getUTCSeconds()).padStart(2, "0");
+  return { captureDate: `${year}-${month}-${day}`, captureTime: `${h}:${min}:${sec}` };
+}
+
 function interpolateTimestamp(
   before: Photo | null,
   after: Photo | null,
@@ -167,7 +204,7 @@ function interpolateTimestamp(
     // gap at start of block: use first photo's time minus 1 min per dragged photo
     const afterTime = after.currentMetadata.captureTime;
     return {
-      captureDate: dayKey,
+      captureDate: after.currentMetadata.captureDate,
       captureTime: afterTime ? subtractMinutes(afterTime, total - index) : null,
     };
   }
@@ -176,12 +213,25 @@ function interpolateTimestamp(
     // gap at end of block: use last photo's time plus 1 min per dragged photo
     const beforeTime = before.currentMetadata.captureTime;
     return {
-      captureDate: dayKey,
+      captureDate: before.currentMetadata.captureDate,
       captureTime: beforeTime ? addMinutes(beforeTime, index + 1) : null,
     };
   }
 
   // gap between two dated photos: interpolate
+  const t = (index + 1) / (total + 1);
+
+  // Interpolate in UTC to correctly handle photos whose local times span midnight
+  // (e.g., before=22:00 PST Jan 14, after=02:00 PST Jan 15 — same India-time day block)
+  const bMs = photoToUTCMillis(before!);
+  const aMs = photoToUTCMillis(after!);
+  const utcOffset = before!.currentMetadata.utcOffset ?? after!.currentMetadata.utcOffset;
+  if (bMs !== null && aMs !== null && utcOffset) {
+    const local = utcMillisToLocal(bMs + Math.round((aMs - bMs) * t), utcOffset);
+    if (local) return local;
+  }
+
+  // Fallback: naive same-day time interpolation (used when utcOffset is absent)
   const bt = before!.currentMetadata.captureTime;
   const at = after!.currentMetadata.captureTime;
   if (!bt || !at) {
@@ -190,7 +240,6 @@ function interpolateTimestamp(
 
   const bSec = timeToSeconds(bt);
   const aSec = timeToSeconds(at);
-  const t = (index + 1) / (total + 1);
   const interpolated = bSec + Math.round((aSec - bSec) * t);
   return {
     captureDate: dayKey,

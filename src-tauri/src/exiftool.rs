@@ -1,6 +1,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::thread;
 use tauri::{AppHandle, Manager};
 
 pub struct ExiftoolProcess {
@@ -48,12 +49,21 @@ impl ExiftoolProcess {
             .args(["-stay_open", "True", "-@", "/dev/stdin"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("failed to start exiftool at {}: {}", binary.display(), e))?;
 
         let stdin = child.stdin.take().ok_or("exiftool: no stdin handle")?;
         let stdout = BufReader::new(child.stdout.take().ok_or("exiftool: no stdout handle")?);
+
+        if let Some(stderr) = child.stderr.take() {
+            thread::spawn(move || {
+                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                    eprintln!("[exiftool] {}", line);
+                }
+            });
+        }
+
         Ok(ExiftoolProcess { child, stdin, stdout, binary, config })
     }
 

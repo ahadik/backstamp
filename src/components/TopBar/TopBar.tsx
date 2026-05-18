@@ -89,6 +89,7 @@ export function TopBar({ applyPhase, setApplyPhase }: TopBarProps) {
   async function handleRollback() {
     setIsRollingBack(true);
     setRollbackError(null);
+    setApplyPhase({ type: "undoing", done: 0, total: 0 });
     try {
       const result = await tauriCommands.rollback();
       const session = await tauriCommands.loadSession();
@@ -100,9 +101,13 @@ export function TopBar({ applyPhase, setApplyPhase }: TopBarProps) {
       });
       if (result.failedFiles.length > 0) {
         setRollbackError(`Roll Back failed for ${result.failedFiles.length} file(s).`);
+        setApplyPhase({ type: "idle" });
+      } else {
+        setApplyPhase({ type: "complete", errors: [] });
       }
     } catch (err) {
       setRollbackError(String(err));
+      setApplyPhase({ type: "idle" });
     } finally {
       setIsRollingBack(false);
     }

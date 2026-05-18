@@ -21,6 +21,7 @@ const emptySessionState: SessionState = {
   gpxFiles: [], selectedGpxId: null,
   applyInProgress: false,
   canRollback: false,
+  metadataHistory: [],
 };
 
 const defaultUIState: UIState = {

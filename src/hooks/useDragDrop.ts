@@ -78,15 +78,17 @@ export function useDragDrop({
       const idx = orderedIds.indexOf(tileId);
       const dayKey = findDayKey(tileId);
       if (zone === "gap-before") {
+        const prevId = idx > 0 ? orderedIds[idx - 1] : null;
         return {
-          beforeId: idx > 0 ? orderedIds[idx - 1] : null,
+          beforeId: prevId && findDayKey(prevId) === dayKey ? prevId : null,
           afterId: tileId,
           dayKey,
         };
       }
+      const nextId = idx < orderedIds.length - 1 ? orderedIds[idx + 1] : null;
       return {
         beforeId: tileId,
-        afterId: idx < orderedIds.length - 1 ? orderedIds[idx + 1] : null,
+        afterId: nextId && findDayKey(nextId) === dayKey ? nextId : null,
         dayKey,
       };
     },

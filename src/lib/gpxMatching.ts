@@ -69,6 +69,9 @@ export function matchToTrack(
       : null;
   }
   if (before && after) {
+    const distBefore = Math.abs(targetUtcSecs - before.timestamp);
+    const distAfter = Math.abs(after.timestamp - targetUtcSecs);
+    if (distBefore > toleranceSecs && distAfter > toleranceSecs) return null;
     const total = after.timestamp - before.timestamp;
     if (total === 0) return { lat: before.lat, lng: before.lng };
     const t = (targetUtcSecs - before.timestamp) / total;
@@ -113,9 +116,10 @@ export function countMatches(
 export function applyGpxAutoTag(
   photos: Photo[],
   trackPoints: TrackPoint[],
-  dispatch: (action: { type: "SET_PENDING"; ids: string[]; changes: { gpsLat: number; gpsLng: number } }) => void,
+  dispatch: (action: { type: "SET_PENDING_BATCH"; updates: Array<{ id: string; changes: { gpsLat: number; gpsLng: number } }> }) => void,
   toleranceSecs = 60
 ): void {
+  const updates: Array<{ id: string; changes: { gpsLat: number; gpsLng: number } }> = [];
   for (const photo of photos) {
     const { captureDate, captureTime, timezone } = photo.currentMetadata;
     if (!captureDate || !captureTime || !timezone) continue;
@@ -124,10 +128,9 @@ export function applyGpxAutoTag(
     const match = matchToTrack(trackPoints, utcSecs, toleranceSecs);
     if (!match) continue;
 
-    dispatch({
-      type: "SET_PENDING",
-      ids: [photo.id],
-      changes: { gpsLat: match.lat, gpsLng: match.lng },
-    });
+    updates.push({ id: photo.id, changes: { gpsLat: match.lat, gpsLng: match.lng } });
+  }
+  if (updates.length > 0) {
+    dispatch({ type: "SET_PENDING_BATCH", updates });
   }
 }
