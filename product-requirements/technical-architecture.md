@@ -50,54 +50,81 @@ The PRD requires that the app cannot be opened in multiple windows or instances 
 ## 2. Codebase Architecture
 
 ```
-photo-manager/
+backstamp/
 ├── src/                          # React/TypeScript frontend
 │   ├── components/
 │   │   ├── TopBar/               # Apply, Roll Back, Reset
+│   │   ├── ApplyModal/           # Two-phase apply progress overlay (applying → undoing)
 │   │   ├── ImportModal/          # Import progress overlay (progress bar, error list)
+│   │   ├── SettingsModal/        # API key management (Mapbox, Google Maps, Anthropic)
+│   │   ├── common/
+│   │   │   ├── CameraConflictDialog/  # Gap-drop camera data conflict resolution
+│   │   │   ├── ConfirmDialog/         # Generic confirmation overlay
+│   │   │   ├── CorpusComboBox/        # Searchable corpus-backed dropdown
+│   │   │   ├── DevLogModal/           # Dev-mode error log viewer
+│   │   │   └── ErrorModal/            # User-facing error display
 │   │   ├── PhotoManager/
-│   │   │   ├── FloatingControls/ # Import Photos, Remove, Grid Size +/-, Working TZ
+│   │   │   ├── FloatingControls/ # Import Photos, Remove, Grid Size +/-
+│   │   │   ├── SubBar/           # Secondary action bar
 │   │   │   └── PhotoGrid/        # Tile grid; PhotoTile per photo
-│   │   │       └── PhotoTile/    # Thumbnail img, pending-change dot, missing-file state
+│   │   │       ├── PhotoTile/    # Thumbnail img, pending-change dot, missing-file state
+│   │   │       ├── DayBlockHeader/  # Sticky day group headers
+│   │   │       ├── GapDropZone/     # Drag-and-drop insertion targets
+│   │   │       └── GpxTile/         # GPX file tile with route thumbnail
 │   │   ├── InspectorPanel/
-│   │   │   ├── DateTimeSection/
-│   │   │   ├── LocationSection/  # Mini-map + search
-│   │   │   ├── CameraSection/
-│   │   │   └── VibeTagSection/
-│   │   └── MapPanel/             # Full-width bottom map overlay
+│   │   │   ├── DateTimeSection/  # Date, time, timezone, hour-increment controls
+│   │   │   ├── LocationSection/  # Mapbox mini-map + geocoding search + timezone mismatch alert
+│   │   │   ├── CameraSection/    # Make, Model, Lens, Film corpus comboboxes
+│   │   │   └── VibeTagSection/   # Claude chat interface for natural-language tagging
+│   │   └── MapPanel/             # Full-width bottom map overlay with clustering + GPX routes
 │   ├── state/
-│   │   ├── SessionContext.tsx     # useReducer + Context: photos, selection, pending changes
-│   │   ├── CorpusContext.tsx      # useReducer + Context: camera/lens/film options
-│   │   └── UIContext.tsx          # useReducer + Context: panel sizes, working timezone, grid size
+│   │   ├── SessionContext.tsx    # useReducer + Context: photos, selection, pending, undo history, GPX
+│   │   ├── CorpusContext.tsx     # useReducer + Context: camera/lens/film options with vendor support
+│   │   ├── UIContext.tsx         # useReducer + Context: grid columns, map height, timezone, API keys
+│   │   ├── DevLogContext.tsx     # Dev-mode console error/warning capture
+│   │   └── selectors.ts         # groupPhotosByDay(), flatOrderedPhotos()
 │   ├── hooks/
 │   │   ├── useDragDrop.ts
 │   │   └── useMetadataInheritance.ts
 │   ├── styles/
-│   │   ├── tokens.css             # CSS custom properties: color, spacing, typography, radius
-│   │   ├── layout.css             # Grid and flex utility classes
-│   │   ├── typography.css         # Type scale and font-family definitions
-│   │   └── components.css         # Shared component base styles (button, input, dropdown)
+│   │   ├── tokens.css            # CSS custom properties: color, spacing, typography, radius
+│   │   ├── layout.css            # Layered overlay layout
+│   │   ├── typography.css        # SF Pro font stack + type scale
+│   │   └── components.css        # Liquid glass button, input, dropdown base styles
 │   └── lib/
-│       ├── tauri.ts              # Typed wrappers for Tauri commands
-│       ├── interpolation.ts      # Timestamp/GPS midpoint calculations
-│       └── vibeTag.ts            # Claude API client + prompt builder
+│       ├── tauri.ts              # Typed wrappers for all Tauri IPC commands
+│       ├── applyUtils.ts         # Builds ApplyPayload with UTC offset computation
+│       ├── gpxMatching.ts        # Track-point matching + GPS interpolation
+│       ├── inspectorUtils.ts     # deriveFieldValue(), buildPendingChange()
+│       ├── timezone.ts           # DST-correct UTC offset calculation
+│       ├── timezones.ts          # IANA timezone list
+│       └── vibeTag.ts            # Claude API client + tool-use loop + proposal validation
 │
 └── src-tauri/
     ├── resources/                # Bundled assets (not committed to git)
     │   ├── exiftool              # ExifTool CLI script (from official macOS .pkg)
     │   └── lib/                  # ExifTool Perl library (Image/ and File/ subdirectories)
+    ├── tests/
+    │   └── import_integration.rs # Integration tests (DB schema, path key stability)
     ├── src/
     │   ├── lib.rs                # AppState, plugin wiring, command registration
     │   ├── commands/             # Tauri IPC commands (called from frontend)
-    │   │   ├── session.rs        # Load/save/clear session
-    │   │   ├── photos.rs         # Import pipeline: thumbnails + metadata + SQLite + events
-    │   │   ├── metadata.rs       # Apply changes, rollback
-    │   │   └── thumbnails.rs     # get_thumbnail command stub
+    │   │   ├── session.rs        # load_session, clear_session
+    │   │   ├── photos.rs         # import_photos, find_xmp_sidecars, remove_photos, reorder_photos
+    │   │   ├── metadata.rs       # apply_changes, apply_cancel, rollback, reset_photos, set/clear_pending_changes
+    │   │   ├── thumbnails.rs     # get_thumbnail
+    │   │   ├── corpus.rs         # load/add/remove/record corpus entries
+    │   │   ├── gpx.rs            # import_gpx, remove_gpx, save_gpx_thumbnail
+    │   │   ├── timezone.rs       # resolve_timezone (via tzf-rs)
+    │   │   ├── context_menu.rs   # show_photo_context_menu (native macOS)
+    │   │   └── settings.rs       # get_setting, set_setting (SQLite-backed)
     │   ├── exiftool.rs           # ExiftoolProcess: -stay_open mode, run_command, extract_preview, read_metadata
-    │   ├── thumbnail.rs          # generate_thumbnails: SHA-256 key, image crate resize, ExifTool RAW preview
-    │   ├── session.rs            # SQLite schema and init (returns Connection)
-    │   ├── gpx.rs                # GPX file parsing and time matching
-    │   └── corpus.rs             # Camera/lens/film option management
+    │   ├── write_metadata.rs     # Field-to-ExifTool tag translation, inline + XMP sidecar writes
+    │   ├── thumbnail.rs          # SHA-256 keyed thumbnail generation (Lanczos3)
+    │   ├── session.rs            # SQLite schema, migrations (v0–v7), init_db, apply_schema
+    │   ├── gpx.rs                # GPX file parsing and track-point extraction
+    │   ├── corpus_seed.rs        # Seeded camera/lens/film data
+    │   └── main.rs               # Tauri CLI entry point
     └── Cargo.toml
 ```
 
@@ -120,10 +147,12 @@ interface Photo {
 interface Metadata {
   captureDate: string | null;  // ISO 8601 date-only "YYYY-MM-DD"
   captureTime: string | null;  // "HH:MM:SS"
+  utcOffset: string | null;    // e.g. "-07:00"; computed and written separately from timezone
   timezone: string | null;     // IANA name e.g. "America/Los_Angeles"
   gpsLat: number | null;
   gpsLng: number | null;
-  cameraBody: string | null;
+  cameraMake: string | null;   // e.g. "Canon"
+  cameraModel: string | null;  // e.g. "EOS R5"; null when cameraMake is null
   lens: string | null;
   filmVendor: string | null;   // e.g. "Kodak"
   filmType: string | null;     // e.g. "Portra 400"; null when filmVendor is null
@@ -133,35 +162,69 @@ interface SessionState {
   photos: Photo[];
   selectedIds: Set<string>;
   gpxFiles: GpxFile[];
+  selectedGpxId: string | null;    // mutually exclusive with photo selection
   applyInProgress: boolean;
+  canRollback: boolean;
+  metadataHistory: MetadataSnapshot[];  // max 50 snapshots; supports UNDO_LAST_EDIT
 }
 
 type SessionAction =
   | { type: 'IMPORT_PHOTOS'; photos: Photo[] }
+  | { type: 'IMPORT_PHOTO_PROGRESS'; photo: Photo | null; error: string | null }
   | { type: 'SELECT'; id: string; mode: 'single' | 'shift' | 'cmd' }
+  | { type: 'SELECT_SINGLE'; id: string }
+  | { type: 'TOGGLE_SELECT'; id: string }
+  | { type: 'SELECT_RANGE'; id: string }
+  | { type: 'SELECT_ALL' }
+  | { type: 'DESELECT_ALL' }
+  | { type: 'SELECT_GPX'; id: string }
   | { type: 'SET_PENDING'; ids: string[]; changes: Partial<Metadata> }
+  | { type: 'SET_PENDING_BATCH'; updates: Array<{ id: string; changes: Partial<Metadata> }> }
   | { type: 'CLEAR_PENDING'; ids: string[] }
+  | { type: 'APPLY_START' }
   | { type: 'APPLY_COMPLETE'; updatedPhotos: Photo[] }
   | { type: 'ROLLBACK_COMPLETE'; restoredPhotos: Photo[] }
+  | { type: 'RESET_PHOTOS'; restoredPhotos: Photo[] }
   | { type: 'REMOVE_PHOTOS'; ids: string[] }
+  | { type: 'MARK_MISSING'; ids: string[] }
+  | { type: 'ADD_GPX'; gpxFile: GpxFile }
+  | { type: 'REMOVE_GPX'; id: string }
+  | { type: 'UPDATE_GPX_THUMBNAIL'; id: string; thumbnailPath: string }
+  | { type: 'REORDER_PHOTOS'; orderedIds: string[] }
+  | { type: 'RESTORE_SESSION'; photos: Photo[]; gpxFiles: GpxFile[]; canRollback: boolean }
   | { type: 'CLEAR_SESSION' }
-  // ...
+  | { type: 'UNDO_LAST_EDIT' }
 ```
 
 ```typescript
 // state/UIContext.tsx
 interface UIState {
-  workingTimezone: string;     // IANA name, display-only
-  gridTileSize: number;        // 0–1, fraction of Photo Manager panel width per tile including padding
-  mapPanelHeight: number;      // px height of the floating map overlay
+  workingTimezone: string;       // IANA name, display-only
+  gridColumns: number;           // target number of columns in the photo grid
+  panelWidth: number;            // px width of the PhotoManager panel (set by ResizeObserver)
+  mapPanelHeight: number;        // px height of the floating map overlay
+  mapboxToken: string | null;    // loaded from SQLite settings on app start
+  googleMapsKey: string | null;  // loaded from SQLite settings on app start
+  claudeApiKey: string | null;   // loaded from SQLite settings on app start
+  error: string | null;          // surface non-fatal errors in the UI
 }
+```
+
+Changes to `workingTimezone`, `gridColumns`, and `mapPanelHeight` are auto-saved to the Rust backend via `set_setting` (with a 500 ms debounce on `mapPanelHeight`) so they survive app restarts.
+
+```typescript
+// state/DevLogContext.tsx  (development only)
+// Patches console.warn, console.error, window.onerror, unhandledrejection, and fetch
+// responses at module load time to capture a DevLogEntry[] ring buffer. A DevLogModal
+// component (visible only in dev builds) surfaces the buffer for debugging Tauri IPC issues.
 ```
 
 ```typescript
 // state/CorpusContext.tsx
 // Make and Model maintain separate corpora. Model entries are associated with a
 // Make at creation time; the Model dropdown is disabled until a Make is selected
-// and shows only models previously used with that Make.
+// and shows only models previously used with that Make. Removing a film vendor
+// cascades to delete all its associated film types.
 interface CorpusEntry {
   value: string;
   isBuiltin: boolean;
@@ -178,6 +241,8 @@ interface CorpusState {
   filmTypes: CorpusEntry[];           // vendor = associated film vendor; filtered by selected vendor at render time
 }
 ```
+
+`RECORD_USE` promotes legacy null-vendor entries to vendor-specific entries when the selected Make or film vendor is known at time of use. `REMOVE_ENTRY` for a `film_vendor` cascades to remove all `film_type` entries whose `vendor` matches. Sorting: recently-used entries (non-null `lastUsed`) appear first, ordered by `lastUsed` descending; never-used entries follow alphabetically.
 
 Pending changes accumulate in `pendingChanges` and are merged into `currentMetadata` for display. On Apply, the Rust backend writes changes to disk and the `APPLY_COMPLETE` action updates state. On Rollback, `ROLLBACK_COMPLETE` restores the pre-apply metadata from SQLite history.
 
@@ -379,9 +444,9 @@ exiftool -json -DateTimeOriginal -OffsetTimeOriginal -GPSLatitude -GPSLongitude 
 Two thumbnail sizes are generated per photo at import time and stored in the app data thumbnails directory keyed by a hash of the file path. Storing them locally means the frontend always loads thumbnails from the same place regardless of source file type — no per-load ExifTool calls needed.
 
 - **Small** (400px longest edge) — used for grid display at typical tile sizes.
-- **Large** (2560px longest edge) — used when the tile renders large enough to benefit. 2560px covers a full-panel tile on a 4K display, since `gridTileSize = 1.0` means one photo fills the Photo Manager panel width.
+- **Large** (2560px longest edge) — used when the tile renders large enough to benefit. 2560px covers a full-panel tile on a 4K display when `gridColumns = 1`.
 
-Both are stored as JPEG at 85% quality. The grid loads the small version by default; the large version is swapped in when the tile's rendered width exceeds 400px (`gridTileSize × panelWidth > 400`).
+Both are stored as JPEG at 85% quality. The grid loads the small version by default; the large version is swapped in when the tile's rendered width exceeds 400px (computed from `panelWidth` and `gridColumns` in `UIContext`).
 
 **Source by file type:**
 
@@ -434,8 +499,8 @@ This produces a properly rendered map with the route overlaid, with no custom ra
 ### Directory layout (macOS app data)
 
 ```
-~/Library/Application Support/photo-manager/
-├── session.db              # SQLite — session state, history, corpus
+~/Library/Application Support/backstamp/
+├── session.db              # SQLite — session state, history, corpus, settings
 └── thumbnails/
     ├── <sha256-of-path>.jpg
     └── ...
@@ -498,7 +563,8 @@ CREATE TABLE photos (
   file_path   TEXT NOT NULL UNIQUE,
   file_hash   TEXT,              -- SHA-256 of file at import time
   added_at    INTEGER NOT NULL,
-  nodateorder INTEGER            -- display order within the No Date block
+  nodateorder INTEGER,           -- display order within the No Date block
+  sort_order  INTEGER DEFAULT 0  -- explicit user-controlled ordering (set by reorder_photos)
 );
 
 -- Metadata snapshot at import time (source of truth for Reset)
@@ -540,9 +606,11 @@ CREATE TABLE apply_history (
 
 -- GPX files added to the session
 CREATE TABLE gpx_files (
-  id        TEXT PRIMARY KEY,
-  file_path TEXT NOT NULL,
-  added_at  INTEGER NOT NULL
+  id             TEXT PRIMARY KEY,
+  file_path      TEXT NOT NULL,
+  added_at       INTEGER NOT NULL,
+  track_points   TEXT,            -- JSON-serialized TrackPoint[] (lat, lng, timestamp_utc)
+  thumbnail_path TEXT             -- absolute path to the PNG route thumbnail
 );
 
 -- Camera/lens/film corpus (persists across session clears)
@@ -561,9 +629,39 @@ CREATE TABLE corpus (
   use_count   INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (category, value)
 );
+
+-- Per-photo keyword tags (reserved for future use)
+CREATE TABLE photo_keywords (
+  photo_id TEXT NOT NULL,
+  keyword  TEXT NOT NULL,
+  PRIMARY KEY (photo_id, keyword),
+  FOREIGN KEY (photo_id) REFERENCES photos(id)
+);
+
+-- Persistent app settings including API keys and UI state
+CREATE TABLE settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+  -- keys: mapbox_token, google_maps_key, claude_api_key,
+  --       ui.workingTimezone, ui.gridColumns, ui.mapPanelHeight
+);
 ```
 
-**Session clear** drops and recreates all tables except `corpus`. The corpus is intentionally decoupled so it survives clears.
+**Session clear** drops and recreates all tables except `corpus` and `settings`. The corpus and settings are intentionally decoupled so they survive clears.
+
+### Schema migrations
+
+`session.rs` ships a sequential migration system. On startup `init_db` reads the current `PRAGMA user_version`, then applies any pending migrations up to the latest version:
+
+| Version | Change |
+|---|---|
+| v1 | Add `sort_order` column to `photos` |
+| v2 | Create `settings` table |
+| v3 | Add `vendor` column to `corpus`; migrate legacy `"film"` rows into `film_vendor` + `film_type` pairs |
+| v4 | Seed film corpus (Kodak, Fujifilm, Ilford, Cinestill) |
+| v5 | Add `track_points` and `thumbnail_path` columns to `gpx_files` |
+| v6 | Seed camera make/model corpus (Canon, Nikon, Sony, Fujifilm, Leica, Olympus/OM System, Hasselblad) |
+| v7 | Split legacy `camera_body` corpus rows (`"Make Model"` strings) into separate `camera_make` + `camera_model` entries using a known-makes priority list |
 
 ---
 
@@ -795,13 +893,29 @@ Two independent test suites run without a live Tauri process or ExifTool binary.
 
 | File | What is tested |
 |---|---|
-| `state/SessionContext.tsx` | All reducer actions: `CLEAR_SESSION`, `IMPORT_PHOTO_PROGRESS`, `IMPORT_PHOTOS`, `SELECT` (single/cmd), `REMOVE_PHOTOS`, `MARK_MISSING` |
-| `state/UIContext.tsx` | `SET_WORKING_TIMEZONE`, `SET_GRID_TILE_SIZE` (including bounds clamping), `SET_MAP_PANEL_HEIGHT` |
-| `state/CorpusContext.tsx` | `LOAD_CORPUS`, `ADD_ENTRY` (deduplication, trimming), `REMOVE_ENTRY` (case-insensitive), `RECORD_USE` |
-| `lib/tauri.ts` | All 7 command wrappers — correct `invoke` command string and argument shape |
-| `components/.../PhotoTile` | `ok` / `missing` file states, small vs. large thumbnail threshold (400px), pending dot visibility |
-| `components/.../PhotoGrid` | Empty state, photo count, `ResizeObserver` integration |
-| `components/.../ImportModal` | Progress rendering, error list, Done button visibility, auto-dismiss timer (fake timers) |
+| `state/SessionContext.tsx` | All reducer actions: selection modes, `IMPORT_PHOTO_PROGRESS`, `SET_PENDING`/`CLEAR_PENDING`, `APPLY_START`/`APPLY_COMPLETE`, `ROLLBACK_COMPLETE`, `REMOVE_PHOTOS`, `MARK_MISSING`, `ADD_GPX`/`REMOVE_GPX`, `REORDER_PHOTOS`, `UNDO_LAST_EDIT`, `CLEAR_SESSION`, `RESTORE_SESSION` |
+| `state/UIContext.tsx` | `SET_WORKING_TIMEZONE`, `SET_GRID_COLUMNS`, `SET_MAP_PANEL_HEIGHT`, `SET_MAPBOX_TOKEN`, `SET_GOOGLE_MAPS_KEY`, `SET_CLAUDE_API_KEY`; auto-save side effects |
+| `state/CorpusContext.tsx` | `LOAD_CORPUS`, `ADD_ENTRY` (deduplication, trimming, vendor association), `REMOVE_ENTRY` (case-insensitive, cascading film type delete), `RECORD_USE` (legacy entry promotion) |
+| `state/selectors.ts` | `groupPhotosByDay()` grouping and ordering; `flatOrderedPhotos()` |
+| `lib/tauri.ts` | All IPC command wrappers — correct `invoke` command string and argument shape |
+| `lib/applyUtils.ts` | `buildApplyPayload()` with UTC offset computation for DST edge cases |
+| `lib/gpxMatching.ts` | `matchToTrack()` within/outside tolerance, linear interpolation between track points |
+| `lib/inspectorUtils.ts` | `deriveFieldValue()` for all field types; `buildPendingChange()` |
+| `lib/timezone.ts` | `getUtcOffset()` — DST-correct offset for summer/winter dates, multiple timezones |
+| `lib/vibeTag.ts` | `validateProposal()` — valid/invalid date, time, timezone, camera, lens, film, location shapes |
+| `hooks/useDragDrop.ts` | Drag state machine: dragstart, dragover, dragleave, drop; gap vs. photo-tile targets |
+| `hooks/useMetadataInheritance.ts` | GPS interpolation; timestamp inheritance from adjacent photos; GPX matching |
+| `components/.../PhotoTile` | `ok` / `missing` file states, pending dot visibility, context menu trigger |
+| `components/.../PhotoGrid` | Day block grouping, empty state, `ResizeObserver` integration, gap drop zone rendering |
+| `components/.../ImportModal` | Progress rendering, error list, skip count, Done button visibility |
+| `components/.../ApplyModal` | Progress bar, cancel button, undo progress phase, error display |
+| `components/.../SettingsModal` | Key input masking, show/hide toggle, test button, remove action |
+| `components/.../TopBar` | Apply/Rollback/Reset button enabled states |
+| `components/.../DateTimeSection` | Date/time input, timezone dropdown, hour-increment control |
+| `components/.../CameraSection` | Corpus dropdown filtering by selected Make; new entry flow |
+| `components/.../VibeTagSection` | Claude proposal rendering, accept/follow-up actions, empty-key prompt |
+| `components/.../MapPanel` | Map rendering guard (no key), photo cluster count |
+| `components/.../CameraConflictDialog` | Conflict prompt rendering, keep/replace actions |
 
 ### Rust: Cargo
 
@@ -830,37 +944,52 @@ The `messages` array is maintained in `SessionContext` state and scoped to the c
 
 ## 10. Settings & API Key Management
 
-### Secure storage
+### Storage
 
-API keys are stored in the macOS Keychain via **`tauri-plugin-keychain`** (Tauri v2's typed wrapper around the system credential store). Keys are read at call time and never held in JS memory longer than the duration of a single API request. They are never written to SQLite, `localStorage`, or any plaintext file.
+**API keys** are stored in the macOS Keychain via the `keyring` crate (`com.alexhadik.backstamp` service). Keys are encrypted at rest by the OS, never appear in SQLite or any plaintext file, and are excluded from unencrypted backups.
 
-Two keys are managed:
+**Non-sensitive UI preferences** persist in the `settings` SQLite table via the generic `get_setting` / `set_setting` commands.
 
-| Key | Service name in Keychain | Used by |
+Three keys are managed in the Keychain:
+
+| Account name | Used by |
+|---|---|
+| `mapbox_token` | Map rendering, geocoding fallback, GPX route thumbnails (§7, §3) |
+| `google_maps_key` | Location type-ahead and coordinate lookup when set; Mapbox used as fallback otherwise |
+| `claude_api_key` | Vibe Tag natural-language metadata entry (§8) |
+
+UI state that persists across restarts is stored in SQLite via `get_setting`/`set_setting`:
+
+| Setting key | Default | Notes |
 |---|---|---|
-| Anthropic API key | `photo-manager.anthropic` | Vibe Tag (§8) |
-| Mapbox access token | `photo-manager.mapbox` | Map rendering, geocoding, GPX thumbnail (§7, §3) |
+| `ui.workingTimezone` | system timezone | Updated immediately on change |
+| `ui.gridColumns` | 6 | Updated immediately on change |
+| `ui.mapPanelHeight` | — | Updated with 500 ms debounce |
 
 ### Tauri commands
 
 ```rust
-// commands/settings.rs
-#[tauri::command] async fn get_api_key(service: String) -> Result<Option<String>, String>
-#[tauri::command] async fn set_api_key(service: String, key: String) -> Result<(), String>
-#[tauri::command] async fn delete_api_key(service: String) -> Result<(), String>
-#[tauri::command] async fn validate_anthropic_key(key: String) -> Result<bool, String>
-#[tauri::command] async fn validate_mapbox_key(key: String) -> Result<bool, String>
+// commands/api_keys.rs  — Keychain-backed
+#[tauri::command] async fn get_api_key(account: String) -> Result<Option<String>, String>
+#[tauri::command] async fn set_api_key(account: String, value: String) -> Result<(), String>
+#[tauri::command] async fn delete_api_key(account: String) -> Result<(), String>
+#[tauri::command] async fn test_api_key(account: String, key: String) -> Result<bool, String>
+
+// commands/settings.rs  — SQLite-backed (non-sensitive preferences only)
+#[tauri::command] async fn get_setting(key: String) -> Result<Option<String>, String>
+#[tauri::command] async fn set_setting(key: String, value: String) -> Result<(), String>
 ```
 
-`get_api_key` / `set_api_key` / `delete_api_key` are thin wrappers over the keychain plugin. `validate_*` make the cheapest possible API call to each service:
-- **Anthropic** — POST to `v1/messages` with `max_tokens: 1` and a minimal prompt. A `200` or `400` (bad request) response confirms the key is accepted; `401` means invalid.
-- **Mapbox** — GET to the Geocoding API with a fixed test query. A `200` confirms the key; `401` / `403` means invalid.
+`get_api_key` / `set_api_key` / `delete_api_key` are thin wrappers over the `keyring` crate. On startup, `migrate_keys_from_sqlite` runs once: any API key values still in the `settings` table (from the earlier SQLite-only implementation) are moved to the Keychain and deleted from the database.
 
-Validation is performed on the Rust side so the key is never passed through JS network calls; it is read from the Keychain and used directly in the Rust `reqwest` call.
+Validation is performed on the Rust side via `test_api_key` using `reqwest` — the key is never passed through a JS network call. The frontend calls `tauriCommands.testApiKey(account, key)` and receives a `boolean`. The Rust implementation makes the cheapest possible probe request per service:
+- **Anthropic** — `POST /v1/messages` with `max_tokens: 1`. A non-`401` status confirms the key (rate-limit and other non-auth errors still mean the key itself is valid).
+- **Mapbox** — `GET /geocoding/v5/mapbox.places/test.json?access_token=<key>&limit=1`. HTTP `200` confirms the key.
+- **Google Maps** — `POST /v1/places:autocomplete` with `X-Goog-Api-Key` header. A successful response containing a `suggestions` array (and no `error` field) confirms the key (requires Places API (New) enabled in Google Cloud Console).
 
 ### Settings UI
 
-The Settings panel is a full-window modal overlay (`SettingsModal` component) — a distinct component from `InspectorPanel`, not a conditional state of it. It is opened from a gear icon in the top bar and rendered above all other UI layers at a `z-index` above `--z-topbar`. Closing it returns the app to exactly the state it was in before opening; no main-view state changes as a result of the modal being open or closed (except that `useApiKeys` re-fetches on close).
+The Settings panel is a full-window modal overlay (`SettingsModal` component) — a distinct component from `InspectorPanel`, not a conditional state of it. It is opened from a gear icon in the top bar and rendered above all other UI layers at a `z-index` above `--z-topbar`. Closing it returns the app to exactly the state it was in before opening; API key values in `UIContext` are refreshed from SQLite when the modal closes.
 
 ```
 src/components/
@@ -870,26 +999,16 @@ src/components/
 ```
 
 Each key field follows this pattern:
-1. Labelled `<input type="password">` pre-filled with the masked value (`sk-ant-••••••••••••XXXX`) on load if a key is stored.
+1. Labelled `<input type="password">` pre-filled with the masked value (e.g. `pk.ey••••••••XXXX`) on load if a key is stored.
 2. **Show / Hide** toggle (`type="text"` ↔ `type="password"`) reveals the full key.
-3. **Test** button triggers the corresponding `validate_*` command and shows an inline success/error badge.
-4. **Remove** button calls `delete_api_key` and clears the field.
+3. **Test** button calls the appropriate service endpoint and shows an inline success/error badge.
+4. **Remove** button clears the field and deletes the value from SQLite.
 5. Changes are saved automatically on blur (no explicit Save button).
 
 ### Feature gating
 
-Key presence is checked at render time via a `useApiKeys` hook that calls `get_api_key` for both services on mount and re-checks whenever the Settings modal closes. The hook exposes:
-
-```typescript
-interface ApiKeyState {
-  anthropicKeySet: boolean;
-  mapboxKeySet: boolean;
-}
-```
-
-Components consuming this hook:
-- `VibeTagSection` — renders a "Set Anthropic API key in Settings" prompt when `anthropicKeySet` is `false`.
-- `LocationSection` (mini-map), `MapPanel`, and location type-ahead — render a "Set Mapbox API key in Settings" prompt when `mapboxKeySet` is `false`.
-- GPX import handler — surfaces a Settings prompt before opening the file picker when `mapboxKeySet` is `false`.
-
-The hook does not poll; it only re-fetches when the Settings modal closes (the modal calls an `onClose` callback that triggers a re-fetch in the hook).
+Key presence is read from `UIContext` (`mapboxToken`, `googleMapsKey`, `claudeApiKey`), which loads all three from SQLite on app start. Components consuming these values:
+- `VibeTagSection` — renders a "Set Anthropic API key in Settings" prompt when `claudeApiKey` is `null`.
+- `LocationSection` (mini-map), `MapPanel`, and location type-ahead — render a "Set Mapbox API key in Settings" prompt when `mapboxToken` is `null`.
+- `LocationSection` type-ahead — uses Google Maps Places API when `googleMapsKey` is set; falls back to Mapbox Geocoding otherwise.
+- GPX import handler — surfaces a Settings prompt before opening the file picker when `mapboxToken` is `null`.

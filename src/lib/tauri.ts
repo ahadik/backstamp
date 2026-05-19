@@ -123,6 +123,18 @@ export const tauriCommands = {
   setSetting: (key: string, value: string) =>
     invoke<void>("set_setting", { key, value }),
 
+  getApiKey: (account: string) =>
+    invoke<string | null>("get_api_key", { account }),
+
+  setApiKey: (account: string, value: string) =>
+    invoke<void>("set_api_key", { account, value }),
+
+  deleteApiKey: (account: string) =>
+    invoke<void>("delete_api_key", { account }),
+
+  testApiKey: (account: string, key: string) =>
+    invoke<boolean>("test_api_key", { account, key }),
+
   setPendingChanges: (photoIds: string[], fields: Array<{ field: string; value: string | null }>) =>
     invoke<void>("set_pending_changes", { photoIds, fields }),
 

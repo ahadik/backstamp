@@ -35,7 +35,7 @@ ExifTool is a Perl script. It requires system Perl (`/usr/bin/perl`), which ship
 
 ## API Keys
 
-Backstamp uses three external API keys, all entered in **Settings** (gear icon in the top bar). Keys are stored in the system keychain and never written to disk in plaintext.
+Backstamp uses three external API keys, all entered in **Settings** (gear icon in the top bar). Keys are stored in the macOS Keychain and never written to disk in plaintext.
 
 ### Mapbox (required)
 
@@ -93,10 +93,11 @@ Two independent test suites cover the frontend and Rust backend.
 ```sh
 npm test                # run once
 npm run test:watch      # watch mode
+npm run test:ui         # browser UI
 npm run test:coverage   # coverage report
 ```
 
-Tests live alongside the source they cover (e.g. `SessionContext.test.ts` next to `SessionContext.tsx`). The suite covers state reducers, Tauri IPC argument shapes, utility logic (apply payload building, GPX timestamp matching, timezone offset calculation, metadata field derivation, Claude proposal validation), and component rendering for `PhotoTile`, `PhotoGrid`, `ImportModal`, `ApplyModal`, `SettingsModal`, `DateTimeSection`, `CameraSection`, `MapPanel`, and `TopBar`. Tauri IPC calls are mocked — no running desktop app is required.
+Tests live alongside the source they cover (e.g. `SessionContext.test.ts` next to `SessionContext.tsx`). The suite covers state reducers, Tauri IPC argument shapes, utility logic (apply payload building, GPX timestamp matching, timezone offset calculation, metadata field derivation, Claude proposal validation, selector grouping), drag-and-drop state machine, metadata inheritance and GPS interpolation, and component rendering for `PhotoTile`, `PhotoGrid`, `ImportModal`, `ApplyModal`, `SettingsModal`, `DateTimeSection`, `CameraSection`, `VibeTagSection`, `MapPanel`, `TopBar`, and `CameraConflictDialog`. Tauri IPC calls are mocked — no running desktop app is required.
 
 **Rust (Cargo):**
 
@@ -124,11 +125,13 @@ backstamp/
 │   │   ├── TopBar/                         # Apply, Roll Back, Reset buttons + photo count
 │   │   ├── ApplyModal/                     # Two-phase apply progress overlay (applying → undoing)
 │   │   ├── ImportModal/                    # Import progress overlay with error list
-│   │   ├── SettingsModal/                  # Mapbox & Claude API key management
+│   │   ├── SettingsModal/                  # API key management (Mapbox, Google Maps, Anthropic)
 │   │   ├── common/
 │   │   │   ├── CameraConflictDialog/       # Gap-drop camera data conflict resolution
 │   │   │   ├── ConfirmDialog/              # Generic confirmation overlay
-│   │   │   └── CorpusComboBox/             # Searchable corpus-backed dropdown (make/model/lens/film)
+│   │   │   ├── CorpusComboBox/             # Searchable corpus-backed dropdown (make/model/lens/film)
+│   │   │   ├── DevLogModal/                # Dev-mode error log viewer
+│   │   │   └── ErrorModal/                 # User-facing error display
 │   │   ├── PhotoManager/
 │   │   │   ├── FloatingControls/           # Import Photos, Remove, Grid Size controls
 │   │   │   ├── SubBar/                     # Secondary action bar
@@ -147,9 +150,10 @@ backstamp/
 │   │   ├── useDragDrop.ts                  # Drag-reorder state machine
 │   │   └── useMetadataInheritance.ts       # Gap-drop timestamp interpolation + GPS lerp
 │   ├── state/
-│   │   ├── SessionContext.tsx              # Photos, selection, pending changes, apply history
+│   │   ├── SessionContext.tsx              # Photos, selection, pending changes, undo history, GPX
 │   │   ├── CorpusContext.tsx               # Camera / lens / film option lists with recent-use tracking
-│   │   ├── UIContext.tsx                   # Grid size, map height, working timezone, API keys
+│   │   ├── UIContext.tsx                   # Grid columns, map height, working timezone, API keys
+│   │   ├── DevLogContext.tsx               # Dev-mode console error/warning capture
 │   │   └── selectors.ts                    # groupPhotosByDay() and flat ordering helpers
 │   ├── lib/
 │   │   ├── tauri.ts                        # Typed wrappers for all Tauri IPC commands
@@ -172,9 +176,9 @@ backstamp/
     │   └── import_integration.rs           # Integration tests (DB schema, path key stability)
     └── src/
         ├── commands/                       # Tauri IPC handlers
-        │   ├── photos.rs                   # import_photos, remove_photos, reorder_photos
+        │   ├── photos.rs                   # import_photos, find_xmp_sidecars, remove_photos, reorder_photos
         │   ├── session.rs                  # load_session, clear_session
-        │   ├── metadata.rs                 # apply_changes, apply_cancel, rollback, reset_photos
+        │   ├── metadata.rs                 # apply_changes, apply_cancel, rollback, reset_photos, set/clear_pending_changes
         │   ├── thumbnails.rs               # get_thumbnail
         │   ├── corpus.rs                   # load/add/remove/record corpus entries
         │   ├── gpx.rs                      # import_gpx, remove_gpx, save_gpx_thumbnail
@@ -184,7 +188,7 @@ backstamp/
         ├── exiftool.rs                     # ExifTool subprocess (-stay_open mode)
         ├── write_metadata.rs               # Field-to-ExifTool tag translation, inline + XMP sidecar writes
         ├── thumbnail.rs                    # SHA-256 keyed thumbnail generation (Lanczos3)
-        ├── session.rs                      # SQLite schema, migrations, init
+        ├── session.rs                      # SQLite schema, migrations (v0–v7), init
         ├── gpx.rs                          # GPX parsing + track-point extraction
         ├── corpus_seed.rs                  # Seeded camera/lens/film data
         └── lib.rs                          # AppState, plugin wiring, command registration
@@ -218,7 +222,7 @@ Phased plans live in [`product-requirements/planning/`](product-requirements/pla
 | 2 — Full import pipeline + metadata reading | — | Complete |
 | 3 — Photo grid: day blocks, selection, drag-and-drop | — | Complete |
 | 4 — Inspector Panel fields with live editing | — | Complete |
-| 5 — Apply / Rollback / Reset pipeline | — | In Progress |
+| 5 — Apply / Rollback / Reset pipeline | — | Complete |
 | 6 — Native macOS context menu | — | Complete |
 | 7 — Map Panel (Mapbox) + Location section | — | Complete |
 | 8 — GPX import and auto-tagging | — | Complete |

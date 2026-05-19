@@ -14,59 +14,13 @@ function maskKey(key: string): string {
   return key.slice(0, 6) + "••••••••••••" + key.slice(-4);
 }
 
-async function testAnthropicKey(key: string): Promise<boolean> {
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1,
-        messages: [{ role: "user", content: "ping" }],
-      }),
-    });
-    // 401 = invalid key; other non-200 statuses (rate limit, etc.) still mean the key is valid
-    return res.status !== 401;
-  } catch {
-    return false;
-  }
+function makeKeyTester(account: string) {
+  return (key: string) => tauriCommands.testApiKey(account, key).catch(() => false);
 }
 
-async function testMapboxKey(key: string): Promise<boolean> {
-  try {
-    const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/test.json?access_token=${encodeURIComponent(key)}&limit=1`
-    );
-    return res.status === 200;
-  } catch {
-    return false;
-  }
-}
-
-async function testGoogleMapsKey(key: string): Promise<boolean> {
-  try {
-    const res = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": key,
-        "X-Goog-FieldMask": "suggestions.placePrediction.placeId",
-      },
-      body: JSON.stringify({ input: "New York" }),
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    // A valid key with Places API (New) enabled returns a suggestions array.
-    // An error field here means the API is not enabled on this key.
-    return !data.error && Array.isArray(data.suggestions);
-  } catch {
-    return false;
-  }
-}
+const testAnthropicKey = makeKeyTester("claude_api_key");
+const testMapboxKey = makeKeyTester("mapbox_token");
+const testGoogleMapsKey = makeKeyTester("google_maps_key");
 
 interface KeyFieldProps {
   label: string;
@@ -97,7 +51,7 @@ function KeyField({
     const trimmed = value.trim();
     if (trimmed) {
       onSaved(trimmed);
-      tauriCommands.setSetting(settingKey, trimmed).catch(console.error);
+      tauriCommands.setApiKey(settingKey, trimmed).catch(console.error);
     } else {
       // User cleared the field — revert display without removing the saved key
       setValue(savedValue ?? "");
@@ -106,7 +60,7 @@ function KeyField({
   }
 
   async function handleRemove() {
-    await tauriCommands.setSetting(settingKey, "");
+    await tauriCommands.deleteApiKey(settingKey);
     setValue("");
     setIsDirty(false);
     setTestState("idle");

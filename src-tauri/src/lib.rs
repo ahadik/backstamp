@@ -6,7 +6,7 @@ pub mod session;
 pub mod thumbnail;
 pub mod write_metadata;
 
-use commands::{context_menu, corpus as corpus_commands, gpx as gpx_commands, metadata, photos, session as session_commands, settings, thumbnails, timezone};
+use commands::{api_keys, context_menu, corpus as corpus_commands, gpx as gpx_commands, metadata, photos, session as session_commands, settings, thumbnails, timezone};
 use exiftool::ExiftoolProcess;
 use rusqlite::Connection;
 use std::path::PathBuf;
@@ -40,6 +40,7 @@ pub fn run() {
 
             let db = session::init_db(&app_data_dir)
                 .expect("failed to initialize database");
+            api_keys::migrate_keys_from_sqlite(&db);
 
             let exiftool = ExiftoolProcess::start(&app.handle())
                 .expect("failed to start exiftool");
@@ -98,6 +99,10 @@ pub fn run() {
             corpus_commands::record_corpus_use,
             settings::get_setting,
             settings::set_setting,
+            api_keys::get_api_key,
+            api_keys::set_api_key,
+            api_keys::delete_api_key,
+            api_keys::test_api_key,
             timezone::resolve_timezone,
             context_menu::show_photo_context_menu,
             gpx_commands::import_gpx,

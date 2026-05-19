@@ -9,7 +9,8 @@ vi.mock("../../state/UIContext", () => ({
 
 vi.mock("../../lib/tauri", () => ({
   tauriCommands: {
-    setSetting: vi.fn().mockResolvedValue(undefined),
+    setApiKey: vi.fn().mockResolvedValue(undefined),
+    deleteApiKey: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -77,17 +78,17 @@ describe("rendering", () => {
 // ── Save on blur ──────────────────────────────────────────────────────────────
 
 describe("save on blur", () => {
-  it("calls setSetting with trimmed value on blur after typing", async () => {
+  it("calls setApiKey with trimmed value on blur after typing", async () => {
     setupMocks();
     const { container } = render(<SettingsModal onClose={onClose} />);
     // First input (password) is the Mapbox key field
     const mapboxInput = container.querySelectorAll("input")[0] as HTMLInputElement;
     fireEvent.change(mapboxInput, { target: { value: "  pk.newkey  " } });
     await act(async () => { fireEvent.blur(mapboxInput); });
-    expect(tauriCommands.setSetting).toHaveBeenCalledWith("mapbox_token", "pk.newkey");
+    expect(tauriCommands.setApiKey).toHaveBeenCalledWith("mapbox_token", "pk.newkey");
   });
 
-  it("does not call setSetting when clearing input on blur", async () => {
+  it("does not call setApiKey when clearing input on blur", async () => {
     setupMocks({ mapboxToken: "pk.existing" });
     const { container } = render(<SettingsModal onClose={onClose} />);
     const mapboxInput = container.querySelectorAll("input")[0] as HTMLInputElement;
@@ -96,30 +97,30 @@ describe("save on blur", () => {
     // Clear the value
     fireEvent.change(mapboxInput, { target: { value: "" } });
     await act(async () => { fireEvent.blur(mapboxInput); });
-    expect(tauriCommands.setSetting).not.toHaveBeenCalled();
+    expect(tauriCommands.setApiKey).not.toHaveBeenCalled();
   });
 });
 
 // ── Remove ────────────────────────────────────────────────────────────────────
 
 describe("Remove", () => {
-  it("calls setSetting with empty string and dispatches SET_MAPBOX_TOKEN null", async () => {
+  it("calls deleteApiKey and dispatches SET_MAPBOX_TOKEN null", async () => {
     const { dispatch } = setupMocks({ mapboxToken: "pk.test" });
     render(<SettingsModal onClose={onClose} />);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /remove/i }));
     });
-    expect(tauriCommands.setSetting).toHaveBeenCalledWith("mapbox_token", "");
+    expect(tauriCommands.deleteApiKey).toHaveBeenCalledWith("mapbox_token");
     expect(dispatch).toHaveBeenCalledWith({ type: "SET_MAPBOX_TOKEN", token: null });
   });
 
-  it("calls setSetting with empty string and dispatches SET_CLAUDE_API_KEY null", async () => {
+  it("calls deleteApiKey and dispatches SET_CLAUDE_API_KEY null", async () => {
     const { dispatch } = setupMocks({ claudeApiKey: "sk-ant-test" });
     render(<SettingsModal onClose={onClose} />);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /remove/i }));
     });
-    expect(tauriCommands.setSetting).toHaveBeenCalledWith("claude_api_key", "");
+    expect(tauriCommands.deleteApiKey).toHaveBeenCalledWith("claude_api_key");
     expect(dispatch).toHaveBeenCalledWith({ type: "SET_CLAUDE_API_KEY", key: null });
   });
 });

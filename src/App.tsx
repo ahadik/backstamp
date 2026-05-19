@@ -88,13 +88,13 @@ function App() {
         setSessionLoading(false);
       }
 
-      tauriCommands.getSetting("mapbox_token").then((token) => {
+      tauriCommands.getApiKey("mapbox_token").then((token) => {
         if (token) uiDispatch({ type: "SET_MAPBOX_TOKEN", token });
       });
-      tauriCommands.getSetting("google_maps_key").then((key) => {
+      tauriCommands.getApiKey("google_maps_key").then((key) => {
         if (key) uiDispatch({ type: "SET_GOOGLE_MAPS_KEY", key });
       });
-      tauriCommands.getSetting("claude_api_key").then((key) => {
+      tauriCommands.getApiKey("claude_api_key").then((key) => {
         if (key) uiDispatch({ type: "SET_CLAUDE_API_KEY", key });
       });
     }

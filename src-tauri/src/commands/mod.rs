@@ -1,3 +1,4 @@
+pub mod api_keys;
 pub mod context_menu;
 pub mod corpus;
 pub mod gpx;
