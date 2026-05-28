@@ -184,26 +184,23 @@ function App() {
         <TopBar
           applyPhase={applyPhase}
           setApplyPhase={setApplyPhase}
-          onOpenSettings={openSettings}
         />
         <InspectorPanel onOpenSettings={openSettings} />
       </div>
       <MapPanel onOpenSettings={openSettings} />
-      {applyPhase.type !== "idle" && (
-        <ApplyModal
-          phase={applyPhase}
-          onCancel={async () => {
-            setApplyPhase((prev) =>
-              prev.type === "applying"
-                ? { type: "undoing", done: 0, total: prev.done }
-                : prev
-            );
-            await tauriCommands.applyCancel();
-          }}
-          onDismiss={() => setApplyPhase({ type: "idle" })}
-        />
-      )}
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      <ApplyModal
+        phase={applyPhase}
+        onCancel={async () => {
+          setApplyPhase((prev) =>
+            prev.type === "applying"
+              ? { type: "undoing", done: 0, total: prev.done }
+              : prev
+          );
+          await tauriCommands.applyCancel();
+        }}
+        onDismiss={() => setApplyPhase({ type: "idle" })}
+      />
+      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <ErrorModal />
       <DevLogModal />
     </div>

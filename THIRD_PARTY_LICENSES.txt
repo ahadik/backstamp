@@ -1,0 +1,236 @@
+THIRD-PARTY SOFTWARE LICENSES
+Backstamp — Photo Metadata Manager
+================================================================================
+
+This document lists the third-party software libraries and services used in
+Backstamp, along with their license terms. Libraries are listed in two groups:
+
+  1. Bundled software — code compiled into or shipped inside the application.
+  2. External services — APIs whose terms of service users must independently
+     agree to before using the features that depend on them.
+
+================================================================================
+1. BUNDLED SOFTWARE
+================================================================================
+
+--------------------------------------------------------------------------------
+ExifTool
+--------------------------------------------------------------------------------
+Version:   13.57
+Author:    Phil Harvey
+Website:   https://exiftool.org
+License:   Perl Artistic License 1.0 (or GPL, at your option)
+
+ExifTool is bundled within this application as a Perl script and its companion
+library (Image::ExifTool). It is used to read and write photo metadata
+(EXIF, XMP, IPTC, GPS, and other formats).
+
+Copyright (c) 2003-2024, Phil Harvey. All rights reserved.
+
+This package is free software; you can redistribute it and/or modify
+it under the terms of either:
+
+  a) the "Artistic License" as described in the file ARTISTIC, or
+  b) the GNU General Public License as published by the Free Software
+     Foundation; either version 1, or (at your option) any later version.
+
+For the full text of the Artistic License 1.0, see:
+  https://dev.perl.org/licenses/artistic.html
+
+For the full text of the GNU General Public License, see:
+  https://www.gnu.org/licenses/gpl.html
+
+
+--------------------------------------------------------------------------------
+mapbox-gl (Mapbox GL JS)
+--------------------------------------------------------------------------------
+Version:   ^3.12.0
+Publisher: Mapbox, Inc.
+Website:   https://www.mapbox.com
+License:   Mapbox Terms of Service (proprietary)
+
+mapbox-gl v2.0 and later is licensed under the Mapbox Terms of Service, which
+is a proprietary license. It is NOT open-source software. Use of this library
+requires a Mapbox account and API access token and is subject to usage-based
+pricing under the Mapbox pricing model.
+
+  Copyright © 2021 Mapbox
+
+  This software is subject to the Mapbox Terms of Service:
+  https://www.mapbox.com/legal/tos
+
+By using this application's map features, you also agree to be bound by the
+Mapbox Terms of Service.
+
+
+--------------------------------------------------------------------------------
+SQLite
+--------------------------------------------------------------------------------
+Version:   (bundled via rusqlite)
+Authors:   D. Richard Hipp and contributors
+Website:   https://www.sqlite.org
+License:   Public Domain
+
+SQLite is in the public domain and does not require a license. No copyright
+claim is made on the SQLite source code and it may be used for any purpose.
+
+  "The author disclaims copyright to this source code. In place of a legal
+   notice, here is a blessing: May you do good and not evil. May you find
+   forgiveness for yourself and others. May you share freely, never taking
+   more than you give."
+
+
+--------------------------------------------------------------------------------
+React
+--------------------------------------------------------------------------------
+Version:   ^19.1.0
+Authors:   Meta Platforms, Inc. and affiliates
+Website:   https://react.dev
+License:   MIT
+
+MIT License
+
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+Anthropic SDK for JavaScript (@anthropic-ai/sdk)
+--------------------------------------------------------------------------------
+Version:   ^0.39.0
+Authors:   Anthropic, PBC
+Website:   https://github.com/anthropics/anthropic-sdk-typescript
+License:   MIT
+
+MIT License
+
+Copyright (c) 2023 Anthropic, PBC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+Tauri Framework and Plugins
+--------------------------------------------------------------------------------
+Components: tauri, tauri-plugin-dialog, tauri-plugin-fs,
+            tauri-plugin-single-instance, @tauri-apps/api,
+            @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs
+Authors:    Tauri Programme within The Commons Conservancy
+Website:    https://tauri.app
+License:    MIT OR Apache-2.0
+
+Licensed under either of:
+
+  Apache License, Version 2.0
+    https://www.apache.org/licenses/LICENSE-2.0
+
+  MIT License
+    https://opensource.org/licenses/MIT
+
+at your option. Copyright (c) 2019-2024 Tauri Programme within The Commons
+Conservancy.
+
+
+--------------------------------------------------------------------------------
+Rust Standard Libraries and Crates
+--------------------------------------------------------------------------------
+The following Rust crates are compiled into the Backstamp binary. Each is
+independently licensed under MIT and/or Apache-2.0.
+
+  serde / serde_json     — MIT OR Apache-2.0  — https://serde.rs
+  tokio                  — MIT                 — https://tokio.rs
+  rusqlite               — MIT                 — https://github.com/rusqlite/rusqlite
+  uuid                   — MIT OR Apache-2.0   — https://github.com/uuid-rs/uuid
+  image                  — MIT OR Apache-2.0   — https://github.com/image-rs/image
+  sha2                   — MIT OR Apache-2.0   — https://github.com/RustCrypto/hashes
+  hex                    — MIT OR Apache-2.0   — https://github.com/KokaKiwi/rust-hex
+  tempfile               — MIT OR Apache-2.0   — https://github.com/Stebalien/tempfile
+  tzf-rs                 — MIT                 — https://github.com/ringsaturn/tzf-rs
+  keyring                — MIT OR Apache-2.0   — https://github.com/hwchen/keyring-rs
+  reqwest                — MIT OR Apache-2.0   — https://github.com/seanmonstar/reqwest
+  gpx                    — MIT                 — https://github.com/georust/gpx
+  time                   — MIT OR Apache-2.0   — https://github.com/time-rs/time
+
+Full license texts for these crates are available at their respective GitHub
+repositories and in the Cargo registry at https://crates.io.
+
+For MIT licenses: the standard MIT License text applies (see the React section
+above for a representative copy). For Apache-2.0 licenses, the full text is
+available at https://www.apache.org/licenses/LICENSE-2.0.
+
+
+================================================================================
+2. EXTERNAL SERVICES
+================================================================================
+
+The following third-party APIs are called at runtime. They are not bundled with
+the application. Users must create accounts and agree to the respective terms
+of service independently. API keys are stored locally in the macOS Keychain.
+
+--------------------------------------------------------------------------------
+Anthropic Claude API
+--------------------------------------------------------------------------------
+Website: https://www.anthropic.com
+Used for: AI-assisted metadata editing ("VibeTag" feature)
+Terms:    https://www.anthropic.com/legal/consumer-terms
+
+Using the VibeTag feature requires a valid Anthropic API key and is subject to
+Anthropic's usage-based pricing. Photo filenames and user-written metadata
+prompts are sent to Anthropic's servers for processing.
+
+--------------------------------------------------------------------------------
+Mapbox APIs
+--------------------------------------------------------------------------------
+Website: https://www.mapbox.com
+Used for: Map rendering, geocoding, GPX track thumbnails, location search
+Terms:    https://www.mapbox.com/legal/tos
+
+Using map and location features requires a valid Mapbox access token and is
+subject to Mapbox's usage-based pricing.
+
+--------------------------------------------------------------------------------
+Google Places API
+--------------------------------------------------------------------------------
+Website: https://developers.google.com/maps/documentation/places/web-service
+Used for: Location autocomplete search in the inspector panel
+Terms:    https://developers.google.com/maps/terms-20180207
+
+Using location search features requires a valid Google Maps API key and is
+subject to Google's usage-based pricing.
+
+================================================================================
+END OF THIRD-PARTY LICENSES
+================================================================================

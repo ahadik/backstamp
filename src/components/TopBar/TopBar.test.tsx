@@ -91,7 +91,7 @@ function setup(sessionOverrides: Partial<SessionState> = {}, phase: ApplyPhase =
   };
   vi.mocked(useSession).mockReturnValue({ state: base, dispatch: mockDispatch });
   vi.mocked(useUI).mockReturnValue({ state: defaultUiState, dispatch: mockUiDispatch });
-  render(<TopBar applyPhase={phase} setApplyPhase={vi.fn()} onOpenSettings={vi.fn()} />);
+  render(<TopBar applyPhase={phase} setApplyPhase={vi.fn()} />);
 }
 
 beforeEach(() => {
@@ -221,7 +221,7 @@ describe("TopBar — Clear Session button", () => {
   });
 
   it("is enabled when only GPX files exist", () => {
-    setup({ photos: [], gpxFiles: [{ id: "g1", filePath: "/g.gpx", addedAt: 0, trackPoints: [], thumbnailPath: null }] });
+    setup({ photos: [], gpxFiles: [{ id: "g1", filePath: "/g.gpx", addedAt: 0, trackPoints: [], thumbnailPath: null, timezone: null }] });
     expect(screen.getByRole("button", { name: /clear session/i })).not.toBeDisabled();
   });
 

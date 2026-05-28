@@ -1,40 +1,159 @@
-use keyring::Entry;
+// API key storage.
+//
+// Keys are persisted to a JSON file (`api_keys.json`) in the app data directory.
+// On Unix the file is chmod 0600 so other local users can't read it.
+//
+// ---------------------------------------------------------------------------
+// Why a file and not the macOS Keychain?
+// ---------------------------------------------------------------------------
+// We previously stored keys in the Keychain via the `keyring` crate. Keychain
+// entries carry a `partition_id` integrity ACL bound to the *hash* of the
+// binary that wrote them. That works fine within a single signed identity,
+// but it falls over in two cases we actually ship through:
+//
+//   1. `tauri dev` — each rebuild produces a new ad-hoc signature, so every
+//      run looks like a different app to the Keychain and can't decrypt the
+//      previous run's entries.
+//
+//   2. DMG upgrades of unsigned (or ad-hoc signed) release builds — same
+//      problem at the user level: the new binary's hash doesn't match the
+//      ACL, so v0.2.0 can't read keys written by v0.1.0 and the user has to
+//      re-enter them on every release. This was reported during the v0.1.0
+//      smoke test of an upgrade install.
+//
+// Until we ship a stable Developer ID signature (see RELEASING.md "Future
+// work"), the Keychain provides no real benefit over a local file — the app
+// is unsigned anyway, and the session DB sitting next to this file is also
+// plaintext. So we store keys in plaintext JSON, with restrictive file perms,
+// and accept that anyone with local read access to this user's home dir can
+// read them. That's the same trust boundary the rest of the app already
+// assumes.
+//
+// ---------------------------------------------------------------------------
+// How to switch back to the Keychain once the app is signed
+// ---------------------------------------------------------------------------
+// When Developer ID signing + notarization are wired up:
+//
+//   1. Re-add `keyring = "3"` to src-tauri/Cargo.toml.
+//   2. Gate this file's storage on `#[cfg(debug_assertions)]` again: keep the
+//      JSON path for dev builds (where ad-hoc signing still breaks Keychain),
+//      and use `keyring::Entry::new(SERVICE, account)` for release builds.
+//      SERVICE was `"com.alexhadik.backstamp"` (matches the bundle id).
+//   3. In `migrate_keys_from_sqlite`, add a second migration step that runs
+//      once per install: if `api_keys.json` exists in a release build, read
+//      each key, write it to the Keychain, then delete the file. Mirror the
+//      pattern already used here for the SQLite -> file migration.
+//   4. Verify the partition_id ACL is stable across releases by building two
+//      signed DMGs with different version numbers and confirming the second
+//      one can read keys written by the first without prompting.
+// ---------------------------------------------------------------------------
+
 use reqwest::Client;
 use rusqlite::params;
 use serde_json::json;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
-const SERVICE: &str = "com.alexhadik.backstamp";
+const ACCOUNTS: &[&str] = &["mapbox_token", "google_maps_key", "claude_api_key"];
 
-fn entry(account: &str) -> Result<Entry, String> {
-    Entry::new(SERVICE, account).map_err(|e| format!("keychain entry: {e}"))
+fn keys_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir.join("api_keys.json")
 }
 
-#[tauri::command]
-pub async fn get_api_key(account: String) -> Result<Option<String>, String> {
-    let e = entry(&account)?;
-    match e.get_password() {
-        Ok(pw) if !pw.is_empty() => Ok(Some(pw)),
-        Ok(_) => Ok(None),
-        Err(err) if matches!(err, keyring::Error::NoEntry) => Ok(None),
-        Err(err) => Err(format!("get_api_key: {err}")),
+fn legacy_keys_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir.join("dev_api_keys.json")
+}
+
+// Older dev builds wrote to `dev_api_keys.json`. Rename it on first read so
+// existing dev installs don't lose their keys.
+fn migrate_legacy_filename(app_data_dir: &Path) {
+    let legacy = legacy_keys_path(app_data_dir);
+    let current = keys_path(app_data_dir);
+    if legacy.exists() && !current.exists() {
+        let _ = std::fs::rename(&legacy, &current);
     }
 }
 
-#[tauri::command]
-pub async fn set_api_key(account: String, value: String) -> Result<(), String> {
-    let e = entry(&account)?;
-    e.set_password(&value)
-        .map_err(|err| format!("set_api_key: {err}"))
+fn read_all(app_data_dir: &Path) -> Result<HashMap<String, String>, String> {
+    migrate_legacy_filename(app_data_dir);
+    let path = keys_path(app_data_dir);
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let data = std::fs::read_to_string(&path).map_err(|e| format!("read keys: {e}"))?;
+    serde_json::from_str(&data).map_err(|e| format!("parse keys: {e}"))
+}
+
+fn write_all(app_data_dir: &Path, keys: &HashMap<String, String>) -> Result<(), String> {
+    let path = keys_path(app_data_dir);
+    let data = serde_json::to_string_pretty(keys)
+        .map_err(|e| format!("serialize keys: {e}"))?;
+    std::fs::write(&path, data).map_err(|e| format!("write keys: {e}"))?;
+    restrict_permissions(&path);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn restrict_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+fn restrict_permissions(_path: &Path) {}
+
+fn get_key(app_data_dir: &Path, account: &str) -> Result<Option<String>, String> {
+    let keys = read_all(app_data_dir)?;
+    Ok(keys.get(account).filter(|v| !v.is_empty()).cloned())
+}
+
+fn set_key(app_data_dir: &Path, account: &str, value: &str) -> Result<(), String> {
+    let mut keys = read_all(app_data_dir)?;
+    keys.insert(account.to_string(), value.to_string());
+    write_all(app_data_dir, &keys)
+}
+
+fn delete_key(app_data_dir: &Path, account: &str) -> Result<(), String> {
+    let mut keys = read_all(app_data_dir)?;
+    if keys.remove(account).is_some() {
+        write_all(app_data_dir, &keys)?;
+    }
+    Ok(())
+}
+
+fn resolve_app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    app.path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))
 }
 
 #[tauri::command]
-pub async fn delete_api_key(account: String) -> Result<(), String> {
-    let e = entry(&account)?;
-    match e.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(err) if matches!(err, keyring::Error::NoEntry) => Ok(()),
-        Err(err) => Err(format!("delete_api_key: {err}")),
-    }
+pub async fn get_api_key(
+    app: tauri::AppHandle,
+    account: String,
+) -> Result<Option<String>, String> {
+    let dir = resolve_app_data_dir(&app)?;
+    get_key(&dir, &account)
+}
+
+#[tauri::command]
+pub async fn set_api_key(
+    app: tauri::AppHandle,
+    account: String,
+    value: String,
+) -> Result<(), String> {
+    let dir = resolve_app_data_dir(&app)?;
+    set_key(&dir, &account, &value)
+}
+
+#[tauri::command]
+pub async fn delete_api_key(
+    app: tauri::AppHandle,
+    account: String,
+) -> Result<(), String> {
+    let dir = resolve_app_data_dir(&app)?;
+    delete_key(&dir, &account)
 }
 
 #[tauri::command]
@@ -86,10 +205,11 @@ pub async fn test_api_key(account: String, key: String) -> Result<bool, String> 
     }
 }
 
-/// Called once at startup: moves any API key values still stored in SQLite into the Keychain
-/// and removes them from the database. This handles upgrades from the earlier SQLite-based storage.
-pub fn migrate_keys_from_sqlite(conn: &rusqlite::Connection) {
-    for account in &["mapbox_token", "google_maps_key", "claude_api_key"] {
+/// Called once at startup: moves any API key values still stored in SQLite
+/// into the JSON file store and removes them from the database. Handles
+/// upgrades from the original SQLite-based storage.
+pub fn migrate_keys_from_sqlite(conn: &rusqlite::Connection, app_data_dir: &Path) {
+    for account in ACCOUNTS {
         let result: rusqlite::Result<String> = conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
             params![account],
@@ -97,13 +217,11 @@ pub fn migrate_keys_from_sqlite(conn: &rusqlite::Connection) {
         );
         match result {
             Ok(value) if !value.is_empty() => {
-                if let Ok(e) = Entry::new(SERVICE, account) {
-                    if e.set_password(&value).is_ok() {
-                        let _ = conn.execute(
-                            "DELETE FROM settings WHERE key = ?1",
-                            params![account],
-                        );
-                    }
+                if set_key(app_data_dir, account, &value).is_ok() {
+                    let _ = conn.execute(
+                        "DELETE FROM settings WHERE key = ?1",
+                        params![account],
+                    );
                 }
             }
             Ok(_) => {

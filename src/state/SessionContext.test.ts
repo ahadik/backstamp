@@ -8,6 +8,7 @@ function makeGpxFile(id: string, overrides: Partial<GpxFile> = {}): GpxFile {
     addedAt: 1700000000,
     trackPoints: [],
     thumbnailPath: null,
+    timezone: null,
     ...overrides,
   };
 }

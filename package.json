@@ -11,7 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "refresh-icon": "bash scripts/refresh-icon.sh",
+    "release:pre-build": "bash scripts/release-pre-build.sh",
+    "release:build": "bash scripts/release-build.sh",
+    "release:publish": "bash scripts/release-publish.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

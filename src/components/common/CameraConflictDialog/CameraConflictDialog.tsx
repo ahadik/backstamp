@@ -1,4 +1,5 @@
 import type { CameraConflict, CameraData } from "../../../hooks/useMetadataInheritance";
+import { Modal } from "../Modal/Modal";
 import styles from "./CameraConflictDialog.module.css";
 
 interface CameraConflictDialogProps {
@@ -19,11 +20,8 @@ function summarizeCameraData(data: CameraData | null): string {
 
 export function CameraConflictDialog({ conflict, onResolve }: CameraConflictDialogProps) {
   return (
-    <div className={styles.backdrop}>
-      <div
-        className={styles.dialog}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal isOpen closeOnBackdrop={false} closeOnEscape={false}>
+      <div className={styles.dialog}>
         <h3 className={styles.title}>Which camera details should these photos inherit?</h3>
         <div className={styles.options}>
           <button
@@ -47,6 +45,6 @@ export function CameraConflictDialog({ conflict, onResolve }: CameraConflictDial
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

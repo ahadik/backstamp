@@ -1,13 +1,21 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useUI } from "../../state/UIContext";
 import { tauriCommands } from "../../lib/tauri";
+import { Modal } from "../common/Modal/Modal";
 import styles from "./SettingsModal.module.css";
 
 interface SettingsModalProps {
+  isOpen: boolean;
   onClose: () => void;
 }
 
-type TestState = "idle" | "testing" | "ok" | "fail";
+type TestState =
+  | { kind: "idle" }
+  | { kind: "testing" }
+  | { kind: "ok" }
+  | { kind: "fail"; message?: string };
+
+type TestResult = { ok: true } | { ok: false; message?: string };
 
 function maskKey(key: string): string {
   if (key.length <= 8) return key.slice(0, 2) + "••••••";
@@ -15,12 +23,26 @@ function maskKey(key: string): string {
 }
 
 function makeKeyTester(account: string) {
-  return (key: string) => tauriCommands.testApiKey(account, key).catch(() => false);
+  return async (key: string): Promise<TestResult> => {
+    const ok = await tauriCommands.testApiKey(account, key).catch(() => false);
+    return ok ? { ok: true } : { ok: false };
+  };
 }
 
 const testAnthropicKey = makeKeyTester("claude_api_key");
-const testMapboxKey = makeKeyTester("mapbox_token");
 const testGoogleMapsKey = makeKeyTester("google_maps_key");
+
+async function testMapboxKey(key: string): Promise<TestResult> {
+  if (/^sk\./i.test(key.trim())) {
+    return {
+      ok: false,
+      message:
+        "This is a secret token (sk.…). The map needs a public token that starts with pk.… — create one in your Mapbox account dashboard.",
+    };
+  }
+  const ok = await tauriCommands.testApiKey("mapbox_token", key).catch(() => false);
+  return ok ? { ok: true } : { ok: false };
+}
 
 interface KeyFieldProps {
   label: string;
@@ -28,7 +50,7 @@ interface KeyFieldProps {
   placeholder: string;
   savedValue: string | null;
   settingKey: string;
-  onTest: (key: string) => Promise<boolean>;
+  onTest: (key: string) => Promise<TestResult>;
   onSaved: (value: string | null) => void;
 }
 
@@ -44,7 +66,7 @@ function KeyField({
   const [value, setValue] = useState(savedValue ?? "");
   const [isDirty, setIsDirty] = useState(false);
   const [showKey, setShowKey] = useState(false);
-  const [testState, setTestState] = useState<TestState>("idle");
+  const [testState, setTestState] = useState<TestState>({ kind: "idle" });
 
   async function handleBlur() {
     if (!isDirty) return;
@@ -63,26 +85,33 @@ function KeyField({
     await tauriCommands.deleteApiKey(settingKey);
     setValue("");
     setIsDirty(false);
-    setTestState("idle");
+    setTestState({ kind: "idle" });
     onSaved(null);
   }
 
   async function handleTest() {
-    const key = isDirty ? value.trim() : (savedValue ?? "");
+    // Use value if the user has typed anything, otherwise the saved key.
+    // Avoid depending on isDirty: blur fires before click, racing the state update.
+    const key = value.trim() || (savedValue ?? "");
     if (!key) return;
-    setTestState("testing");
-    const ok = await onTest(key);
-    setTestState(ok ? "ok" : "fail");
+    setTestState({ kind: "testing" });
+    const result = await onTest(key);
+    setTestState(result.ok ? { kind: "ok" } : { kind: "fail", message: result.message });
   }
+
+  const testing = testState.kind === "testing";
 
   return (
     <section className={styles.section}>
       <div className={styles.sectionHeader}>
         <h3 className={styles.sectionTitle}>{label}</h3>
-        {testState === "ok" && <span className={styles.badgeOk}>✓ Valid</span>}
-        {testState === "fail" && <span className={styles.badgeFail}>✗ Invalid</span>}
+        {testState.kind === "ok" && <span className={styles.badgeOk}>✓ Valid</span>}
+        {testState.kind === "fail" && <span className={styles.badgeFail}>✗ Invalid</span>}
       </div>
       <p className={styles.hint}>{hint}</p>
+      {testState.kind === "fail" && testState.message && (
+        <p className={styles.testMessage}>{testState.message}</p>
+      )}
       {savedValue && !isDirty && (
         <p className={styles.currentKey}>{maskKey(savedValue)}</p>
       )}
@@ -95,7 +124,7 @@ function KeyField({
           onChange={(e) => {
             setValue(e.target.value);
             setIsDirty(true);
-            setTestState("idle");
+            setTestState({ kind: "idle" });
           }}
           onFocus={(e) => {
             if (!isDirty && savedValue) {
@@ -110,7 +139,7 @@ function KeyField({
           spellCheck={false}
         />
         <button
-          className="btn btn-glass"
+          className="btn btn-low btn-glass"
           type="button"
           onClick={() => setShowKey((s) => !s)}
           aria-label={showKey ? "Hide key" : "Show key"}
@@ -118,15 +147,15 @@ function KeyField({
           {showKey ? "Hide" : "Show"}
         </button>
         <button
-          className="btn btn-glass"
+          className="btn btn-low btn-glass"
           type="button"
-          disabled={testState === "testing" || (!isDirty && !savedValue)}
+          disabled={testing || (!value.trim() && !savedValue)}
           onClick={handleTest}
         >
-          {testState === "testing" ? "Testing…" : "Test"}
+          {testing ? "Testing…" : "Test"}
         </button>
         {savedValue && !isDirty && (
-          <button className="btn btn-danger" type="button" onClick={handleRemove}>
+          <button className="btn btn-low btn-danger" type="button" onClick={handleRemove}>
             Remove
           </button>
         )}
@@ -135,20 +164,12 @@ function KeyField({
   );
 }
 
-export function SettingsModal({ onClose }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { state, dispatch } = useUI();
 
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
   return (
-    <div className={styles.backdrop} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+    <Modal isOpen={isOpen} onClose={onClose}>
+      <div className={styles.modal}>
         <div className={styles.header}>
           <h2 className={styles.title}>Settings</h2>
           <button
@@ -197,6 +218,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

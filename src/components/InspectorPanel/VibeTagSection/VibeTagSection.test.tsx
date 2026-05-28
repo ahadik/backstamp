@@ -129,7 +129,7 @@ describe("normal state", () => {
   it("send button is disabled when input is empty", () => {
     setupMocks();
     render(<VibeTagSection selectedPhotos={[makePhoto()]} onOpenSettings={onOpenSettings} />);
-    expect(screen.getByRole("button", { name: "Tag It ✨" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Tag It" })).toBeDisabled();
   });
 
   it("pressing Enter on empty input does not call runVibeTag", () => {

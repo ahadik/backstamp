@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Modal } from "../Modal/Modal";
 import styles from "./ConfirmDialog.module.css";
 
 interface ConfirmDialogProps {
@@ -23,11 +24,8 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   return (
-    <div className={styles.backdrop} onClick={onCancel}>
-      <div
-        className={styles.dialog}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal isOpen onClose={onCancel}>
+      <div className={styles.dialog}>
         <h3 className={styles.title}>{title}</h3>
         <p className={styles.message}>{message}</p>
         <div className={styles.actions}>
@@ -50,6 +48,6 @@ export function ConfirmDialog({
           )}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

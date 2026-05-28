@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Modal } from "../common/Modal/Modal";
 import styles from "./ImportModal.module.css";
 
 interface Props {
@@ -37,10 +38,8 @@ export function ImportModal({
     }
   }, [errors.length]);
 
-  if (!isOpen) return null;
-
   return (
-    <div className={styles.overlay}>
+    <Modal isOpen={isOpen} closeOnBackdrop={false} closeOnEscape={false}>
       <div className={styles.panel}>
         <p className={styles.title}>Importing Photos</p>
 
@@ -68,6 +67,6 @@ export function ImportModal({
           </div>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }

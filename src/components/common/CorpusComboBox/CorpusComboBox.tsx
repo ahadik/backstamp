@@ -186,13 +186,13 @@ export function CorpusComboBox({
           </p>
           <div className={styles.removeActions}>
             <button
-              className="btn btn-glass"
+              className="btn btn-low btn-glass"
               onMouseDown={(e) => { e.preventDefault(); setRemoveConfirm(null); }}
             >
               Cancel
             </button>
             <button
-              className="btn btn-danger"
+              className="btn btn-low btn-danger"
               onMouseDown={(e) => { e.preventDefault(); handleRemoveConfirm(); }}
             >
               Remove

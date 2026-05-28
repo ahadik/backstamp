@@ -20,3 +20,7 @@ src-tauri/resources/lib/
 # editor
 .DS_Store
 *.sw?
+
+#claude
+.mcp.json
+.claude/*

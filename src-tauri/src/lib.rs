@@ -40,7 +40,7 @@ pub fn run() {
 
             let db = session::init_db(&app_data_dir)
                 .expect("failed to initialize database");
-            api_keys::migrate_keys_from_sqlite(&db);
+            api_keys::migrate_keys_from_sqlite(&db, &app_data_dir);
 
             let exiftool = ExiftoolProcess::start(&app.handle())
                 .expect("failed to start exiftool");

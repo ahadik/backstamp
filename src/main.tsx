@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "./styles/reset.css";
+import "./styles/colors.css";
 import "./styles/tokens.css";
 import "./styles/layout.css";
 import "./styles/typography.css";

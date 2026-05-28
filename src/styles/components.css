@@ -1,4 +1,8 @@
-/* ── Buttons ── */
+/* ── Buttons ──
+   Two tiers:
+   - .btn (high-level): pill-shaped. Top-bar global actions and modal Save buttons.
+   - .btn + .btn-low: 8px radius. Buttons inside the inspector and secondary
+     actions inside modals (Manage API Keys, Vibe It, etc.). */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -15,6 +19,11 @@
     opacity var(--transition-fast);
   white-space: nowrap;
   user-select: none;
+  -webkit-user-select: none;
+}
+
+.btn-low {
+  border-radius: var(--radius-md);
 }
 
 .btn:disabled {
@@ -24,10 +33,19 @@
 
 .btn-primary {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--palette-white);
   border-color: var(--color-accent);
 }
 .btn-primary:not(:disabled):hover {
+  filter: brightness(1.1);
+}
+
+.btn-secondary {
+  background: var(--color-secondary);
+  color: var(--color-text);
+  border-color: var(--color-secondary);
+}
+.btn-secondary:not(:disabled):hover {
   filter: brightness(1.1);
 }
 
@@ -56,7 +74,7 @@
 }
 .btn-danger:not(:disabled):hover {
   background: var(--color-danger);
-  color: #fff;
+  color: var(--palette-white);
 }
 
 /* ── Text input ── */

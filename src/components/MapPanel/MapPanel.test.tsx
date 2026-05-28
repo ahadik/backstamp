@@ -128,6 +128,17 @@ describe("MapPanel", () => {
     expect(container.querySelector("[class*='map']")).toBeInTheDocument();
   });
 
+  it("shows secret-token prompt instead of map when token starts with sk. (Bug #2/#3)", () => {
+    const { onOpenSettings } = setupMocks({}, { mapboxToken: "sk.eyJleHByaXZhdGU" });
+    render(<MapPanel onOpenSettings={onOpenSettings} />);
+    expect(screen.getByText(/secret token/i)).toBeInTheDocument();
+    // The Open Settings button must be reachable so the user can fix the token.
+    const btn = screen.getByRole("button", { name: "Open Settings" });
+    expect(btn).toBeInTheDocument();
+    fireEvent.click(btn);
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
   describe("drag handle", () => {
     it("dispatches SET_MAP_PANEL_HEIGHT when dragging upward", () => {
       const { uiDispatch, onOpenSettings } = setupMocks({}, { mapPanelHeight: 200 });

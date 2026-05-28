@@ -165,7 +165,7 @@ export function VibeTagSection({
         <div className="section-label">Vibe Tag</div>
         <div className={`inspector-card ${styles.card}`}>
           <p className={styles.noKey}>A Claude API key is required for Vibe Tag.</p>
-          <button className="btn btn-primary" onClick={onOpenSettings}>
+          <button className="btn btn-low btn-secondary" onClick={onOpenSettings}>
             Open Settings
           </button>
         </div>
@@ -185,10 +185,10 @@ export function VibeTagSection({
               <div className={styles.proposal}>
                 <p className={styles.proposalText}>{formatProposal(proposal)}</p>
                 <div className={styles.proposalActions}>
-                  <button className="btn btn-primary" onClick={handleAccept}>
+                  <button className="btn btn-low btn-primary" onClick={handleAccept}>
                     Accept
                   </button>
-                  <button className="btn btn-glass" onClick={handleFollowUp}>
+                  <button className="btn btn-low btn-glass" onClick={handleFollowUp}>
                     Follow Up
                   </button>
                 </div>
@@ -212,11 +212,11 @@ export function VibeTagSection({
                 onKeyDown={handleKeyDown}
               />
               <button
-                className={`btn btn-primary ${styles.sendBtn}`}
+                className={`btn btn-low btn-primary ${styles.sendBtn}`}
                 disabled={loading || !inputText.trim()}
                 onClick={handleSubmit}
               >
-                {loading ? <span className={styles.spinner} /> : "Tag It ✨"}
+                {loading ? <span className={styles.spinner} /> : "Tag It"}
               </button>
             </div>
           </>

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Modal } from "../common/Modal/Modal";
 import styles from "./ApplyModal.module.css";
 
 export interface ApplyError {
@@ -29,7 +30,7 @@ export function ApplyModal({ phase, onCancel, onDismiss }: ApplyModalProps) {
     }
   }, [phase, onDismiss]);
 
-  if (phase.type === "idle") return null;
+  const isOpen = phase.type !== "idle";
 
   const renderProgress = () => {
     if (phase.type === "applying" || phase.type === "undoing") {
@@ -56,7 +57,7 @@ export function ApplyModal({ phase, onCancel, onDismiss }: ApplyModalProps) {
   };
 
   return (
-    <div className={styles.overlay}>
+    <Modal isOpen={isOpen} closeOnBackdrop={false} closeOnEscape={false}>
       <div className={styles.card}>
         {phase.type === "applying" && (
           <>
@@ -65,7 +66,7 @@ export function ApplyModal({ phase, onCancel, onDismiss }: ApplyModalProps) {
             </h3>
             {renderProgress()}
             <div className={styles.actions}>
-              <button className="btn btn-glass" onClick={onCancel}>
+              <button className="btn btn-low btn-glass" onClick={onCancel}>
                 Cancel
               </button>
             </div>
@@ -133,6 +134,6 @@ export function ApplyModal({ phase, onCancel, onDismiss }: ApplyModalProps) {
           </>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }

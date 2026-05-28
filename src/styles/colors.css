@@ -1,0 +1,109 @@
+/* ── Palette ──────────────────────────────────────────────────────────────
+   Single source of truth. All hex values in the codebase live here.
+   Five ramps × seven shades each, stepping from light (-1) to dark (-7).
+   See product-specs/colors.md for ramp roles and featured "core" shades.
+   ──────────────────────────────────────────────────────────────────────── */
+:root {
+  /* Brand — Primary (lime → forest green) */
+  --palette-brand-primary-1: #ACEE68;
+  --palette-brand-primary-2: #8CC354;
+  --palette-brand-primary-3: #6E9A41; /* core */
+  --palette-brand-primary-4: #51732E;
+  --palette-brand-primary-5: #364E1D;
+  --palette-brand-primary-6: #1D2C0D;
+  --palette-brand-primary-7: #0B1304;
+
+  /* Brand — Secondary (sage green) */
+  --palette-brand-secondary-1: #DDF3E8;
+  --palette-brand-secondary-2: #A8CEBC;
+  --palette-brand-secondary-3: #87A697;
+  --palette-brand-secondary-4: #677F74;
+  --palette-brand-secondary-5: #495B52; /* core */
+  --palette-brand-secondary-6: #2D3933;
+  --palette-brand-secondary-7: #131A16;
+
+  /* Info (sky → steel blue) */
+  --palette-info-1: #ECF1FA;
+  --palette-info-2: #C2D4F1;
+  --palette-info-3: #85AEE5; /* core */
+  --palette-info-4: #5589C4;
+  --palette-info-5: #3D6491;
+  --palette-info-6: #274261;
+  --palette-info-7: #122235;
+
+  /* Surface — Canvas (warm taupe / olive neutral) */
+  --palette-surface-canvas-1: #D9D9B5;
+  --palette-surface-canvas-2: #B1B193;
+  --palette-surface-canvas-3: #8B8B73;
+  --palette-surface-canvas-4: #676754;
+  --palette-surface-canvas-5: #454538;
+  --palette-surface-canvas-6: #25251D; /* core */
+  --palette-surface-canvas-7: #11110C;
+
+  /* Surface — Neutral (achromatic gray) */
+  --palette-surface-neutral-1: #EBEFED;
+  --palette-surface-neutral-2: #C1C7C5;
+  --palette-surface-neutral-3: #9BA09E;
+  --palette-surface-neutral-4: #777B79;
+  --palette-surface-neutral-5: #545756;
+  --palette-surface-neutral-6: #343636;
+  --palette-surface-neutral-7: #171818;
+
+  /* Utility */
+  --palette-white: #FFFFFF;
+
+  /* Status — not part of the Figma palette; retained for state colors. */
+  --palette-success: #00B56E;
+  --palette-failure: #FF4D32;
+  --palette-warning: #FF9F0A;
+}
+
+/* ── Semantic tokens ──────────────────────────────────────────────────────
+   Map palette values to role-based names. Light mode defaults.
+   ──────────────────────────────────────────────────────────────────────── */
+:root {
+  --color-bg:             var(--palette-surface-neutral-1);
+  --color-surface:        var(--palette-white);
+  --color-border:         color-mix(in srgb, var(--palette-surface-neutral-7) 12%, transparent);
+  --color-text:           var(--palette-surface-neutral-7);
+  --color-text-secondary: color-mix(in srgb, var(--palette-surface-neutral-7) 55%, transparent);
+
+  --color-accent:         var(--palette-brand-primary-3);
+  --color-accent-dark:    var(--palette-brand-primary-5);
+  --color-secondary:      var(--palette-brand-secondary-2);
+  --color-secondary-dark: var(--palette-brand-secondary-6);
+  --color-info:           var(--palette-info-3);
+  --color-info-dark:      var(--palette-info-5);
+
+  --color-success:        var(--palette-success);
+  --color-danger:         var(--palette-failure);
+  --color-warning:        var(--palette-warning);
+
+  --color-glass-bg:       color-mix(in srgb, var(--palette-white)              72%, transparent);
+  --color-glass-border:   color-mix(in srgb, var(--palette-surface-neutral-7)   8%, transparent);
+  --color-overlay:        color-mix(in srgb, var(--palette-surface-neutral-7)  60%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg:             var(--palette-surface-neutral-7);
+    --color-surface:        var(--palette-surface-neutral-6);
+    --color-border:         color-mix(in srgb, var(--palette-surface-neutral-1) 15%, transparent);
+    --color-text:           var(--palette-surface-neutral-1);
+    --color-text-secondary: color-mix(in srgb, var(--palette-surface-neutral-1) 55%, transparent);
+
+    --color-glass-bg:       color-mix(in srgb, var(--palette-surface-neutral-1) 14%, transparent);
+    --color-glass-border:   color-mix(in srgb, var(--palette-surface-neutral-1) 18%, transparent);
+    --color-overlay:        color-mix(in srgb, var(--palette-surface-neutral-7) 60%, transparent);
+  }
+}
+
+/* ── Semantic utilities ───────────────────────────────────────────────── */
+.text-default   { color: var(--color-text); }
+.text-muted     { color: var(--color-text-secondary); }
+.text-accent    { color: var(--color-accent); }
+.text-danger    { color: var(--color-danger); }
+
+.surface-bg      { background-color: var(--color-bg); }
+.surface-default { background-color: var(--color-surface); }
+.surface-danger  { background-color: var(--color-danger); }

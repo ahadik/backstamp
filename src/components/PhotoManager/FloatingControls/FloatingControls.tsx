@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { tauriCommands } from "../../../lib/tauri";
 import { useUI } from "../../../state/UIContext";
 import { useSession } from "../../../state/SessionContext";
@@ -36,8 +37,23 @@ export function FloatingControls() {
     sessionDispatch({ type: "REMOVE_PHOTOS", ids });
   }
 
+  function handleDragMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    if (e.target !== e.currentTarget) return;
+    if (e.button !== 0) return;
+    const win = getCurrentWindow();
+    if (e.detail === 2) {
+      win.toggleMaximize();
+    } else {
+      win.startDragging();
+    }
+  }
+
   return (
-    <div className={styles.floatingControls}>
+    <div
+      className={styles.floatingControls}
+      data-tauri-drag-region
+      onMouseDown={handleDragMouseDown}
+    >
       <div className={styles.leftGroup}>
         <button className="btn btn-glass" onClick={handleImportPhotos}>
           Import Photos

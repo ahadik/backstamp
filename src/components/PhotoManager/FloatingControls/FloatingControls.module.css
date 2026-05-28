@@ -1,14 +1,25 @@
 .floatingControls {
   position: fixed;
-  top: var(--space-3);
+  top: 0;
   left: 0;
   right: var(--inspector-width);
   z-index: var(--z-floating-controls);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 var(--space-3);
+  padding: 10px var(--space-3) 10px 88px;
+  isolation: isolate;
+  -webkit-app-region: drag;
+}
+
+.floatingControls::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
   pointer-events: none;
+  z-index: -1;
 }
 
 .leftGroup,
@@ -17,6 +28,7 @@
   align-items: center;
   gap: var(--space-2);
   pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 
 .tzSelect {
@@ -32,6 +44,8 @@
   padding: 5px 28px 5px var(--space-3);
   cursor: pointer;
   outline: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .gridSizeControl {

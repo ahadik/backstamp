@@ -28,7 +28,8 @@ export function buildApplyPayload(photos: Photo[]): ApplyPayload {
         ? getUtcOffset(effectiveTimezone, new Date(effectiveDateStr))
         : null;
 
-    changes[photo.id] = { ...p, ...supplement, ...(utcOffset !== null ? { utcOffset } : {}) };
+    const utcOffsetChanged = hasPendingDate || hasPendingTime || "timezone" in p;
+    changes[photo.id] = { ...p, ...supplement, ...(utcOffsetChanged ? { utcOffset } : {}) };
   }
   return { changes };
 }

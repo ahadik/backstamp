@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { useUI } from "../../../state/UIContext";
+import { Modal } from "../Modal/Modal";
 import styles from "./ErrorModal.module.css";
 
 export function ErrorModal() {
   const { state, dispatch } = useUI();
   const [copied, setCopied] = useState(false);
-
-  if (!state.error) return null;
 
   function dismiss() {
     dispatch({ type: "SET_ERROR", error: null });
@@ -20,8 +19,8 @@ export function ErrorModal() {
   }
 
   return (
-    <div className={styles.backdrop} onClick={dismiss}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+    <Modal isOpen={state.error !== null} onClose={dismiss}>
+      <div className={styles.dialog}>
         <div className={styles.header}>
           <span className={styles.title}>Error</span>
           <button className={styles.copyBtn} onClick={copyToClipboard}>
@@ -33,6 +32,6 @@ export function ErrorModal() {
           <button className="btn" onClick={dismiss}>Dismiss</button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

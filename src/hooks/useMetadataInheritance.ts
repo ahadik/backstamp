@@ -204,7 +204,7 @@ function interpolateTimestamp(
     // gap at start of block: use first photo's time minus 1 min per dragged photo
     const afterTime = after.currentMetadata.captureTime;
     return {
-      captureDate: after.currentMetadata.captureDate,
+      captureDate: after.currentMetadata.captureDate ?? dayKey,
       captureTime: afterTime ? subtractMinutes(afterTime, total - index) : null,
     };
   }
@@ -213,7 +213,7 @@ function interpolateTimestamp(
     // gap at end of block: use last photo's time plus 1 min per dragged photo
     const beforeTime = before.currentMetadata.captureTime;
     return {
-      captureDate: before.currentMetadata.captureDate,
+      captureDate: before.currentMetadata.captureDate ?? dayKey,
       captureTime: beforeTime ? addMinutes(beforeTime, index + 1) : null,
     };
   }

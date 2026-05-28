@@ -8,6 +8,7 @@ import { wallClockToUtcSecs, matchToTrack, countMatches, applyGpxAutoTag } from 
 import { ConfirmDialog } from "../../common/ConfirmDialog/ConfirmDialog";
 import type { Photo } from "../../../state/SessionContext";
 import type { TrackPoint } from "../../../lib/tauri";
+import { colors } from "../../../lib/colors";
 import styles from "./LocationSection.module.css";
 
 const DEBOUNCE_MS = 300;
@@ -196,7 +197,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
         if (multiMarkersRef.current.has(photo.id)) {
           multiMarkersRef.current.get(photo.id)!.setLngLat([lng, lat]);
         } else {
-          const marker = new mapboxgl.Marker({ color: "#007AFF" })
+          const marker = new mapboxgl.Marker({ color: colors.accent })
             .setLngLat([lng, lat])
             .addTo(map);
           multiMarkersRef.current.set(photo.id, marker);
@@ -368,7 +369,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
               ? "Invalid Mapbox token — use a public token (pk.*) in Settings."
               : "A Mapbox API key is required for location features."}
           </p>
-          <button className="btn btn-primary" onClick={onOpenSettings}>
+          <button className="btn btn-low btn-secondary" onClick={onOpenSettings}>
             Open Settings
           </button>
         </div>
@@ -433,7 +434,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                   No timezone set. Location suggests <strong>{resolvedTz}</strong>.
                 </p>
                 <button
-                  className="btn btn-secondary"
+                  className="btn btn-low btn-secondary"
                   onClick={() => {
                     const changes = { timezone: resolvedTz as string };
                     dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
@@ -453,7 +454,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                   <strong>{timezone as string}</strong>.
                 </p>
                 <button
-                  className="btn btn-secondary"
+                  className="btn btn-low btn-secondary"
                   onClick={() => {
                     const changes = { timezone: resolvedTz as string };
                     dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
@@ -473,7 +474,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                   {tzBulkHasExisting ? ", but some timezones are set differently." : ". No timezone set."}
                 </p>
                 <button
-                  className="btn btn-secondary"
+                  className="btn btn-low btn-secondary"
                   onClick={() => {
                     const changes = { timezone: bulkResolvedTz as string };
                     dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
@@ -489,7 +490,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
             {anyPhotoOverlapsGpx && (
               <div className={styles.gpxLocate}>
                 <button
-                  className="btn btn-secondary"
+                  className="btn btn-low btn-secondary"
                   disabled={!gpxButtonEnabled}
                   title={
                     !gpxButtonEnabled

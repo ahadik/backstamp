@@ -52,7 +52,7 @@ export function InspectorPanel({ onOpenSettings }: InspectorPanelProps) {
       </div>
       {uiState.mapboxToken && uiState.claudeApiKey && (
         <div className={styles.footer}>
-          <button className={styles.manageKeysButton} onClick={onOpenSettings}>
+          <button className={`btn btn-low btn-secondary ${styles.manageKeysButton}`} onClick={onOpenSettings}>
             Manage API Keys
           </button>
         </div>

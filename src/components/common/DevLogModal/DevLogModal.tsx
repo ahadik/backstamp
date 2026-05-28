@@ -1,14 +1,15 @@
 import { useDevLog } from "../../../state/DevLogContext";
+import { Modal } from "../Modal/Modal";
 import styles from "./DevLogModal.module.css";
 
 export function DevLogModal() {
   const { entries, isOpen, close, clear } = useDevLog();
 
-  if (!import.meta.env.DEV || !isOpen) return null;
+  if (!import.meta.env.DEV) return null;
 
   return (
-    <div className={styles.backdrop} onClick={close}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+    <Modal isOpen={isOpen} onClose={close}>
+      <div className={styles.dialog}>
         <div className={styles.header}>
           <span className={styles.title}>Dev Log</span>
           <div className={styles.headerActions}>
@@ -30,6 +31,6 @@ export function DevLogModal() {
           )}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

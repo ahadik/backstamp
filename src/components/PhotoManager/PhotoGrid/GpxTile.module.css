@@ -58,8 +58,8 @@
   height: 20px;
   border-radius: 50%;
   border: none;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
+  background: var(--color-overlay);
+  color: var(--palette-white);
   font-size: 11px;
   cursor: pointer;
   display: flex;

@@ -5,9 +5,30 @@ import { useSession } from "../../state/SessionContext";
 import { useUI } from "../../state/UIContext";
 import type { Photo, GpxFile } from "../../state/SessionContext";
 import styles from "./MapPanel.module.css";
+import { palette, colors } from "../../lib/colors";
 
 // Contiguous US bounds: west, south, east, north
 const US_BOUNDS: [number, number, number, number] = [-125, 24, -66, 50];
+
+// Zoomed-out globe view used on first load and after the session is cleared.
+const GLOBE_VIEW: { center: [number, number]; zoom: number } = {
+  center: [0, 20],
+  zoom: 1,
+};
+
+// Mapbox's light/dark styles are monotone by design; pick to match the OS theme.
+function getMapStyleUrl(): string {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "mapbox://styles/mapbox/dark-v11"
+    : "mapbox://styles/mapbox/light-v11";
+}
+
+// GPX traces use brand-primary; shade flips so the line stays legible on each base map.
+function getGpxLineColor(): string {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? palette.brandPrimary[1]
+    : palette.brandPrimary[4];
+}
 
 function fitToPhotos(map: mapboxgl.Map, photos: Photo[]) {
   const withCoords = photos.filter(
@@ -71,7 +92,7 @@ function setupSources(map: mapboxgl.Map) {
     source: "photos",
     filter: ["has", "point_count"],
     paint: {
-      "circle-color": "#007AFF",
+      "circle-color": colors.accent,
       "circle-radius": ["step", ["get", "point_count"], 16, 10, 22, 30, 28],
       "circle-opacity": 0.85,
     },
@@ -87,7 +108,7 @@ function setupSources(map: mapboxgl.Map) {
       "text-size": 12,
       "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Bold"],
     },
-    paint: { "text-color": "#ffffff" },
+    paint: { "text-color": palette.white },
   });
 
   map.addLayer({
@@ -96,10 +117,10 @@ function setupSources(map: mapboxgl.Map) {
     source: "photos",
     filter: ["!", ["has", "point_count"]],
     paint: {
-      "circle-color": "#007AFF",
+      "circle-color": colors.accent,
       "circle-radius": 6,
       "circle-stroke-width": 1.5,
-      "circle-stroke-color": "#ffffff",
+      "circle-stroke-color": palette.white,
     },
   });
 }
@@ -125,16 +146,20 @@ function syncGpxLayers(map: mapboxgl.Map, gpxFiles: GpxFile[], trackedIds: Set<s
       (map.getSource(sourceId) as mapboxgl.GeoJSONSource).setData(geojson);
     } else {
       map.addSource(sourceId, { type: "geojson", data: geojson });
-      map.addLayer({
-        id: `gpx-line-${gpx.id}`,
-        type: "line",
-        source: sourceId,
-        paint: {
-          "line-color": "#FF9F0A",
-          "line-width": 2,
-          "line-opacity": 0.8,
+      const beforeId = map.getLayer("clusters") ? "clusters" : undefined;
+      map.addLayer(
+        {
+          id: `gpx-line-${gpx.id}`,
+          type: "line",
+          source: sourceId,
+          paint: {
+            "line-color": getGpxLineColor(),
+            "line-width": 2,
+            "line-opacity": 0.8,
+          },
         },
-      });
+        beforeId,
+      );
       trackedIds.add(gpx.id);
     }
   }
@@ -142,6 +167,10 @@ function syncGpxLayers(map: mapboxgl.Map, gpxFiles: GpxFile[], trackedIds: Set<s
 
 interface MapPanelProps {
   onOpenSettings: () => void;
+}
+
+function isSecretMapboxToken(token: string | null): boolean {
+  return !!token && /^sk\./i.test(token.trim());
 }
 
 export function MapPanel({ onOpenSettings }: MapPanelProps) {
@@ -154,6 +183,9 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   const isResizingRef = useRef(false);
   const failedTokenRef = useRef<string | null>(null);
   const gpxLayerIds = useRef(new Set<string>());
+  const hadDataRef = useRef(false);
+
+  const tokenIsSecret = isSecretMapboxToken(ui.mapboxToken);
 
   const hasSelection = session.selectedIds.size > 0;
   const focusPhotos = hasSelection
@@ -178,7 +210,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   gpxFilesRef.current = session.gpxFiles;
 
   useEffect(() => {
-    if (!ui.mapboxToken) return;
+    if (!ui.mapboxToken || tokenIsSecret) return;
     // If there's a stale error from a previous (bad) token, clear it so the map
     // container re-renders. The effect will fire again once mapError becomes null.
     if (mapError) {
@@ -190,9 +222,9 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     try {
       map.current = new mapboxgl.Map({
         container: mapContainer.current,
-        style: "mapbox://styles/mapbox/dark-v11",
-        zoom: 1,
-        center: [0, 20],
+        style: getMapStyleUrl(),
+        zoom: GLOBE_VIEW.zoom,
+        center: GLOBE_VIEW.center,
       });
     } catch (err) {
       failedTokenRef.current = ui.mapboxToken;
@@ -206,18 +238,32 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     });
     ro.observe(mapContainer.current);
 
-    map.current.on("load", () => {
+    // style.load fires on initial style load AND after every setStyle, so it's
+    // the right place to (re-)attach custom sources and layers — switching themes
+    // wipes everything added by setupSources/syncGpxLayers.
+    let didInitialFit = false;
+    map.current.on("style.load", () => {
       map.current!.resize();
       setupSources(map.current!);
-      // Populate sources immediately after style loads — the session effects may have
-      // fired before the style was ready and returned early, so we must seed here too.
       (map.current!.getSource("photos") as mapboxgl.GeoJSONSource).setData(
         buildPhotoGeoJSON(allPhotosRef.current)
       );
+      // setStyle removed the old gpx layers; reset the tracking set so syncGpxLayers re-adds them.
+      gpxLayerIds.current.clear();
       syncGpxLayers(map.current!, gpxFilesRef.current, gpxLayerIds.current);
-      fitToPhotos(map.current!, focusPhotosRef.current);
+      if (!didInitialFit) {
+        fitToPhotos(map.current!, focusPhotosRef.current);
+        didInitialFit = true;
+      }
     });
+
+    // Swap the base style when the OS color scheme flips.
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSchemeChange = () => map.current?.setStyle(getMapStyleUrl());
+    mq.addEventListener("change", onSchemeChange);
+
     return () => {
+      mq.removeEventListener("change", onSchemeChange);
       ro.disconnect();
       map.current?.remove();
       map.current = null;
@@ -258,6 +304,16 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     if (gpx) fitToGpxTrack(map.current, gpx);
   }, [session.selectedGpxId, session.gpxFiles]);
 
+  // Reset to the globe view when the session is cleared (data → empty transition).
+  useEffect(() => {
+    const hasData = session.photos.length > 0 || session.gpxFiles.length > 0;
+    const wasCleared = hadDataRef.current && !hasData;
+    hadDataRef.current = hasData;
+    if (wasCleared && map.current?.isStyleLoaded()) {
+      map.current.flyTo({ center: GLOBE_VIEW.center, zoom: GLOBE_VIEW.zoom });
+    }
+  }, [session.photos.length, session.gpxFiles.length]);
+
   const handleDragStart = useCallback(
     (e: React.MouseEvent) => {
       isResizingRef.current = true;
@@ -281,7 +337,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     [ui.mapPanelHeight, uiDispatch]
   );
 
-  if (!ui.mapboxToken || mapError) {
+  if (!ui.mapboxToken || mapError || tokenIsSecret) {
     return (
       <div
         className={styles.panel}
@@ -289,11 +345,13 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
       >
         <div className={styles.tokenPrompt}>
           <p>
-            {mapError
-              ? `Map error: ${mapError}`
-              : "A Mapbox API key is required to enable the map."}
+            {tokenIsSecret
+              ? "The saved Mapbox token is a secret token (sk.…). The map needs a public token that starts with pk.… — create one in your Mapbox account dashboard."
+              : mapError
+                ? `Map error: ${mapError}`
+                : "A Mapbox API key is required to enable the map."}
           </p>
-          <button className="btn btn-primary" onClick={onOpenSettings}>
+          <button className="btn btn-low btn-secondary" onClick={onOpenSettings}>
             Open Settings
           </button>
         </div>
