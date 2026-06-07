@@ -1,6 +1,8 @@
 # Releasing Backstamp
 
-Backstamp ships as an unsigned macOS DMG via GitHub Releases. Builds are produced locally on Apple Silicon. Notarization and CI are out of scope for now — see "Future work" at the bottom.
+Backstamp ships as a signed + notarized macOS DMG via GitHub Releases. Builds are produced locally on Apple Silicon. CI is out of scope for now — see "Future work" at the bottom.
+
+Code signing prerequisites (Developer ID cert, app-specific password, `.env.release`, `tauri.conf.json` settings) are a one-time setup documented in the **Code Signing & Notarization** section of [README.md](README.md). Make sure that setup is complete before your first signed release.
 
 ## Per-release checklist
 
@@ -25,18 +27,39 @@ Edit `release-notes/v<version>.md` with a markdown summary of changes. This beco
 ### 3. Build the DMG
 
 ```sh
+source .env.release
 npm run release:build
 ```
 
-Runs `tauri build`. On success, prints the DMG path:
+Runs `tauri build` with signing + notarization enabled. The notary round-trip adds 1–5 minutes to the build. On success, prints the DMG path:
 
 ```
 src-tauri/target/release/bundle/dmg/backstamp_<version>_aarch64.dmg
 ```
 
+If `.env.release` is not sourced (or any of `APPLE_SIGNING_IDENTITY` / `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` is unset), Tauri silently skips notarization and the resulting DMG triggers a Gatekeeper warning for users. Verify the signature before publishing — see step 4.
+
 ### 4. Smoke-test the built artifact
 
-1. Mount the DMG, drag the app to `/Applications`, launch it.
+First, verify signing + notarization:
+
+```sh
+stapler validate src-tauri/target/release/bundle/dmg/backstamp_<version>_aarch64.dmg
+spctl --assess --type execute --verbose=4 \
+  src-tauri/target/release/bundle/macos/Backstamp.app
+# Expect: "accepted, source=Notarized Developer ID"
+```
+
+Then simulate the end-user download experience (locally-built DMGs lack the `com.apple.quarantine` attribute, so they always open without warning):
+
+```sh
+xattr -w com.apple.quarantine "0083;$(date +%s);Safari;" \
+  src-tauri/target/release/bundle/dmg/backstamp_<version>_aarch64.dmg
+```
+
+Then run the functional smoke test:
+
+1. Mount the DMG, drag the app to `/Applications`, launch it. No Gatekeeper warning should appear.
 2. Verify the golden path: import a photo, edit metadata, **Apply**, confirm the change persists on disk.
 3. Verify **Roll Back** restores the previous state on disk.
 4. Quit + relaunch → session restores.
@@ -91,6 +114,5 @@ gh api repos/<owner>/backstamp/releases \
 
 ## Future work (not done yet)
 
-- **Code signing + notarization** — requires a $99/yr Apple Developer ID. Removes the Gatekeeper warning for users. Tauri reads `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` from the environment and a `signingIdentity` in `tauri.conf.json` → `bundle.macOS`.
 - **Universal binary** — current builds are Apple Silicon only. For x86_64 support: `rustup target add x86_64-apple-darwin`, then `npm run tauri build -- --target universal-apple-darwin`.
 - **CI release on tag push** — [tauri-apps/tauri-action](https://github.com/tauri-apps/tauri-action) on a macOS GitHub Actions runner. Worth adding once releases happen more than ~monthly.

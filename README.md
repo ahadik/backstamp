@@ -243,6 +243,103 @@ npm run tauri build
 
 Produces an unsigned `.app` and `.dmg` in `src-tauri/target/release/bundle/`. The `src-tauri/resources/` directory (ExifTool script + library) is included in the bundle automatically via `tauri.conf.json`.
 
+### Code Signing & Notarization
+
+Releases shipped to end users should be signed with a Developer ID Application certificate and notarized by Apple. Without notarization, downloaded builds trigger a Gatekeeper warning on first launch.
+
+#### One-time setup
+
+**1. Enroll in the Apple Developer Program**
+
+Enroll at [developer.apple.com/programs/enroll](https://developer.apple.com/programs/enroll/) ($99/yr). Note your **Team ID** from [developer.apple.com/account](https://developer.apple.com/account) → Membership.
+
+**2. Create a Developer ID Application certificate**
+
+In Xcode → **Settings → Accounts**, sign in with your Apple ID. Select your team → **Manage Certificates… → + → Developer ID Application**. The certificate and private key install into your login Keychain.
+
+Verify:
+
+```sh
+security find-identity -v -p codesigning
+# Should list: "Developer ID Application: Your Name (TEAMID)"
+```
+
+**3. Create an app-specific password for notarization**
+
+At [account.apple.com](https://account.apple.com) → **Sign-In and Security → App-Specific Passwords → Generate**, label it `backstamp-notarytool`. Copy the password — it cannot be retrieved later.
+
+**4. Configure `tauri.conf.json`**
+
+Add a `macOS` block inside `bundle`:
+
+```json
+"bundle": {
+  "active": true,
+  "targets": "all",
+  "icon": [ ... ],
+  "resources": ["resources/exiftool"],
+  "macOS": {
+    "signingIdentity": "Developer ID Application: Your Name (TEAMID)",
+    "hardenedRuntime": true
+  }
+}
+```
+
+`hardenedRuntime: true` is required for notarization to succeed.
+
+**5. Set signing environment variables**
+
+Create a gitignored `.env.release` at the repo root and `source` it before building:
+
+```sh
+export APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+export APPLE_ID="you@example.com"
+export APPLE_PASSWORD="xxxx-xxxx-xxxx-xxxx"   # app-specific password from step 3
+export APPLE_TEAM_ID="TEAMID"
+```
+
+When all four are set, Tauri's bundler runs `notarytool submit --wait` and `stapler staple` automatically on the `.app` and `.dmg` during `tauri build`.
+
+#### Per-release build
+
+```sh
+source .env.release
+npm run release:build
+```
+
+Build time increases by 1–5 minutes for the notary round-trip.
+
+#### Verifying the signed build
+
+```sh
+# Signature is valid
+codesign --verify --deep --strict --verbose=2 \
+  src-tauri/target/release/bundle/macos/Backstamp.app
+
+# Notarization ticket is stapled to the DMG
+stapler validate src-tauri/target/release/bundle/dmg/backstamp_<version>_aarch64.dmg
+
+# Gatekeeper accepts it
+spctl --assess --type execute --verbose=4 \
+  src-tauri/target/release/bundle/macos/Backstamp.app
+# Expect: "accepted, source=Notarized Developer ID"
+```
+
+To simulate the end-user download experience (locally-built DMGs have no `com.apple.quarantine` attribute, so they always open without warning):
+
+```sh
+xattr -w com.apple.quarantine "0083;$(date +%s);Safari;" \
+  src-tauri/target/release/bundle/dmg/backstamp_<version>_aarch64.dmg
+```
+
+Mount the DMG and open the app. No Gatekeeper warning = success.
+
+#### Common issues
+
+- **"Errors uploading to the Apple notary service"** — `APPLE_ID` / `APPLE_PASSWORD` mismatch, or your real Apple ID password was used instead of the app-specific one.
+- **"The signature does not include a secure timestamp"** — `codesign` needs network access to Apple's timestamp server.
+- **Hardened-runtime rejection involving the bundled `exiftool`** — add a `bundle.macOS.entitlements` file granting `com.apple.security.cs.disable-library-validation`. Try without first.
+
 ### Releasing
 
 See [RELEASING.md](RELEASING.md) for the version-bump → build → smoke-test → publish flow. Releases are produced locally and uploaded to GitHub Releases via `gh`.
