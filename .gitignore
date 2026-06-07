@@ -24,3 +24,6 @@ src-tauri/resources/lib/
 #claude
 .mcp.json
 .claude/*
+
+#release
+.env.release
