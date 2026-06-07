@@ -23,5 +23,26 @@ fi
 DMG_SIZE=$(du -h "$DMG_PATH" | cut -f1)
 echo ""
 echo "Built: $DMG_PATH ($DMG_SIZE)"
+
+if [ -z "$APPLE_ID" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+  echo ""
+  echo "Warning: APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID not all set."
+  echo "Skipping DMG notarization + stapling. Users will hit a Gatekeeper warning on mount."
+  echo "Source .env.release before rebuilding to produce a fully-notarized DMG."
+else
+  echo ""
+  echo "==> Submitting DMG to Apple notary service"
+  xcrun notarytool submit "$DMG_PATH" \
+    --apple-id "$APPLE_ID" \
+    --password "$APPLE_PASSWORD" \
+    --team-id "$APPLE_TEAM_ID" \
+    --wait
+
+  echo ""
+  echo "==> Stapling notarization ticket to DMG"
+  xcrun stapler staple "$DMG_PATH"
+  xcrun stapler validate "$DMG_PATH"
+fi
+
 echo ""
 echo "Next: smoke-test the DMG, then 'npm run release:publish'."

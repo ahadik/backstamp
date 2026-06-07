@@ -298,7 +298,10 @@ export APPLE_PASSWORD="xxxx-xxxx-xxxx-xxxx"   # app-specific password from step 
 export APPLE_TEAM_ID="TEAMID"
 ```
 
-When all four are set, Tauri's bundler runs `notarytool submit --wait` and `stapler staple` automatically on the `.app` and `.dmg` during `tauri build`.
+When all four are set:
+
+- Tauri's bundler runs `notarytool submit --wait` and `stapler staple` on the `.app` during `tauri build`.
+- The `release:build` script then submits the resulting DMG to `notarytool` and staples that too. (Tauri does not staple the DMG wrapper itself — only the `.app` inside — so the wrapping happens in [scripts/release-build.sh](scripts/release-build.sh).)
 
 #### Per-release build
 

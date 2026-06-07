@@ -31,13 +31,18 @@ source .env.release
 npm run release:build
 ```
 
-Runs `tauri build` with signing + notarization enabled. The notary round-trip adds 1–5 minutes to the build. On success, prints the DMG path:
+The script:
+
+1. Runs `tauri build` — produces the signed `.app`, notarizes and staples it, then wraps it in a DMG. (~1–5 min for the notary round-trip.)
+2. Submits the resulting DMG to `notarytool` for its own ticket and staples that to the DMG. (~1–3 min — Apple has already inspected the payload.)
+
+On success, prints the DMG path:
 
 ```
 src-tauri/target/release/bundle/dmg/backstamp_<version>_aarch64.dmg
 ```
 
-If `.env.release` is not sourced (or any of `APPLE_SIGNING_IDENTITY` / `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` is unset), Tauri silently skips notarization and the resulting DMG triggers a Gatekeeper warning for users. Verify the signature before publishing — see step 4.
+If `.env.release` is not sourced (or any of `APPLE_SIGNING_IDENTITY` / `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` is unset), Tauri silently skips notarization and the script skips DMG-stapling — the resulting DMG triggers a Gatekeeper warning for users. Verify the signature before publishing — see step 4.
 
 ### 4. Smoke-test the built artifact
 
