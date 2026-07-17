@@ -127,11 +127,13 @@ export function TopBar({ applyPhase, setApplyPhase }: TopBarProps) {
   async function handleReset() {
     setShowResetConfirm(false);
     try {
-      const result = await tauriCommands.resetPhotos(resetIds);
-      dispatch({ type: "RESET_PHOTOS", ids: resetIds });
-      if (result.failedFiles.length > 0) {
-        setRollbackError(`Reset failed for ${result.failedFiles.length} file(s).`);
-      }
+      await tauriCommands.resetPhotos(resetIds);
+      // Reset only mutates the session (no disk write). Reload so pendingChanges
+      // reflects the backend's disk-aware recompute — Apply enables only when
+      // disk is out of sync with the import values.
+      const session = await tauriCommands.loadSession();
+      const updatedPhotos = session.photos.map(mapLoadedPhoto);
+      dispatch({ type: "RESET_PHOTOS", updatedPhotos });
     } catch (err) {
       setRollbackError(String(err));
     }
@@ -239,7 +241,7 @@ export function TopBar({ applyPhase, setApplyPhase }: TopBarProps) {
       {showResetConfirm && (
         <ConfirmDialog
           title={`Reset ${resetIds.length} photo${resetIds.length !== 1 ? "s" : ""}?`}
-          message={`Reset ${resetIds.length} photo${resetIds.length !== 1 ? "s" : ""} to their original metadata? Applied writes on disk will be overwritten. This cannot be undone.`}
+          message={`Reset ${resetIds.length} photo${resetIds.length !== 1 ? "s" : ""} to the metadata present at import? This discards pending edits in the session but writes nothing to disk. If changes were already applied to disk this session, you can then Apply to write the import values back.`}
           confirmLabel="Reset"
           destructive
           onConfirm={handleReset}
