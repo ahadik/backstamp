@@ -25,10 +25,22 @@ echo ""
 echo "Built: $DMG_PATH ($DMG_SIZE)"
 
 if [ -z "$APPLE_ID" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
-  echo ""
-  echo "Warning: APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID not all set."
-  echo "Skipping DMG notarization + stapling. Users will hit a Gatekeeper warning on mount."
-  echo "Source .env.release before rebuilding to produce a fully-notarized DMG."
+  # Hard-fail rather than warn: a silently un-notarized DMG is Gatekeeper-blocked
+  # on every user's machine (the v0.2.0 failure class). Sourcing .env.release is
+  # the normal path. Intentional un-notarized local builds must opt in explicitly.
+  if [ "$ALLOW_UNNOTARIZED" = "1" ]; then
+    echo ""
+    echo "Warning: APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID not all set, but"
+    echo "ALLOW_UNNOTARIZED=1 — producing an UN-NOTARIZED DMG for local testing only."
+    echo "Do NOT publish this build; users will hit a Gatekeeper block on mount."
+  else
+    echo ""
+    echo "Error: APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID not all set."
+    echo "Refusing to build an un-notarized DMG that users cannot open."
+    echo "  - Source .env.release, then re-run, to produce a notarized DMG, or"
+    echo "  - set ALLOW_UNNOTARIZED=1 to build a local-testing-only DMG."
+    exit 1
+  fi
 else
   echo ""
   echo "==> Submitting DMG to Apple notary service"

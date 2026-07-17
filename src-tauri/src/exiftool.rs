@@ -39,9 +39,30 @@ impl ExiftoolProcess {
         Self::start_with_binary(binary, config)
     }
 
+    /// Build a Command that runs the exiftool script. On macOS the script is passed
+    /// as an argument to the system perl rather than exec'd directly: exiftool is an
+    /// unsigned perl script, and exec'ing it from a freshly downloaded (quarantined)
+    /// app bundle fails Gatekeeper's exec-time check with EPERM. /usr/bin/perl is an
+    /// Apple platform binary, and a script it merely reads is not subject to that
+    /// check. This also removes the dependency on the `#!/usr/bin/env perl` shebang
+    /// resolving through the minimal PATH of Finder-launched apps.
+    fn command_for(script: &std::path::Path) -> Command {
+        #[cfg(target_os = "macos")]
+        {
+            let perl = std::path::Path::new("/usr/bin/perl");
+            if perl.exists() {
+                let mut cmd = Command::new(perl);
+                cmd.arg(script);
+                return cmd;
+            }
+        }
+        Command::new(script)
+    }
+
     pub fn start_with_binary(binary: PathBuf, config: Option<PathBuf>) -> Result<Self, String> {
-        // -config must be the very first argument; it cannot be passed per-command in -stay_open mode.
-        let mut cmd = Command::new(&binary);
+        // -config must be the very first exiftool argument; it cannot be passed
+        // per-command in -stay_open mode.
+        let mut cmd = Self::command_for(&binary);
         if let Some(ref cfg) = config {
             cmd.arg("-config").arg(cfg);
         }
@@ -56,15 +77,42 @@ impl ExiftoolProcess {
         let stdin = child.stdin.take().ok_or("exiftool: no stdin handle")?;
         let stdout = BufReader::new(child.stdout.take().ok_or("exiftool: no stdout handle")?);
 
+        // Mirror stderr to the console and keep a bounded copy so a startup
+        // failure can report what exiftool/perl actually printed.
+        let stderr_buf = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
         if let Some(stderr) = child.stderr.take() {
+            let buf = std::sync::Arc::clone(&stderr_buf);
             thread::spawn(move || {
                 for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                     eprintln!("[exiftool] {}", line);
+                    if let Ok(mut b) = buf.lock() {
+                        if b.len() < 2000 {
+                            b.push_str(&line);
+                            b.push('\n');
+                        }
+                    }
                 }
             });
         }
 
-        Ok(ExiftoolProcess { child, stdin, stdout, binary, config })
+        let mut process = ExiftoolProcess { child, stdin, stdout, binary, config };
+
+        // Health check: a spawn can succeed and the process still die immediately
+        // (e.g. the perl module tree missing next to the script). Catch that here
+        // so the failure surfaces at startup with perl's own error message rather
+        // than as a cryptic failure on first use.
+        match process.run_command(&["-ver"]) {
+            Ok(_) => Ok(process),
+            Err(e) => {
+                thread::sleep(std::time::Duration::from_millis(100));
+                let stderr_text = stderr_buf.lock().map(|b| b.clone()).unwrap_or_default();
+                if stderr_text.is_empty() {
+                    Err(format!("exiftool failed startup check: {e}"))
+                } else {
+                    Err(format!("exiftool failed startup check: {e}\n{stderr_text}"))
+                }
+            }
+        }
     }
 
     /// Run a command and return stdout text. Each element of `args` is one CLI argument.
@@ -118,7 +166,7 @@ impl ExiftoolProcess {
             let out_file = std::fs::File::create(output_path)
                 .map_err(|e| format!("exiftool preview create file: {}", e))?;
 
-            let mut cmd = Command::new(&self.binary);
+            let mut cmd = Self::command_for(&self.binary);
             if let Some(ref cfg) = self.config {
                 cmd.arg("-config").arg(cfg);
             }

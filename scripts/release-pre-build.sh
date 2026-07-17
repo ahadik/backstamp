@@ -81,6 +81,49 @@ if [ "$PKG_VERSION" != "$TAURI_VERSION" ] || [ "$PKG_VERSION" != "$CARGO_VERSION
   exit 1
 fi
 
+# ── Bundled exiftool payload verification ─────────────────────────────────────
+# The exiftool script, its Perl module tree (lib/), and exiftool.config are
+# gitignored (installed manually per README), and tauri.conf.json bundles them
+# by path. A fresh clone / CI / reimaged machine has none of them, and
+# `tauri build` will happily ship a DMG missing the metadata engine — the exact
+# class of failure that shipped in v0.2.0. Verify the payload exists AND runs
+# before we spend minutes building an unshippable artifact.
+
+echo ""
+echo "==> Verifying bundled exiftool payload"
+
+RES_DIR="src-tauri/resources"
+MISSING=0
+for f in "$RES_DIR/exiftool" "$RES_DIR/exiftool.config" "$RES_DIR/lib/Image/ExifTool.pm"; do
+  if [ ! -e "$f" ]; then
+    echo "  MISSING: $f"
+    MISSING=1
+  fi
+done
+
+if [ "$MISSING" -ne 0 ]; then
+  echo ""
+  echo "Error: bundled exiftool payload is incomplete. These files are gitignored"
+  echo "and must be installed manually (see README). Building now would ship a DMG"
+  echo "whose metadata engine is missing or broken."
+  exit 1
+fi
+
+# Confirm the script actually runs with its module tree next to it. This catches
+# a truncated/partial install that the existence checks above would pass.
+if [ -x /usr/bin/perl ]; then
+  ET_VER=$(/usr/bin/perl "$RES_DIR/exiftool" -ver 2>&1) || {
+    echo ""
+    echo "Error: bundled exiftool failed to run:"
+    echo "$ET_VER" | sed 's/^/    /'
+    echo "The lib/ module tree is likely incomplete. Reinstall it (see README)."
+    exit 1
+  }
+  echo "  exiftool $ET_VER OK (script + lib/ + config present)"
+else
+  echo "  Warning: /usr/bin/perl not found; skipped runtime check (files present)."
+fi
+
 # ── Release notes stub ────────────────────────────────────────────────────────
 
 NOTES_FILE="release-notes/v${PKG_VERSION}.md"

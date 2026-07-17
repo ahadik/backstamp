@@ -26,6 +26,19 @@ if [ ! -f "$NOTES_FILE" ]; then
   exit 1
 fi
 
+# Refuse to publish a DMG that isn't notarized + stapled. Without this, an
+# un-notarized build (e.g. one produced with ALLOW_UNNOTARIZED=1, or before
+# .env.release was sourced) could be tagged and shipped, and every user would
+# hit a Gatekeeper block — the v0.2.0 failure class. stapler validate checks the
+# ticket is present and embedded in the DMG.
+if ! xcrun stapler validate "$DMG_PATH" >/dev/null 2>&1; then
+  echo "Error: $DMG_PATH is not notarized/stapled."
+  echo "Users would hit a Gatekeeper block. Rebuild with .env.release sourced"
+  echo "(see 'npm run release:build') before publishing."
+  exit 1
+fi
+echo "  Notarization: stapled ticket valid"
+
 if ! gh auth status >/dev/null 2>&1; then
   echo "Error: gh CLI is not authenticated. Run 'gh auth login'."
   exit 1

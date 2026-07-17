@@ -22,6 +22,34 @@ pub struct AppState {
     pub context_menu_path: Arc<Mutex<Option<String>>>,
 }
 
+fn init_app_state(app: &tauri::App) -> Result<AppState, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("failed to resolve app data directory: {e}"))?;
+    std::fs::create_dir_all(&app_data_dir)
+        .map_err(|e| format!("failed to create app data directory: {e}"))?;
+
+    let db = session::init_db(&app_data_dir)
+        .map_err(|e| format!("failed to initialize database: {e}"))?;
+    api_keys::migrate_keys_from_sqlite(&db, &app_data_dir);
+
+    let exiftool = ExiftoolProcess::start(&app.handle())
+        .map_err(|e| format!("failed to start exiftool: {e}"))?;
+
+    let thumbnails_dir = app_data_dir.join("thumbnails");
+    std::fs::create_dir_all(&thumbnails_dir)
+        .map_err(|e| format!("failed to create thumbnails directory: {e}"))?;
+
+    Ok(AppState {
+        db: Arc::new(Mutex::new(db)),
+        exiftool: Arc::new(Mutex::new(exiftool)),
+        thumbnails_dir,
+        apply_cancel_flag: Arc::new(AtomicBool::new(false)),
+        context_menu_path: Arc::new(Mutex::new(None)),
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -31,31 +59,25 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("failed to resolve app data directory");
-            std::fs::create_dir_all(&app_data_dir)
-                .expect("failed to create app data directory");
-
-            let db = session::init_db(&app_data_dir)
-                .expect("failed to initialize database");
-            api_keys::migrate_keys_from_sqlite(&db, &app_data_dir);
-
-            let exiftool = ExiftoolProcess::start(&app.handle())
-                .expect("failed to start exiftool");
-
-            let thumbnails_dir = app_data_dir.join("thumbnails");
-            std::fs::create_dir_all(&thumbnails_dir)
-                .expect("failed to create thumbnails directory");
-
-            app.manage(AppState {
-                db: Arc::new(Mutex::new(db)),
-                exiftool: Arc::new(Mutex::new(exiftool)),
-                thumbnails_dir,
-                apply_cancel_flag: Arc::new(AtomicBool::new(false)),
-                context_menu_path: Arc::new(Mutex::new(None)),
-            });
+            let state = match init_app_state(app) {
+                Ok(state) => state,
+                Err(message) => {
+                    // Surface the failure in a dialog and exit cleanly. With
+                    // panic = "abort", bubbling the error up would SIGABRT with
+                    // no user-visible explanation (this shipped as a silent
+                    // launch crash in v0.2.0).
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    app.dialog()
+                        .message(format!(
+                            "Backstamp could not start:\n\n{message}"
+                        ))
+                        .title("Backstamp failed to launch")
+                        .kind(MessageDialogKind::Error)
+                        .blocking_show();
+                    std::process::exit(1);
+                }
+            };
+            app.manage(state);
 
             app.on_menu_event(|app, event| {
                 let state = app.state::<AppState>();

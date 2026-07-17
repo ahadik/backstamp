@@ -113,15 +113,13 @@ fn extract_utc_offset_from_xmp(xmp_dt: &str) -> Option<String> {
     if time_part.ends_with('Z') {
         return Some("+00:00".to_string());
     }
-    if time_part.len() <= 8 {
-        return None;
-    }
-    let after_hms = &time_part[8..]; // skip "HH:MM:SS"
+    // get() rather than indexing: these strings come from photo metadata, and a
+    // multibyte character at the wrong byte position must yield None, not a panic.
+    let after_hms = time_part.get(8..)?; // skip "HH:MM:SS"
     for sep in ['+', '-'] {
         if let Some(off_pos) = after_hms.find(sep) {
-            let offset = &after_hms[off_pos..];
-            if offset.len() >= 6 {
-                return Some(offset[..6].to_string());
+            if let Some(offset) = after_hms[off_pos..].get(..6) {
+                return Some(offset.to_string());
             }
         }
     }
@@ -259,11 +257,9 @@ fn parse_exif_datetime(s: &str) -> (Option<String>, Option<String>) {
         return (None, None);
     }
     let date = parts[0].replace(':', "-");
-    let time = parts[1].to_string();
-    if date.len() == 10 && time.len() >= 8 {
-        (Some(date), Some(time[..8].to_string()))
-    } else {
-        (None, None)
+    match parts[1].get(..8) {
+        Some(hms) if date.len() == 10 => (Some(date), Some(hms.to_string())),
+        _ => (None, None),
     }
 }
 
@@ -274,8 +270,10 @@ fn parse_xmp_datetime(s: &str) -> (Option<String>, Option<String>) {
         let rest = &s[t_pos + 1..];
         // Strip timezone offset
         let time = rest.split(['+', '-', 'Z']).next().unwrap_or(rest);
-        if date.len() == 10 && time.len() >= 8 {
-            return (Some(date.to_string()), Some(time[..8].to_string()));
+        if let Some(hms) = time.get(..8) {
+            if date.len() == 10 {
+                return (Some(date.to_string()), Some(hms.to_string()));
+            }
         }
     }
     (None, None)
@@ -640,6 +638,43 @@ mod tests {
         let m = parse_exiftool_output(SAMPLE_JSON).unwrap();
         assert_eq!(m.capture_date.as_deref(), Some("2024-03-15"));
         assert_eq!(m.capture_time.as_deref(), Some("14:30:00"));
+    }
+
+    // Metadata strings come from arbitrary photo files; multibyte characters at
+    // awkward byte positions must degrade to None, never panic (byte-index
+    // slicing here aborted the whole app under panic = "abort").
+    #[test]
+    fn multibyte_datetime_strings_do_not_panic() {
+        for garbage in [
+            "2024-03-15Tあいうえおかき",
+            "2024:03:15 あいうえおかき",
+            "2024-03-15Tああ:あ:ああ+09:00",
+            "あいうえおかきくけこ",
+            "2024-03-15T14:30:00+あい:うえ",
+        ] {
+            let _ = extract_utc_offset_from_xmp(garbage);
+            let _ = parse_exif_datetime(garbage);
+            let _ = parse_xmp_datetime(garbage);
+        }
+    }
+
+    #[test]
+    fn multibyte_time_part_yields_none() {
+        assert_eq!(extract_utc_offset_from_xmp("2024-03-15Tあいうえおかき"), None);
+        assert_eq!(parse_exif_datetime("2024:03:15 あいうえおかき"), (None, None));
+        assert_eq!(parse_xmp_datetime("2024-03-15Tあいうえおかき"), (None, None));
+    }
+
+    #[test]
+    fn valid_offset_still_extracted_after_boundary_fix() {
+        assert_eq!(
+            extract_utc_offset_from_xmp("2024-03-15T14:30:00+09:00").as_deref(),
+            Some("+09:00")
+        );
+        assert_eq!(
+            extract_utc_offset_from_xmp("2024:03:15 14:30:00-08:00").as_deref(),
+            Some("-08:00")
+        );
     }
 
     #[test]
