@@ -12,10 +12,24 @@ pub struct ExiftoolProcess {
     config: Option<PathBuf>,
 }
 
+// Resources declared in tauri.conf.json under `resources/<name>` are staged at
+// `<resource_dir>/resources/<name>` — the `resources/` path component is preserved
+// and must be included when resolving them at runtime. Omitting it (joining
+// `<resource_dir>/exiftool` directly) silently fails on any machine without a
+// system exiftool on the fallback path, which is exactly how a broken bundle
+// shipped undetected: the developer's Homebrew exiftool masked the missing file.
+fn bundled_exiftool_path(resource_dir: &std::path::Path) -> PathBuf {
+    resource_dir.join("resources").join("exiftool")
+}
+
+fn bundled_exiftool_config_path(resource_dir: &std::path::Path) -> PathBuf {
+    resource_dir.join("resources").join("exiftool.config")
+}
+
 impl ExiftoolProcess {
     pub fn binary_path(app_handle: &AppHandle) -> PathBuf {
         if let Ok(res_dir) = app_handle.path().resource_dir() {
-            let bundled = res_dir.join("exiftool");
+            let bundled = bundled_exiftool_path(&res_dir);
             if bundled.exists() {
                 return bundled;
             }
@@ -34,7 +48,7 @@ impl ExiftoolProcess {
             .path()
             .resource_dir()
             .ok()
-            .map(|d| d.join("exiftool.config"))
+            .map(|d| bundled_exiftool_config_path(&d))
             .filter(|p| p.exists());
         Self::start_with_binary(binary, config)
     }
@@ -291,6 +305,36 @@ mod tests {
     fn start() -> ExiftoolProcess {
         let binary = find_exiftool().expect("exiftool not found");
         ExiftoolProcess::start_with_binary(binary, None).expect("failed to start exiftool")
+    }
+
+    // ── bundled path resolution ──────────────────────────────────────────────
+
+    #[test]
+    fn bundled_paths_include_resources_subdir() {
+        // Tauri stages `resources/exiftool` at <resource_dir>/resources/exiftool.
+        let res_dir = PathBuf::from("/Apps/Backstamp.app/Contents/Resources");
+        assert_eq!(
+            bundled_exiftool_path(&res_dir),
+            PathBuf::from("/Apps/Backstamp.app/Contents/Resources/resources/exiftool")
+        );
+        assert_eq!(
+            bundled_exiftool_config_path(&res_dir),
+            PathBuf::from("/Apps/Backstamp.app/Contents/Resources/resources/exiftool.config")
+        );
+    }
+
+    #[test]
+    fn bundled_exiftool_resolves_in_simulated_bundle() {
+        // Lay out a fake bundle exactly as tauri stages it, and confirm the helper
+        // points at the real file (not <resource_dir>/exiftool, which would miss).
+        let dir = TempDir::new().unwrap();
+        let res_dir = dir.path();
+        std::fs::create_dir_all(res_dir.join("resources")).unwrap();
+        std::fs::write(res_dir.join("resources").join("exiftool"), b"#!/usr/bin/perl\n").unwrap();
+
+        let resolved = bundled_exiftool_path(res_dir);
+        assert!(resolved.exists(), "resolved bundled path should exist: {:?}", resolved);
+        assert!(!res_dir.join("exiftool").exists(), "flat path must not be where the file is");
     }
 
     // ── extract_preview ──────────────────────────────────────────────────────
