@@ -41,7 +41,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources/exiftool"],
+    "resources": ["resources/exiftool", "resources/lib", "resources/exiftool.config"],
       "macOS": {
       "signingIdentity": "Developer ID Application: Alexander Hadik (4S36HK7MB2)",
       "hardenedRuntime": true

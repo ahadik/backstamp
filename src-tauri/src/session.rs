@@ -7,50 +7,58 @@ pub fn init_db(app_data_dir: &std::path::Path) -> Result<Connection> {
         .expect("failed to create thumbnails directory");
 
     let db_path = app_data_dir.join("session.db");
-    let conn = Connection::open(db_path)?;
+    let mut conn = Connection::open(db_path)?;
     apply_schema(&conn)?;
-    run_migrations(&conn)?;
+    run_migrations(&mut conn)?;
     Ok(conn)
 }
 
-fn run_migrations(conn: &Connection) -> Result<()> {
+// Each version step runs inside its own transaction: an interrupted or failing
+// migration must roll back entirely rather than commit a partial shape with
+// user_version unbumped (which the guards below can then mis-detect on retry).
+fn run_migrations(conn: &mut Connection) -> Result<()> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     if version < 1 {
-        let col_exists: bool = conn
+        let tx = conn.transaction()?;
+        let col_exists: bool = tx
             .prepare("SELECT 1 FROM pragma_table_info('photos') WHERE name = 'sort_order'")?
             .exists([])?;
         if !col_exists {
-            conn.execute_batch(
+            tx.execute_batch(
                 "ALTER TABLE photos ADD COLUMN sort_order INTEGER DEFAULT 0",
             )?;
         }
-        conn.pragma_update(None, "user_version", 1i64)?;
+        tx.pragma_update(None, "user_version", 1i64)?;
+        tx.commit()?;
     }
     if version < 2 {
+        let tx = conn.transaction()?;
         // Add settings table if not present
-        conn.execute_batch(
+        tx.execute_batch(
             "CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );"
         )?;
-        conn.pragma_update(None, "user_version", 2i64)?;
+        tx.pragma_update(None, "user_version", 2i64)?;
+        tx.commit()?;
     }
     if version < 3 {
-        let col_exists: bool = conn
+        let tx = conn.transaction()?;
+        let col_exists: bool = tx
             .prepare("SELECT 1 FROM pragma_table_info('corpus') WHERE name = 'vendor'")?
             .exists([])?;
         if !col_exists {
-            conn.execute_batch("ALTER TABLE corpus ADD COLUMN vendor TEXT")?;
+            tx.execute_batch("ALTER TABLE corpus ADD COLUMN vendor TEXT")?;
         }
         // Migrate old 'film' corpus entries to 'film_vendor'
-        conn.execute_batch(
+        tx.execute_batch(
             "UPDATE corpus SET category = 'film_vendor' WHERE category = 'film';",
         )?;
         // Migrate old 'film' metadata rows to 'film_vendor' (split "Vendor Type" on first space)
         // We do this in Rust because SQLite lacks a clean split-on-first-space.
         let film_rows: Vec<(String, String, String)> = {
-            let mut stmt = conn.prepare(
+            let mut stmt = tx.prepare(
                 "SELECT photo_id, field, value FROM metadata_current WHERE field = 'film'
                  UNION ALL
                  SELECT photo_id, field, value FROM metadata_original WHERE field = 'film'",
@@ -74,44 +82,53 @@ fn run_migrations(conn: &Connection) -> Result<()> {
                 ("metadata_original", "film_type", film_type),
             ] {
                 if let Some(v) = meta_val {
-                    conn.execute(
+                    tx.execute(
                         &format!("INSERT OR REPLACE INTO {} (photo_id, field, value) VALUES (?1, ?2, ?3)", tbl),
                         rusqlite::params![photo_id, meta_field, v],
                     )?;
                 }
             }
-            conn.execute(
+            tx.execute(
                 "DELETE FROM metadata_current WHERE photo_id = ?1 AND field = 'film'",
                 rusqlite::params![photo_id],
             )?;
-            conn.execute(
+            tx.execute(
                 "DELETE FROM metadata_original WHERE photo_id = ?1 AND field = 'film'",
                 rusqlite::params![photo_id],
             )?;
         }
-        conn.pragma_update(None, "user_version", 3i64)?;
+        tx.pragma_update(None, "user_version", 3i64)?;
+        tx.commit()?;
     }
     if version < 4 {
-        corpus_seed::seed_film_corpus(conn)?;
-        conn.pragma_update(None, "user_version", 4i64)?;
+        let tx = conn.transaction()?;
+        corpus_seed::seed_film_corpus(&tx)?;
+        tx.pragma_update(None, "user_version", 4i64)?;
+        tx.commit()?;
     }
     if version < 5 {
-        let has_track_pts: bool = conn
-            .prepare("SELECT 1 FROM pragma_table_info('gpx_files') WHERE name = 'track_points'")?
-            .exists([])?;
-        if !has_track_pts {
-            conn.execute_batch(
-                "ALTER TABLE gpx_files ADD COLUMN track_points TEXT;
-                 ALTER TABLE gpx_files ADD COLUMN thumbnail_path TEXT;"
-            )?;
+        let tx = conn.transaction()?;
+        // Guard each column independently: an earlier interrupted run (before this
+        // step was transactional) could have added one column but not the other.
+        for col in ["track_points", "thumbnail_path"] {
+            let exists: bool = tx
+                .prepare("SELECT 1 FROM pragma_table_info('gpx_files') WHERE name = ?1")?
+                .exists([col])?;
+            if !exists {
+                tx.execute_batch(&format!("ALTER TABLE gpx_files ADD COLUMN {} TEXT", col))?;
+            }
         }
-        conn.pragma_update(None, "user_version", 5i64)?;
+        tx.pragma_update(None, "user_version", 5i64)?;
+        tx.commit()?;
     }
     if version < 6 {
-        corpus_seed::seed_camera_corpus(conn)?;
-        conn.pragma_update(None, "user_version", 6i64)?;
+        let tx = conn.transaction()?;
+        corpus_seed::seed_camera_corpus(&tx)?;
+        tx.pragma_update(None, "user_version", 6i64)?;
+        tx.commit()?;
     }
     if version < 7 {
+        let tx = conn.transaction()?;
         // Split legacy camera_body rows ("Make Model") into separate camera_make and
         // camera_model rows. Uses a priority-ordered known-makes list to find where the
         // make ends; if no known make matches, the whole value goes into camera_model.
@@ -122,7 +139,7 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         ];
         for table in &["metadata_original", "metadata_current"] {
             let rows: Vec<(String, String)> = {
-                let mut stmt = conn.prepare(&format!(
+                let mut stmt = tx.prepare(&format!(
                     "SELECT photo_id, value FROM {} WHERE field = 'camera_body'",
                     table
                 ))?;
@@ -133,8 +150,12 @@ fn run_migrations(conn: &Connection) -> Result<()> {
                 collected
             };
             for (photo_id, body) in &rows {
+                // Compare a byte-length prefix of the original string rather than
+                // to_lowercase() output: Unicode lowercasing can shift byte offsets,
+                // making the body[m.len()..] slice below panic or split mid-word.
                 let make = KNOWN_MAKES.iter().find(|&&m| {
-                    body.to_lowercase().starts_with(&m.to_lowercase())
+                    body.get(..m.len())
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(m))
                 });
                 let (camera_make, camera_model) = match make {
                     Some(m) => {
@@ -144,24 +165,25 @@ fn run_migrations(conn: &Connection) -> Result<()> {
                     None => (None, Some(body.clone())),
                 };
                 if let Some(ref v) = camera_make {
-                    conn.execute(
+                    tx.execute(
                         &format!("INSERT OR REPLACE INTO {} (photo_id, field, value) VALUES (?1, ?2, ?3)", table),
                         rusqlite::params![photo_id, "camera_make", v],
                     )?;
                 }
                 if let Some(ref v) = camera_model {
-                    conn.execute(
+                    tx.execute(
                         &format!("INSERT OR REPLACE INTO {} (photo_id, field, value) VALUES (?1, ?2, ?3)", table),
                         rusqlite::params![photo_id, "camera_model", v],
                     )?;
                 }
-                conn.execute(
+                tx.execute(
                     &format!("DELETE FROM {} WHERE photo_id = ?1 AND field = 'camera_body'", table),
                     rusqlite::params![photo_id],
                 )?;
             }
         }
-        conn.pragma_update(None, "user_version", 7i64)?;
+        tx.pragma_update(None, "user_version", 7i64)?;
+        tx.commit()?;
     }
     Ok(())
 }
@@ -332,5 +354,82 @@ mod tests {
             )
             .unwrap();
         assert_eq!(val, "pk.test");
+    }
+
+    fn columns(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("SELECT name FROM pragma_table_info('{}')", table))
+            .unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn fresh_migrations_reach_latest_version() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        run_migrations(&mut conn).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 7);
+        // Corpus was seeded by the v4/v6 steps.
+        let corpus_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM corpus", [], |r| r.get(0))
+            .unwrap();
+        assert!(corpus_count > 0);
+    }
+
+    #[test]
+    fn migrations_are_idempotent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        run_migrations(&mut conn).unwrap();
+        // A second run must be a no-op, not an error.
+        run_migrations(&mut conn).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 7);
+    }
+
+    #[test]
+    fn v5_recovers_from_partial_column_add() {
+        // Simulate a pre-transaction interrupted v5: gpx_files has track_points
+        // but not thumbnail_path, and user_version was left at 4. The old guard
+        // (which only checked track_points) would skip the block and never add
+        // thumbnail_path; the fixed per-column guard must add the missing one.
+        let mut conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        // Bring corpus to its post-v3 shape (vendor column) so the starting state
+        // matches a genuine version-4 database, then recreate gpx_files missing the
+        // thumbnail_path column to mimic the interrupted v5.
+        conn.execute_batch(
+            "ALTER TABLE corpus ADD COLUMN vendor TEXT;
+             DROP TABLE gpx_files;
+             CREATE TABLE gpx_files (
+                 id           TEXT PRIMARY KEY,
+                 file_path    TEXT NOT NULL,
+                 added_at     INTEGER NOT NULL,
+                 track_points TEXT
+             );",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 4i64).unwrap();
+
+        run_migrations(&mut conn).unwrap();
+
+        let cols = columns(&conn, "gpx_files");
+        assert!(cols.iter().any(|c| c == "track_points"));
+        assert!(
+            cols.iter().any(|c| c == "thumbnail_path"),
+            "thumbnail_path column should have been added by the recovered v5 migration"
+        );
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 7);
     }
 }
