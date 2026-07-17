@@ -27,3 +27,6 @@ src-tauri/resources/lib/
 
 #release
 .env.release
+
+#tmp
+tmp/*

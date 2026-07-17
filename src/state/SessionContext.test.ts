@@ -323,7 +323,7 @@ describe("sessionReducer", () => {
   });
 
   describe("RESET_PHOTOS", () => {
-    it("restores currentMetadata from originalMetadata and clears pendingChanges", () => {
+    it("adopts the reloaded rows, keeping backend-computed pendingChanges", () => {
       const original: Metadata = { ...nullMetadata, cameraMake: "Canon", cameraModel: "EOS R5" };
       const state: SessionState = {
         ...initialState,
@@ -335,12 +335,35 @@ describe("sessionReducer", () => {
           }),
         ],
       };
-      const next = sessionReducer(state, { type: "RESET_PHOTOS", ids: ["a"] });
+      // No changes were on disk: backend returns current == original, no pending.
+      const reloaded = makePhoto("a", {
+        originalMetadata: original,
+        currentMetadata: original,
+        pendingChanges: null,
+      });
+      const next = sessionReducer(state, { type: "RESET_PHOTOS", updatedPhotos: [reloaded] });
       expect(next.photos[0].currentMetadata).toEqual(original);
       expect(next.photos[0].pendingChanges).toBeNull();
     });
 
-    it("leaves photos not in ids unchanged", () => {
+    it("keeps non-null pendingChanges when disk is out of sync after reset", () => {
+      const original: Metadata = { ...nullMetadata, cameraMake: "Canon" };
+      const state: SessionState = {
+        ...initialState,
+        photos: [makePhoto("a", { originalMetadata: original })],
+      };
+      // Changes were applied to disk earlier: reset reverts current to import
+      // values but keeps a pending diff so the import values can be written back.
+      const reloaded = makePhoto("a", {
+        originalMetadata: original,
+        currentMetadata: original,
+        pendingChanges: { cameraMake: "Canon" },
+      });
+      const next = sessionReducer(state, { type: "RESET_PHOTOS", updatedPhotos: [reloaded] });
+      expect(next.photos[0].pendingChanges).toEqual({ cameraMake: "Canon" });
+    });
+
+    it("leaves photos not in the reloaded set unchanged", () => {
       const state: SessionState = {
         ...initialState,
         photos: [
@@ -348,7 +371,9 @@ describe("sessionReducer", () => {
           makePhoto("b", { pendingChanges: { filmVendor: "Kodak", filmType: "Portra 400" } }),
         ],
       };
-      const next = sessionReducer(state, { type: "RESET_PHOTOS", ids: ["a"] });
+      const reloadedA = makePhoto("a", { pendingChanges: null });
+      const next = sessionReducer(state, { type: "RESET_PHOTOS", updatedPhotos: [reloadedA] });
+      expect(next.photos[0].pendingChanges).toBeNull();
       expect(next.photos[1].pendingChanges).toEqual({ filmVendor: "Kodak", filmType: "Portra 400" });
     });
   });

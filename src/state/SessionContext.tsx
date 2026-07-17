@@ -65,7 +65,7 @@ type SessionAction =
   | { type: "APPLY_START" }
   | { type: "APPLY_COMPLETE"; updatedPhotos: Photo[]; canRollback: boolean }
   | { type: "ROLLBACK_COMPLETE"; restoredPhotos: Photo[]; canRollback: boolean }
-  | { type: "RESET_PHOTOS"; ids: string[] }
+  | { type: "RESET_PHOTOS"; updatedPhotos: Photo[] }
   | { type: "REMOVE_PHOTOS"; ids: string[] }
   | { type: "MARK_MISSING"; ids: string[] }
   | { type: "ADD_GPX"; gpxFile: GpxFile }
@@ -239,14 +239,14 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     }
 
     case "RESET_PHOTOS": {
-      const idSet = new Set(action.ids);
+      // Reset is a session-only revert to import values. The backend recomputes
+      // pendingChanges against actual disk state, so we adopt the reloaded rows
+      // verbatim: pendingChanges is non-null (→ Apply enabled) exactly when disk
+      // is out of sync with the import values.
+      const byId = new Map(action.updatedPhotos.map((p) => [p.id, p]));
       return {
         ...state,
-        photos: state.photos.map((p) =>
-          idSet.has(p.id)
-            ? { ...p, currentMetadata: { ...p.originalMetadata }, pendingChanges: null }
-            : p
-        ),
+        photos: state.photos.map((p) => byId.get(p.id) ?? p),
       };
     }
 

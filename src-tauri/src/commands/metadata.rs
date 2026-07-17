@@ -642,6 +642,18 @@ pub async fn rollback(
     })
 }
 
+/// Reset the given photos' session metadata back to the values present at
+/// import. This is a session-only operation: it does NOT write to disk.
+///
+/// For each field we recompute `is_pending` against the *current on-disk state*
+/// so that Apply becomes available exactly when disk is out of sync with the
+/// import values (i.e. changes were written to disk earlier this session):
+///   - `is_pending = 0` on a field means `metadata_current` already matches disk.
+///   - otherwise disk holds the most recent applied value (`apply_history`), or
+///     the import value if this field was never applied.
+/// A field that only ever existed as a pending edit (absent at import, never
+/// applied) is dropped entirely; one that was applied but is absent at import
+/// (e.g. GPS added then applied) is queued as a pending clear.
 #[tauri::command]
 pub async fn reset_photos(
     state: State<'_, AppState>,
@@ -651,77 +663,245 @@ pub async fn reset_photos(
         return Ok(ResetResult { failed_files: vec![] });
     }
 
-    // Load original metadata + file paths
-    let by_photo: HashMap<String, (String, Vec<(String, Option<String>)>)> = {
-        let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
-        let mut result = HashMap::new();
-        for photo_id in &ids {
-            let file_path: String = conn
-                .query_row(
-                    "SELECT file_path FROM photos WHERE id = ?1",
-                    params![photo_id],
-                    |r| r.get(0),
-                )
-                .unwrap_or_default();
+    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
+    reset_photos_in_db(&conn, &ids)?;
+    Ok(ResetResult { failed_files: vec![] })
+}
 
-            let fields: Vec<(String, Option<String>)> = {
-                let mut stmt = conn
-                    .prepare(
-                        "SELECT field, value FROM metadata_original WHERE photo_id = ?1",
-                    )
-                    .map_err(|e| format!("prepare reset: {}", e))?;
-                let rows: Vec<_> = stmt.query_map(params![photo_id], |r| {
+/// Session-only reset of `metadata_current` back to import values, with
+/// `is_pending` recomputed against actual disk state. Pure DB work — no disk
+/// writes — so it is safe to run against any connection (see `reset_photos`).
+pub(crate) fn reset_photos_in_db(
+    conn: &rusqlite::Connection,
+    ids: &[String],
+) -> Result<(), String> {
+    for photo_id in ids {
+        // Import-time values, keyed by field. Presence of the key means the
+        // field existed at import (value may still be NULL).
+        let original: HashMap<String, Option<String>> = {
+            let mut stmt = conn
+                .prepare("SELECT field, value FROM metadata_original WHERE photo_id = ?1")
+                .map_err(|e| format!("prepare original: {}", e))?;
+            let rows = stmt
+                .query_map(params![photo_id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                })
+                .map_err(|e| format!("query original: {}", e))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+
+        // Latest value written to disk per field, if any Apply ever touched it.
+        // Ascending order means the final entry per field wins (the newest).
+        let applied: HashMap<String, Option<String>> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT ah.field, ah.value_after
+                     FROM apply_history ah
+                     JOIN apply_ops ao ON ao.id = ah.apply_id
+                     WHERE ah.photo_id = ?1
+                     ORDER BY ao.applied_at ASC",
+                )
+                .map_err(|e| format!("prepare applied: {}", e))?;
+            let rows = stmt
+                .query_map(params![photo_id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                })
+                .map_err(|e| format!("query applied: {}", e))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+
+        // The current session rows are the set of fields we must reconcile.
+        let current: Vec<(String, Option<String>, i64)> = {
+            let mut stmt = conn
+                .prepare("SELECT field, value, is_pending FROM metadata_current WHERE photo_id = ?1")
+                .map_err(|e| format!("prepare current: {}", e))?;
+            let rows = stmt
+                .query_map(params![photo_id], |r| {
                     Ok((
                         r.get::<_, String>(0)?,
                         r.get::<_, Option<String>>(1)?,
+                        r.get::<_, i64>(2)?,
                     ))
                 })
-                .map_err(|e| format!("query reset: {}", e))?
-                .filter_map(|r| r.ok())
-                .collect();
-                rows
+                .map_err(|e| format!("query current: {}", e))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+
+        for (field, cur_value, is_pending) in &current {
+            // The value actually on disk right now for this field.
+            let disk_value: Option<String> = if *is_pending == 0 {
+                // Not pending => metadata_current already reflects disk.
+                cur_value.clone()
+            } else if let Some(v) = applied.get(field) {
+                // Pending edit over a previously-applied value.
+                v.clone()
+            } else {
+                // Pending edit that was never applied => disk holds import value.
+                original.get(field).cloned().flatten()
             };
 
-            result.insert(photo_id.clone(), (file_path, fields));
-        }
-        result
-    };
-
-    let mut failed_files: Vec<FailedFile> = Vec::new();
-
-    for photo_id in &ids {
-        if let Some((file_path, fields)) = by_photo.get(photo_id) {
-            let reset_write = history_to_photo_write(photo_id, file_path, fields);
-            let result = {
-                let mut et = state
-                    .exiftool
-                    .lock()
-                    .map_err(|e| format!("exiftool lock: {}", e))?;
-                crate::write_metadata::write_metadata(&mut et, &reset_write)
-            };
-            match result {
-                Ok(()) => {
-                    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
-                    for (field, value) in fields {
-                        let _ = conn.execute(
-                            "INSERT INTO metadata_current (photo_id, field, value, is_pending)
-                             VALUES (?1, ?2, ?3, 0)
-                             ON CONFLICT(photo_id, field)
-                             DO UPDATE SET value = excluded.value, is_pending = 0",
-                            params![photo_id, field, value],
-                        );
-                    }
+            if !original.contains_key(field) {
+                // Field did not exist at import (e.g. GPS added later).
+                if disk_value.is_none() {
+                    // Never written to disk -> discard the pending value entirely.
+                    conn.execute(
+                        "DELETE FROM metadata_current WHERE photo_id = ?1 AND field = ?2",
+                        params![photo_id, field],
+                    )
+                    .map_err(|e| format!("reset delete: {}", e))?;
+                } else {
+                    // On disk -> queue a pending clear so Apply removes it.
+                    conn.execute(
+                        "UPDATE metadata_current SET value = NULL, is_pending = 1
+                         WHERE photo_id = ?1 AND field = ?2",
+                        params![photo_id, field],
+                    )
+                    .map_err(|e| format!("reset clear: {}", e))?;
                 }
-                Err(e) => {
-                    failed_files.push(FailedFile {
-                        photo_id: photo_id.clone(),
-                        file_path: file_path.clone(),
-                        error: e,
-                    });
-                }
+                continue;
             }
+
+            // Field existed at import: restore its value and mark it pending
+            // only when disk differs from that import value.
+            let target_value: Option<String> = original.get(field).cloned().flatten();
+            let pending = if target_value == disk_value { 0 } else { 1 };
+            conn.execute(
+                "UPDATE metadata_current SET value = ?3, is_pending = ?4
+                 WHERE photo_id = ?1 AND field = ?2",
+                params![photo_id, field, target_value, pending],
+            )
+            .map_err(|e| format!("reset restore: {}", e))?;
         }
     }
 
-    Ok(ResetResult { failed_files })
+    Ok(())
+}
+
+#[cfg(test)]
+mod reset_tests {
+    use super::reset_photos_in_db;
+    use crate::session::apply_schema;
+    use rusqlite::{params, Connection};
+
+    fn db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        conn
+    }
+
+    fn seed_photo(conn: &Connection, id: &str) {
+        conn.execute(
+            "INSERT INTO photos (id, file_path, added_at) VALUES (?1, ?2, ?3)",
+            params![id, format!("/photos/{id}.jpg"), 1_700_000_000i64],
+        )
+        .unwrap();
+    }
+
+    fn orig(conn: &Connection, id: &str, field: &str, value: Option<&str>) {
+        conn.execute(
+            "INSERT INTO metadata_original (photo_id, field, value) VALUES (?1, ?2, ?3)",
+            params![id, field, value],
+        )
+        .unwrap();
+    }
+
+    fn cur(conn: &Connection, id: &str, field: &str, value: Option<&str>, is_pending: i64) {
+        conn.execute(
+            "INSERT INTO metadata_current (photo_id, field, value, is_pending) VALUES (?1, ?2, ?3, ?4)",
+            params![id, field, value, is_pending],
+        )
+        .unwrap();
+    }
+
+    /// Records an Apply of `field` on disk: creates an apply_op + history row and
+    /// marks the current value as synced (is_pending = 0), exactly as the real
+    /// apply_changes path does.
+    fn apply_to_disk(conn: &Connection, id: &str, field: &str, before: Option<&str>, after: Option<&str>) {
+        let apply_id = format!("apply-{id}-{field}");
+        conn.execute(
+            "INSERT INTO apply_ops (id, applied_at, file_count) VALUES (?1, ?2, 1)",
+            params![apply_id, 1_700_000_100i64],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO apply_history (apply_id, photo_id, field, value_before, value_after)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![apply_id, id, field, before, after],
+        )
+        .unwrap();
+    }
+
+    fn read(conn: &Connection, id: &str, field: &str) -> Option<(Option<String>, i64)> {
+        conn.query_row(
+            "SELECT value, is_pending FROM metadata_current WHERE photo_id = ?1 AND field = ?2",
+            params![id, field],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
+        )
+        .ok()
+    }
+
+    // Golden path: user applied a date change to disk, then Reset All. Session
+    // reverts to the import value AND stays out of sync with disk, so the field
+    // must be pending (Apply re-enabled to write import values back).
+    #[test]
+    fn applied_then_reset_leaves_pending_so_apply_reenables() {
+        let conn = db();
+        seed_photo(&conn, "p1");
+        orig(&conn, "p1", "capture_date", Some("2024-06-01"));
+        // After apply: current == disk == 2020-01-01, synced.
+        cur(&conn, "p1", "capture_date", Some("2020-01-01"), 0);
+        apply_to_disk(&conn, "p1", "capture_date", Some("2024-06-01"), Some("2020-01-01"));
+
+        reset_photos_in_db(&conn, &["p1".to_string()]).unwrap();
+
+        let (value, pending) = read(&conn, "p1", "capture_date").unwrap();
+        assert_eq!(value.as_deref(), Some("2024-06-01"), "reverted to import value");
+        assert_eq!(pending, 1, "disk (2020) != import (2024) -> pending -> Apply enabled");
+    }
+
+    // Edit-only (never applied) then Reset: session matches disk (both import),
+    // so the field is NOT pending (Apply stays disabled).
+    #[test]
+    fn edited_never_applied_then_reset_has_no_pending() {
+        let conn = db();
+        seed_photo(&conn, "p2");
+        orig(&conn, "p2", "capture_date", Some("2024-06-01"));
+        cur(&conn, "p2", "capture_date", Some("2020-01-01"), 1); // pending edit, never applied
+
+        reset_photos_in_db(&conn, &["p2".to_string()]).unwrap();
+
+        let (value, pending) = read(&conn, "p2", "capture_date").unwrap();
+        assert_eq!(value.as_deref(), Some("2024-06-01"));
+        assert_eq!(pending, 0, "disk == import -> no pending -> Apply disabled");
+    }
+
+    // Field added after import (e.g. GPS), never applied: reset drops it entirely.
+    #[test]
+    fn added_field_never_applied_is_dropped() {
+        let conn = db();
+        seed_photo(&conn, "p3");
+        // no metadata_original for gps_lat
+        cur(&conn, "p3", "gps_lat", Some("37.5"), 1);
+
+        reset_photos_in_db(&conn, &["p3".to_string()]).unwrap();
+
+        assert!(read(&conn, "p3", "gps_lat").is_none(), "added-then-reset field removed");
+    }
+
+    // Field added after import AND applied to disk: reset queues a pending clear
+    // (value NULL, pending) so Apply removes it from disk.
+    #[test]
+    fn added_field_applied_then_reset_queues_pending_clear() {
+        let conn = db();
+        seed_photo(&conn, "p4");
+        // no metadata_original for gps_lat; applied to disk, so current synced.
+        cur(&conn, "p4", "gps_lat", Some("37.5"), 0);
+        apply_to_disk(&conn, "p4", "gps_lat", None, Some("37.5"));
+
+        reset_photos_in_db(&conn, &["p4".to_string()]).unwrap();
+
+        let (value, pending) = read(&conn, "p4", "gps_lat").unwrap();
+        assert_eq!(value, None, "queued clear -> NULL");
+        assert_eq!(pending, 1, "on disk -> pending clear -> Apply enabled");
+    }
 }
