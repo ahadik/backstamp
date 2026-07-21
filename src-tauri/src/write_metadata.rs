@@ -124,10 +124,17 @@ fn field_to_exiftool_args(fw: &FieldWrite) -> Vec<String> {
         "gps_lat" => {
             if let Some(ref v) = fw.value {
                 if let Ok(lat) = v.parse::<f64>() {
-                    let abs = lat.abs();
+                    // Pass the *signed* value, not the absolute value. For XMP
+                    // sidecars (all RAW formats) ExifTool encodes the hemisphere
+                    // from the sign of the coordinate and ignores the separate
+                    // -GPSLatitudeRef arg, so a positive value would always be
+                    // written as North regardless of Ref. The explicit Ref is
+                    // still required for embedded EXIF (JPEG/TIFF/HEIC), where a
+                    // signed value alone leaves the Ref field empty. Passing both
+                    // is correct for every write target. See issue #21.
                     let r#ref = if lat >= 0.0 { "N" } else { "S" };
                     return vec![
-                        format!("-GPSLatitude={}", abs),
+                        format!("-GPSLatitude={}", lat),
                         format!("-GPSLatitudeRef={}", r#ref),
                     ];
                 }
@@ -141,10 +148,12 @@ fn field_to_exiftool_args(fw: &FieldWrite) -> Vec<String> {
         "gps_lng" => {
             if let Some(ref v) = fw.value {
                 if let Ok(lng) = v.parse::<f64>() {
-                    let abs = lng.abs();
+                    // Signed value + explicit Ref; see the gps_lat note above and
+                    // issue #21. A positive (abs) value was previously written to
+                    // XMP sidecars as East even for western-hemisphere photos.
                     let r#ref = if lng >= 0.0 { "E" } else { "W" };
                     return vec![
-                        format!("-GPSLongitude={}", abs),
+                        format!("-GPSLongitude={}", lng),
                         format!("-GPSLongitudeRef={}", r#ref),
                     ];
                 }
@@ -333,7 +342,8 @@ mod tests {
         let w = make_write(vec![("gps_lat", Some("37.7749"))]);
         let args = build_exiftool_args(&w);
         assert!(has_arg(&args, "-GPSLatitudeRef=N"));
-        assert!(find_arg(&args, "-GPSLatitude=").is_some());
+        // The coordinate itself must be written signed (issue #21).
+        assert!(has_arg(&args, "-GPSLatitude=37.7749"));
     }
 
     #[test]
@@ -341,6 +351,8 @@ mod tests {
         let w = make_write(vec![("gps_lat", Some("-33.8688"))]);
         let args = build_exiftool_args(&w);
         assert!(has_arg(&args, "-GPSLatitudeRef=S"));
+        // Sign is preserved on the coordinate, not stripped to abs (issue #21).
+        assert!(has_arg(&args, "-GPSLatitude=-33.8688"));
     }
 
     #[test]
@@ -348,6 +360,7 @@ mod tests {
         let w = make_write(vec![("gps_lng", Some("151.2093"))]);
         let args = build_exiftool_args(&w);
         assert!(has_arg(&args, "-GPSLongitudeRef=E"));
+        assert!(has_arg(&args, "-GPSLongitude=151.2093"));
     }
 
     #[test]
@@ -355,6 +368,10 @@ mod tests {
         let w = make_write(vec![("gps_lng", Some("-122.4194"))]);
         let args = build_exiftool_args(&w);
         assert!(has_arg(&args, "-GPSLongitudeRef=W"));
+        // Regression guard for issue #21: a western-hemisphere longitude must
+        // reach ExifTool as a negative number, otherwise XMP sidecars record it
+        // as East and Lightroom shows the photo in the wrong hemisphere.
+        assert!(has_arg(&args, "-GPSLongitude=-122.4194"));
     }
 
     #[test]
@@ -474,5 +491,79 @@ mod tests {
             WriteTarget::Inline(_) => {}
             WriteTarget::Sidecar(_) => panic!(".heic should be Inline"),
         }
+    }
+
+    /// Locate a usable exiftool for the round-trip test, or None to skip it on
+    /// machines/CI without one installed.
+    fn find_exiftool() -> Option<PathBuf> {
+        for path in ["/opt/homebrew/bin/exiftool", "/usr/local/bin/exiftool"] {
+            if std::path::Path::new(path).exists() {
+                return Some(PathBuf::from(path));
+            }
+        }
+        // Fall back to PATH lookup.
+        std::process::Command::new("exiftool")
+            .arg("-ver")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|_| PathBuf::from("exiftool"))
+    }
+
+    /// End-to-end regression test for issue #21: a western-hemisphere coordinate
+    /// written to an XMP sidecar must read back as West/negative, not East.
+    ///
+    /// The pre-fix string-only assertions could not catch this bug because
+    /// ExifTool silently ignores the separate -GPSLongitudeRef arg for XMP and
+    /// derives the hemisphere from the sign of the value. This test actually runs
+    /// ExifTool against a temp .xmp so the sign handling is exercised for real.
+    #[test]
+    fn gps_signed_roundtrips_west_in_xmp_sidecar() {
+        let Some(exiftool) = find_exiftool() else {
+            eprintln!("skipping gps_signed_roundtrips_west_in_xmp_sidecar: exiftool not found");
+            return;
+        };
+
+        // Colorado: north latitude, west longitude.
+        let w = make_write(vec![
+            ("gps_lat", Some("40.526687")),
+            ("gps_lng", Some("-105.601172")),
+        ]);
+        let args = build_exiftool_args(&w);
+
+        // TempDir cleans up on drop even if an assertion below panics, matching
+        // the convention in tests/import_integration.rs.
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        let xmp = dir.path().join("gps_test.xmp");
+
+        let status = std::process::Command::new(&exiftool)
+            .args(&args)
+            .arg("-o")
+            .arg(&xmp)
+            .output()
+            .expect("run exiftool to create sidecar");
+        assert!(
+            xmp.exists(),
+            "exiftool did not create sidecar: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+
+        // Read back as numeric signed decimals.
+        let out = std::process::Command::new(&exiftool)
+            .args(["-n", "-json", "-GPSLatitude", "-GPSLongitude"])
+            .arg(&xmp)
+            .output()
+            .expect("run exiftool to read sidecar");
+        let json: serde_json::Value =
+            serde_json::from_slice(&out.stdout).expect("parse exiftool json");
+        let obj = &json.as_array().unwrap()[0];
+        let lat = obj["GPSLatitude"].as_f64().expect("lat present");
+        let lng = obj["GPSLongitude"].as_f64().expect("lng present");
+
+        assert!(lat > 0.0, "latitude should stay in the northern hemisphere, got {lat}");
+        assert!(
+            lng < 0.0,
+            "longitude must round-trip as West (negative); got {lng} — issue #21 regression"
+        );
     }
 }
