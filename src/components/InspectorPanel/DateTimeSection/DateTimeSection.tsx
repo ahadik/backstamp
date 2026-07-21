@@ -1,7 +1,13 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useSession } from "../../../state/SessionContext";
 import { deriveFieldValue } from "../../../lib/inspectorUtils";
 import { WORKING_TIMEZONES } from "../../../lib/timezones";
+import {
+  distinctCaptureDates,
+  formatZoneOffset,
+  resolveZoneOffsets,
+  shiftWallClock,
+} from "../../../lib/datetime";
 import { ConfirmDialog } from "../../common/ConfirmDialog/ConfirmDialog";
 import { tauriCommands } from "../../../lib/tauri";
 import type { Photo, Metadata } from "../../../state/SessionContext";
@@ -92,18 +98,39 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
   const tzRef = useRef<HTMLDivElement>(null);
 
   const search = tzSearch.toLowerCase();
-  const tzMatches = (s: string) =>
-    s.toLowerCase().includes(search) || s.toLowerCase().replace(/_/g, " ").includes(search);
-  const filteredCurated = WORKING_TIMEZONES.filter((tz) =>
-    tz.label.toLowerCase().includes(search) || tzMatches(tz.value)
-  );
-  const curatedValues = new Set(WORKING_TIMEZONES.map((tz) => tz.value));
-  const extraIana: { value: string; label: string }[] = search
-    ? Intl.supportedValuesOf("timeZone")
-        .filter((tz) => !curatedValues.has(tz) && tzMatches(tz))
-        .map((tz) => ({ value: tz, label: tz }))
-    : [];
-  const filteredTimezones = [...filteredCurated, ...extraIana];
+  const filteredTimezones = useMemo(() => {
+    const matches = (s: string) =>
+      s.toLowerCase().includes(search) || s.toLowerCase().replace(/_/g, " ").includes(search);
+    const curated = WORKING_TIMEZONES.filter(
+      (tz) => tz.name.toLowerCase().includes(search) || matches(tz.value)
+    );
+    const curatedValues = new Set(WORKING_TIMEZONES.map((tz) => tz.value));
+    const extraIana = search
+      ? Intl.supportedValuesOf("timeZone")
+          .filter((tz) => !curatedValues.has(tz) && matches(tz))
+          .map((tz) => ({ value: tz, name: tz }))
+      : [];
+    return [...curated, ...extraIana];
+  }, [search]);
+
+  // A zone's UTC offset depends on the date, so labels are resolved against the
+  // capture dates actually in the selection rather than baked into the list.
+  const captureDates = useMemo(() => distinctCaptureDates(selectedPhotos), [selectedPhotos]);
+  const zoneOffsets = useMemo(() => {
+    const zones = filteredTimezones.map((tz) => tz.value);
+    if (timezone && timezone !== "multiple") zones.push(timezone);
+    return resolveZoneOffsets(zones, captureDates);
+  }, [filteredTimezones, captureDates, timezone]);
+
+  /** "US Mountain · MDT UTC−6", or a bare name when no single offset applies. */
+  const zoneLabelFor = (value: string, name: string) => {
+    const resolved = zoneOffsets.get(value);
+    return resolved ? `${name} · ${formatZoneOffset(resolved)}` : name;
+  };
+
+  // Explain the bare rows when a selection straddles a DST transition.
+  const offsetsHidden =
+    captureDates.length > 0 && filteredTimezones.some((tz) => !zoneOffsets.get(tz.value));
 
   const selectedIds = selectedPhotos.map((p) => p.id);
 
@@ -183,30 +210,14 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
   }
 
   function handleIncrement(direction: 1 | -1) {
-    const deltaSeconds = direction * incrementHours * 3600;
     for (const photo of selectedPhotos) {
-      const { captureDate: cd, captureTime: ct } = photo.currentMetadata;
+      const { captureDate: cd, captureTime: ct, timezone: tz } = photo.currentMetadata;
       if (!cd || !ct) continue;
-      const [hStr, mStr, sStr] = ct.split(":");
-      let totalSec =
-        parseInt(hStr) * 3600 +
-        parseInt(mStr) * 60 +
-        parseInt(sStr ?? "0");
-      totalSec += deltaSeconds;
-      let dayDelta = 0;
-      while (totalSec < 0) { totalSec += 86400; dayDelta--; }
-      while (totalSec >= 86400) { totalSec -= 86400; dayDelta++; }
-      const newH = Math.floor(totalSec / 3600).toString().padStart(2, "0");
-      const newM = Math.floor((totalSec % 3600) / 60).toString().padStart(2, "0");
-      const newS = (totalSec % 60).toString().padStart(2, "0");
-      const newTime = `${newH}:${newM}:${newS}`;
-      let newDate = cd;
-      if (dayDelta !== 0) {
-        const d = new Date(`${cd}T00:00:00`);
-        d.setDate(d.getDate() + dayDelta);
-        newDate = d.toISOString().slice(0, 10);
-      }
-      const changes = { captureDate: newDate, captureTime: newTime };
+      // Shift within the photo's own zone: day rollover and DST transitions both
+      // fall out of the zone arithmetic instead of being hand-rolled.
+      const shifted = shiftWallClock(cd, ct, tz, direction * incrementHours);
+      if (!shifted) continue;
+      const changes = { captureDate: shifted.date, captureTime: shifted.time };
       dispatch({ type: "SET_PENDING", ids: [photo.id], changes });
       persistPending([photo.id], changes);
     }
@@ -228,10 +239,13 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
       ? formatTimeDisplay(captureTime)
       : "";
 
+  const hasMixedTimezones = timezone === "multiple";
   const tzOption = WORKING_TIMEZONES.find((tz) => tz.value === timezone);
-  const tzDisplayValue = tzOption ? tzOption.label : (timezone && timezone !== "multiple" ? timezone : "");
-  const tzPlaceholder =
-    timezone === "multiple" ? "Multiple Values" : "Not set";
+  const tzDisplayValue =
+    timezone && !hasMixedTimezones
+      ? zoneLabelFor(timezone, tzOption ? tzOption.name : timezone)
+      : "";
+  const tzPlaceholder = hasMixedTimezones ? "Multiple Values" : "Not set";
 
   return (
     <div className={styles.section}>
@@ -271,12 +285,12 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
                 onBlur={handleTimeBlur}
               />
             </div>
-            <div className={styles.row}>
+            <div className={`${styles.row} ${styles.tzRow}`}>
               <span className={styles.label}>Timezone</span>
               <div ref={tzRef} className={styles.tzWrapper}>
                 <input
                   type="text"
-                  className={`input ${styles.tzInput}`}
+                  className={`input ${styles.tzInput} ${hasMixedTimezones ? styles.tzInputWarning : ""}`}
                   value={tzOpen ? tzSearch : tzDisplayValue}
                   placeholder={tzPlaceholder}
                   onFocus={() => { setTzOpen(true); setTzSearch(""); }}
@@ -295,13 +309,21 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
                           handleTimezoneSelect(tz.value);
                         }}
                       >
-                        {tz.label}
+                        {zoneLabelFor(tz.value, tz.name)}
                       </button>
                     ))}
                     {filteredTimezones.length === 0 && (
                       <p className={styles.tzNoMatch}>No timezones match</p>
                     )}
+                    {offsetsHidden && filteredTimezones.length > 0 && (
+                      <p className={styles.tzNote}>
+                        Some offsets hidden — selection spans a daylight saving change
+                      </p>
+                    )}
                   </div>
+                )}
+                {hasMixedTimezones && !tzOpen && (
+                  <p className={styles.tzWarning}>Selection contains multiple timezones</p>
                 )}
               </div>
             </div>

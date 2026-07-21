@@ -111,6 +111,49 @@ describe("buildApplyPayload", () => {
     expect(payload.changes["a"].utcOffset).toBeNull();
   });
 
+  // ── DST correctness ───────────────────────────────────────────────────────
+
+  it("recomputes utcOffset from current date/time when only timezone is pending", () => {
+    // Previously this wrote null, wiping a correct offset off the photo.
+    const photos = [
+      makePhoto(
+        "a",
+        { timezone: "America/Denver" },
+        { captureDate: "2026-07-03", captureTime: "12:00:00", utcOffset: "-08:00" }
+      ),
+    ];
+    const payload = buildApplyPayload(photos);
+    expect(payload.changes["a"].utcOffset).toBe("-06:00");
+  });
+
+  it("uses the daylight offset for a summer date", () => {
+    const photos = [
+      makePhoto("a", { captureDate: "2026-07-03", captureTime: "12:00:00", timezone: "America/Denver" }),
+    ];
+    expect(buildApplyPayload(photos).changes["a"].utcOffset).toBe("-06:00");
+  });
+
+  it("resolves the offset at the capture time on a DST transition day", () => {
+    // 2026-11-01 is the US fall-back date; photos either side of 02:00 local
+    // get different offsets. Resolving from the date alone got this wrong.
+    const morning = makePhoto("a", {
+      captureDate: "2026-11-01", captureTime: "01:00:00", timezone: "America/Denver",
+    });
+    const afternoon = makePhoto("b", {
+      captureDate: "2026-11-01", captureTime: "15:00:00", timezone: "America/Denver",
+    });
+    const payload = buildApplyPayload([morning, afternoon]);
+    expect(payload.changes["a"].utcOffset).toBe("-06:00");
+    expect(payload.changes["b"].utcOffset).toBe("-07:00");
+  });
+
+  it("keeps Arizona on standard time in summer", () => {
+    const photos = [
+      makePhoto("a", { captureDate: "2026-07-03", captureTime: "12:00:00", timezone: "America/Phoenix" }),
+    ];
+    expect(buildApplyPayload(photos).changes["a"].utcOffset).toBe("-07:00");
+  });
+
   it("includes all pending fields in the payload", () => {
     const photos = [
       makePhoto("a", { cameraMake: "Canon", cameraModel: "EOS R5", lens: "RF 50mm" }),

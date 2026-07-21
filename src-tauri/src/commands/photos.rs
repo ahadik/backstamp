@@ -238,7 +238,11 @@ fn parse_metadata(json: &serde_json::Value) -> Metadata {
     Metadata {
         capture_date,
         capture_time,
-        timezone: utc_offset.clone(),
+        // `timezone` holds an IANA zone name; EXIF only carries a fixed ±HH:MM
+        // offset, which is not one. Leaving it unset keeps the offset available
+        // for display while letting the location-based suggestion fill in the
+        // real zone, rather than storing a value that resolves to nothing.
+        timezone: None,
         utc_offset,
         gps_lat,
         gps_lng,

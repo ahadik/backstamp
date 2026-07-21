@@ -86,6 +86,31 @@
   cursor: text;
 }
 
+/* Keep the "Timezone" label aligned to the input when a warning pushes the
+   wrapper taller than a single row. */
+.tzRow {
+  align-items: flex-start;
+}
+
+.tzRow .label {
+  padding-top: 7px;
+}
+
+.tzInputWarning,
+.tzInputWarning::placeholder {
+  color: var(--color-warning);
+}
+
+.tzInputWarning {
+  border-color: var(--color-warning);
+}
+
+.tzWarning {
+  margin: var(--space-1) 0 0;
+  font-size: 11px;
+  color: var(--color-warning);
+}
+
 .tzDropdown {
   position: absolute;
   top: calc(100% + 4px);
@@ -120,6 +145,14 @@
 .tzNoMatch {
   padding: var(--space-2);
   font-size: 12px;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.tzNote {
+  padding: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  font-size: 11px;
   color: var(--color-text-secondary);
   margin: 0;
 }

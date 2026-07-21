@@ -5,7 +5,6 @@ import {
   parseTimeInput,
   formatTimeDisplay,
 } from "./DateTimeSection";
-import { getUtcOffset } from "../../../lib/timezone";
 import type { Photo, Metadata, SessionState } from "../../../state/SessionContext";
 
 vi.mock("../../../state/SessionContext", () => ({
@@ -143,32 +142,6 @@ describe("formatTimeDisplay", () => {
   });
 });
 
-// ── getUtcOffset ──────────────────────────────────────────────────────────────
-
-describe("getUtcOffset", () => {
-  const winterDate = new Date("2024-01-15T12:00:00Z");
-
-  it("returns +00:00 for UTC", () => {
-    expect(getUtcOffset("UTC", winterDate)).toBe("+00:00");
-  });
-
-  it("returns +00:00 for Europe/London in winter", () => {
-    expect(getUtcOffset("Europe/London", winterDate)).toBe("+00:00");
-  });
-
-  it("returns +05:30 for Asia/Kolkata", () => {
-    expect(getUtcOffset("Asia/Kolkata", winterDate)).toBe("+05:30");
-  });
-
-  it("returns -05:00 for America/New_York in winter", () => {
-    expect(getUtcOffset("America/New_York", winterDate)).toBe("-05:00");
-  });
-
-  it("returns +00:00 for an invalid timezone", () => {
-    expect(getUtcOffset("Not/A/Timezone", winterDate)).toBe("+00:00");
-  });
-});
-
 // ── DateTimeSection component ─────────────────────────────────────────────────
 
 describe("DateTimeSection", () => {
@@ -290,5 +263,92 @@ describe("DateTimeSection", () => {
         changes: { captureTime: null },
       });
     });
+  });
+});
+
+// ── Timezone field ────────────────────────────────────────────────────────────
+
+describe("DateTimeSection timezone field", () => {
+  function photoWith(id: string, metadata: Partial<Metadata>): Photo {
+    const m = { ...baseMetadata, ...metadata };
+    return {
+      id, filePath: `/${id}.jpg`, fileStatus: "ok",
+      thumbnail: { small: "/s.jpg", large: "/l.jpg" },
+      originalMetadata: m, currentMetadata: m, pendingChanges: null,
+    };
+  }
+
+  function tzInput(): HTMLInputElement {
+    // The date field also uses a "Multiple Values" placeholder, so target the
+    // timezone combobox by its own class rather than by placeholder text.
+    return document.querySelector('input[class*="tzInput"]') as HTMLInputElement;
+  }
+
+  it("labels the selected zone with the offset for a summer capture date", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-07-03", captureTime: "12:00:00", timezone: "America/Denver" }),
+    ]} />);
+    expect(tzInput().value).toBe("US Mountain · MDT UTC−6");
+  });
+
+  it("labels the same zone differently for a winter capture date", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-01-15", captureTime: "12:00:00", timezone: "America/Denver" }),
+    ]} />);
+    expect(tzInput().value).toBe("US Mountain · MST UTC−7");
+  });
+
+  it("shows a bare zone name when the photo has no date to resolve against", () => {
+    render(<DateTimeSection selectedPhotos={[photoWith("p1", { timezone: "America/Denver" })]} />);
+    expect(tzInput().value).toBe("US Mountain");
+  });
+
+  it("warns when the selection spans multiple timezones", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-07-03", timezone: "America/Denver" }),
+      photoWith("p2", { captureDate: "2026-07-03", timezone: "America/New_York" }),
+    ]} />);
+    expect(screen.getByText("Selection contains multiple timezones")).toBeInTheDocument();
+    expect(tzInput().value).toBe("");
+    expect(tzInput()).toHaveAttribute("placeholder", "Multiple Values");
+  });
+
+  it("does not warn when the selection shares one timezone", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-07-03", timezone: "America/Denver" }),
+      photoWith("p2", { captureDate: "2026-07-04", timezone: "America/Denver" }),
+    ]} />);
+    expect(screen.queryByText("Selection contains multiple timezones")).not.toBeInTheDocument();
+  });
+
+  it("offers date-correct offsets in the dropdown", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-07-03", captureTime: "12:00:00" }),
+    ]} />);
+    fireEvent.focus(tzInput());
+    expect(screen.getByText("US Mountain · MDT UTC−6")).toBeInTheDocument();
+    expect(screen.getByText("US Arizona · MST UTC−7")).toBeInTheDocument();
+  });
+
+  it("drops offsets and explains why when the selection straddles a DST change", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-01-15", captureTime: "12:00:00" }),
+      photoWith("p2", { captureDate: "2026-07-03", captureTime: "12:00:00" }),
+    ]} />);
+    fireEvent.focus(tzInput());
+    expect(screen.getByText("US Mountain")).toBeInTheDocument();
+    expect(screen.queryByText(/US Mountain ·/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Some offsets hidden — selection spans a daylight saving change")
+    ).toBeInTheDocument();
+  });
+
+  it("keeps offsets for zones the straddling selection does not affect", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-01-15", captureTime: "12:00:00" }),
+      photoWith("p2", { captureDate: "2026-07-03", captureTime: "12:00:00" }),
+    ]} />);
+    fireEvent.focus(tzInput());
+    expect(screen.getByText("Tokyo · UTC+9")).toBeInTheDocument();
   });
 });
