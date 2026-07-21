@@ -1,27 +1,28 @@
 import { describe, it, expect } from "vitest";
-import { wallClockToUtcSecs, matchToTrack, countMatches } from "./gpxMatching";
+import { matchToTrack, countMatches } from "./gpxMatching";
+import { toUtcSeconds } from "./datetime";
 import type { TrackPoint } from "./tauri";
 
 function pts(data: Array<[number, number, number]>): TrackPoint[] {
   return data.map(([timestamp, lat, lng]) => ({ timestamp, lat, lng }));
 }
 
-describe("wallClockToUtcSecs", () => {
+describe("toUtcSeconds", () => {
   it("Pacific Standard Time (UTC-8)", () => {
     // noon PST = 20:00 UTC = 2024-01-15T20:00:00Z
-    const result = wallClockToUtcSecs("2024-01-15", "12:00:00", "America/Los_Angeles");
+    const result = toUtcSeconds("2024-01-15", "12:00:00", "America/Los_Angeles");
     expect(result).toBe(1705348800);
   });
 
   it("Pacific Daylight Time (UTC-7)", () => {
     // noon PDT = 19:00 UTC = 2024-07-15T19:00:00Z
-    const result = wallClockToUtcSecs("2024-07-15", "12:00:00", "America/Los_Angeles");
+    const result = toUtcSeconds("2024-07-15", "12:00:00", "America/Los_Angeles");
     expect(result).toBe(1721070000);
   });
 
   it("Tokyo (UTC+9, no DST)", () => {
     // 09:00 JST = 00:00 UTC
-    const result = wallClockToUtcSecs("2024-03-15", "09:00:00", "Asia/Tokyo");
+    const result = toUtcSeconds("2024-03-15", "09:00:00", "Asia/Tokyo");
     expect(result).toBe(1710460800);
   });
 });

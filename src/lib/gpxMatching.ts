@@ -1,37 +1,6 @@
+import { toUtcSeconds } from "./datetime";
 import type { TrackPoint } from "./tauri";
 import type { Photo } from "../state/SessionContext";
-
-/**
- * Convert a wall-clock date + time string interpreted in a given IANA timezone
- * to a Unix epoch in seconds (UTC).
- *
- * Uses the Intl offset trick: treat the input as UTC to get a candidate,
- * determine the TZ offset at that candidate, and subtract.
- */
-export function wallClockToUtcSecs(
-  date: string, // "YYYY-MM-DD"
-  time: string, // "HH:MM:SS"
-  timezone: string
-): number {
-  const candidateMs = new Date(`${date}T${time}Z`).getTime();
-
-  const fmt = new Intl.DateTimeFormat("en", {
-    timeZone: timezone,
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-    hour12: false,
-  });
-  const parts = fmt.formatToParts(new Date(candidateMs)).reduce<Record<string, string>>(
-    (acc, p) => { acc[p.type] = p.value; return acc; },
-    {}
-  );
-  const localAtCandidateMs = new Date(
-    `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}Z`
-  ).getTime();
-
-  const offsetMs = localAtCandidateMs - candidateMs;
-  return Math.round((candidateMs - offsetMs) / 1000);
-}
 
 /**
  * Find the best lat/lng for a UTC timestamp from a sorted list of track points.
@@ -100,8 +69,8 @@ export function countMatches(
     const { captureDate, captureTime, timezone } = photo.currentMetadata;
     if (!captureDate || !captureTime || !timezone) continue;
     total++;
-    const utcSecs = wallClockToUtcSecs(captureDate, captureTime, timezone);
-    if (matchToTrack(allTrackPoints, utcSecs, toleranceSecs)) {
+    const utcSecs = toUtcSeconds(captureDate, captureTime, timezone);
+    if (utcSecs !== null && matchToTrack(allTrackPoints, utcSecs, toleranceSecs)) {
       matching++;
     }
   }
@@ -124,7 +93,8 @@ export function applyGpxAutoTag(
     const { captureDate, captureTime, timezone } = photo.currentMetadata;
     if (!captureDate || !captureTime || !timezone) continue;
 
-    const utcSecs = wallClockToUtcSecs(captureDate, captureTime, timezone);
+    const utcSecs = toUtcSeconds(captureDate, captureTime, timezone);
+    if (utcSecs === null) continue;
     const match = matchToTrack(trackPoints, utcSecs, toleranceSecs);
     if (!match) continue;
 

@@ -1,4 +1,4 @@
-import { getUtcOffset } from "./timezone";
+import { utcOffsetFor } from "./datetime";
 import type { Photo } from "../state/SessionContext";
 import type { ApplyPayload } from "./tauri";
 
@@ -10,6 +10,7 @@ export function buildApplyPayload(photos: Photo[]): ApplyPayload {
 
     const hasPendingDate = "captureDate" in p;
     const hasPendingTime = "captureTime" in p;
+    const hasPendingTimezone = "timezone" in p;
 
     // Rust needs both date and time to write DateTimeOriginal. When only one is
     // being changed, supplement the other from currentMetadata so neither is lost.
@@ -21,14 +22,19 @@ export function buildApplyPayload(photos: Photo[]): ApplyPayload {
       supplement.captureTime = photo.currentMetadata.captureTime;
     }
 
-    const effectiveDateStr = hasPendingDate ? p.captureDate : (supplement.captureDate ?? null);
-    const effectiveTimezone = ("timezone" in p ? p.timezone : null) ?? photo.currentMetadata.timezone;
-    const utcOffset =
-      effectiveTimezone && effectiveDateStr
-        ? getUtcOffset(effectiveTimezone, new Date(effectiveDateStr))
-        : null;
+    // Resolve the offset against the full capture instant, not just the date:
+    // on a DST transition day the offset differs before and after the switch.
+    const effectiveDate = hasPendingDate
+      ? (p.captureDate ?? null)
+      : (supplement.captureDate ?? photo.currentMetadata.captureDate);
+    const effectiveTime = hasPendingTime
+      ? (p.captureTime ?? null)
+      : (supplement.captureTime ?? photo.currentMetadata.captureTime);
+    const effectiveTimezone = (hasPendingTimezone ? p.timezone : null) ?? photo.currentMetadata.timezone;
 
-    const utcOffsetChanged = hasPendingDate || hasPendingTime || "timezone" in p;
+    const utcOffset = utcOffsetFor(effectiveDate, effectiveTime, effectiveTimezone);
+
+    const utcOffsetChanged = hasPendingDate || hasPendingTime || hasPendingTimezone;
     changes[photo.id] = { ...p, ...supplement, ...(utcOffsetChanged ? { utcOffset } : {}) };
   }
   return { changes };

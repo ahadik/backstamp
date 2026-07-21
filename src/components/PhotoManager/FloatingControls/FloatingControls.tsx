@@ -1,9 +1,11 @@
+import { useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { tauriCommands } from "../../../lib/tauri";
 import { useUI } from "../../../state/UIContext";
 import { useSession } from "../../../state/SessionContext";
 import { WORKING_TIMEZONES } from "../../../lib/timezones";
+import { formatZoneOffset, resolveZoneOffsets, todayDate } from "../../../lib/datetime";
 import { GridSizeControl } from "./GridSizeControl";
 import styles from "./FloatingControls.module.css";
 
@@ -16,6 +18,12 @@ export function FloatingControls() {
   const { state: ui, dispatch } = useUI();
   const { state, dispatch: sessionDispatch } = useSession();
   const { selectedIds } = state;
+
+  // No photo in play here, so offsets resolve against today.
+  const workingZoneOffsets = useMemo(
+    () => resolveZoneOffsets(WORKING_TIMEZONES.map((tz) => tz.value), [todayDate()]),
+    []
+  );
 
   async function handleImportPhotos() {
     const selected = await open({
@@ -74,9 +82,14 @@ export function FloatingControls() {
             dispatch({ type: "SET_WORKING_TIMEZONE", timezone: e.target.value })
           }
         >
-          {WORKING_TIMEZONES.map((tz) => (
-            <option key={tz.value} value={tz.value}>{tz.label}</option>
-          ))}
+          {WORKING_TIMEZONES.map((tz) => {
+            const resolved = workingZoneOffsets.get(tz.value);
+            return (
+              <option key={tz.value} value={tz.value}>
+                {resolved ? `${tz.name} · ${formatZoneOffset(resolved)}` : tz.name}
+              </option>
+            );
+          })}
         </select>
         <GridSizeControl />
       </div>

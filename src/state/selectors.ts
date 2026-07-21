@@ -1,3 +1,4 @@
+import { dayKeyIn, formatDayKey, instantFromStoredOffset } from "../lib/datetime";
 import type { Photo } from "./SessionContext";
 
 export type DayBlock = {
@@ -39,31 +40,12 @@ export function flatOrderedIds(blocks: DayBlock[]): string[] {
 
 export function getDateKey(photo: Photo, workingTimezone: string): string {
   const { captureDate, captureTime, utcOffset } = photo.currentMetadata;
-  if (!captureDate) return "no-date";
-  if (!utcOffset || !captureTime) return captureDate;
-  try {
-    const date = new Date(`${captureDate}T${captureTime}${utcOffset}`);
-    if (isNaN(date.getTime())) return captureDate;
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: workingTimezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(date);
-  } catch {
-    return captureDate;
-  }
+  return dayKeyIn(captureDate, captureTime, utcOffset, workingTimezone);
 }
 
 function toUTCMillis(photo: Photo): number | null {
   const { captureDate, captureTime, utcOffset } = photo.currentMetadata;
-  if (!captureDate || !captureTime || !utcOffset) return null;
-  try {
-    const d = new Date(`${captureDate}T${captureTime}${utcOffset}`);
-    return isNaN(d.getTime()) ? null : d.getTime();
-  } catch {
-    return null;
-  }
+  return instantFromStoredOffset(captureDate, captureTime, utcOffset);
 }
 
 function comparePhotos(a: Photo, b: Photo): number {
@@ -91,11 +73,5 @@ function toDateTimeString(photo: Photo): string | null {
 
 export function formatLabel(dateKey: string): string {
   if (dateKey === "no-date") return "No Date";
-  const [y, m, d] = dateKey.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  return formatDayKey(dateKey);
 }

@@ -4,7 +4,8 @@ import { useSession } from "../../../state/SessionContext";
 import { useUI } from "../../../state/UIContext";
 import { deriveFieldValue } from "../../../lib/inspectorUtils";
 import { tauriCommands } from "../../../lib/tauri";
-import { wallClockToUtcSecs, matchToTrack, countMatches, applyGpxAutoTag } from "../../../lib/gpxMatching";
+import { matchToTrack, countMatches, applyGpxAutoTag } from "../../../lib/gpxMatching";
+import { toUtcSeconds } from "../../../lib/datetime";
 import { ConfirmDialog } from "../../common/ConfirmDialog/ConfirmDialog";
 import type { Photo } from "../../../state/SessionContext";
 import type { TrackPoint } from "../../../lib/tauri";
@@ -70,8 +71,8 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
     selectedPhotos.some((photo) => {
       const { captureDate, captureTime, timezone } = photo.currentMetadata;
       if (!captureDate || !captureTime || !timezone) return false;
-      const utcSecs = wallClockToUtcSecs(captureDate, captureTime, timezone);
-      return matchToTrack(allTrackPoints, utcSecs) !== null;
+      const utcSecs = toUtcSeconds(captureDate, captureTime, timezone);
+      return utcSecs !== null && matchToTrack(allTrackPoints, utcSecs) !== null;
     });
 
   const gpxButtonEnabled =
