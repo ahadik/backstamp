@@ -5,6 +5,7 @@ import { useUI } from "../../state/UIContext";
 import { useDevLog } from "../../state/DevLogContext";
 import { tauriCommands } from "../../lib/tauri";
 import { buildApplyPayload } from "../../lib/applyUtils";
+import { filterPhotos, hasActiveFilters } from "../../state/selectors";
 import { ConfirmDialog } from "../common/ConfirmDialog/ConfirmDialog";
 import type { Photo, Metadata } from "../../state/SessionContext";
 import type { ApplyPhase } from "../ApplyModal/ApplyModal";
@@ -41,7 +42,7 @@ function mapLoadedPhoto(p: {
 
 export function TopBar({ applyPhase, setApplyPhase }: TopBarProps) {
   const { state, dispatch } = useSession();
-  const { dispatch: uiDispatch } = useUI();
+  const { state: uiState, dispatch: uiDispatch } = useUI();
   const { entries: devEntries, open: openDevLog } = useDevLog();
   const { photos, selectedIds, canRollback, applyInProgress, gpxFiles } = state;
 
@@ -144,7 +145,9 @@ export function TopBar({ applyPhase, setApplyPhase }: TopBarProps) {
       <header className={styles.topBar}>
         <div className={styles.meta}>
           <span className={`text-sm ${styles.count}`}>
-            {photos.length} {photos.length === 1 ? "photo" : "photos"}
+            {hasActiveFilters(uiState.photoFilters)
+              ? `${filterPhotos(photos, uiState.photoFilters, uiState.workingTimezone).length} of ${photos.length} photos`
+              : `${photos.length} ${photos.length === 1 ? "photo" : "photos"}`}
           </span>
           {import.meta.env.DEV && devEntries.length > 0 && (() => {
             const latest = devEntries[devEntries.length - 1];

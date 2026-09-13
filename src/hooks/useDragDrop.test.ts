@@ -44,12 +44,13 @@ function reactMouseEvent(opts: {
   } as any;
 }
 
-function domMouseEvent(type: string, opts: { clientX?: number; clientY?: number } = {}) {
+function domMouseEvent(type: string, opts: { clientX?: number; clientY?: number; metaKey?: boolean } = {}) {
   return new MouseEvent(type, {
     bubbles: true,
     cancelable: true,
     clientX: opts.clientX ?? 50,
     clientY: opts.clientY ?? 50,
+    metaKey: opts.metaKey ?? false,
   });
 }
 
@@ -170,11 +171,28 @@ describe("useDragDrop — dragHandlers.onMouseDown", () => {
     expect(result.current.dragState.draggingIds).toHaveLength(0);
   });
 
-  it("ignores cmd+click (reserved for toggle selection)", () => {
+  it("ignores ctrl+click (reserved for toggle selection)", () => {
     const { result } = setup();
-    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ metaKey: true })));
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ ctrlKey: true })));
     act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 100, clientY: 100 })); });
     expect(result.current.dragState.draggingIds).toHaveLength(0);
+  });
+
+  it("allows a drag to start from a cmd+mousedown (5px threshold disambiguates from cmd+click)", () => {
+    vi.spyOn(document, "querySelector").mockReturnValue(null);
+    const { result } = setup();
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ metaKey: true, clientX: 10, clientY: 10 })));
+    act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 30, clientY: 10 })); });
+    expect(result.current.dragState.draggingIds).toContain("p1");
+    vi.restoreAllMocks();
+  });
+
+  it("does not start a drag on cmd+mousedown without movement, so cmd+click toggle still works", () => {
+    const { result } = setup();
+    act(() => result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ metaKey: true, clientX: 10, clientY: 10 })));
+    act(() => { document.dispatchEvent(domMouseEvent("mouseup", { clientX: 11, clientY: 10, metaKey: true })); });
+    expect(result.current.dragState.draggingIds).toHaveLength(0);
+    expect(result.current.dragCompletedRef.current).toBe(false);
   });
 
   it("prevents default to suppress text selection during drag", () => {
@@ -232,7 +250,19 @@ describe("useDragDrop — drop target construction", () => {
     const { result, onDrop } = setup();
     const targetEl = makeTileEl("p2", 0.5);
     simulateDrag({ sourceId: "p1", targetEl, result });
-    expect(onDrop).toHaveBeenCalledWith(["p1"], { kind: "photo", photoId: "p2" });
+    expect(onDrop).toHaveBeenCalledWith(["p1"], { kind: "photo", photoId: "p2" }, { metaKey: false });
+  });
+
+  it("reports metaKey: true when ⌘ is held at release", () => {
+    const { result, onDrop } = setup();
+    const targetEl = makeTileEl("p2", 0.5);
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(targetEl);
+    vi.spyOn(document, "querySelector").mockReturnValue(null);
+    act(() => { result.current.dragHandlers("p1").onMouseDown(reactMouseEvent({ clientX: 10, clientY: 10 })); });
+    act(() => { document.dispatchEvent(domMouseEvent("mousemove", { clientX: 20, clientY: 20 })); });
+    act(() => { document.dispatchEvent(domMouseEvent("mouseup", { clientX: 50, clientY: 50, metaKey: true })); });
+    vi.restoreAllMocks();
+    expect(onDrop).toHaveBeenCalledWith(["p1"], { kind: "photo", photoId: "p2" }, { metaKey: true });
   });
 
   it("produces gap-before when dropping on the left 20% of a tile", () => {
@@ -242,7 +272,7 @@ describe("useDragDrop — drop target construction", () => {
     expect(onDrop).toHaveBeenCalledWith(["p1"], {
       kind: "gap",
       gap: { beforeId: "p1", afterId: "p2", dayKey: "2024-03-15" },
-    });
+    }, { metaKey: false });
   });
 
   it("produces gap-after when dropping on the right 20% of a tile", () => {
@@ -252,7 +282,7 @@ describe("useDragDrop — drop target construction", () => {
     expect(onDrop).toHaveBeenCalledWith(["p1"], {
       kind: "gap",
       gap: { beforeId: "p2", afterId: "p3", dayKey: "2024-03-15" },
-    });
+    }, { metaKey: false });
   });
 
   it("gap-before on the first photo has beforeId: null", () => {
@@ -262,7 +292,7 @@ describe("useDragDrop — drop target construction", () => {
     expect(onDrop).toHaveBeenCalledWith(["p2"], {
       kind: "gap",
       gap: { beforeId: null, afterId: "p1", dayKey: "2024-03-15" },
-    });
+    }, { metaKey: false });
   });
 
   it("gap-after on the last photo has afterId: null", () => {
@@ -272,7 +302,7 @@ describe("useDragDrop — drop target construction", () => {
     expect(onDrop).toHaveBeenCalledWith(["p1"], {
       kind: "gap",
       gap: { beforeId: "p3", afterId: null, dayKey: "2024-03-15" },
-    });
+    }, { metaKey: false });
   });
 
   it("does not call onDrop when dropping a single photo onto itself", () => {
@@ -351,6 +381,7 @@ describe("useDragDrop — day key in gap target", () => {
         kind: "gap",
         gap: expect.objectContaining({ dayKey: "2024-02-01" }),
       }),
+      { metaKey: false },
     );
   });
 
@@ -367,6 +398,7 @@ describe("useDragDrop — day key in gap target", () => {
       expect.objectContaining({
         gap: expect.objectContaining({ dayKey: "no-date" }),
       }),
+      { metaKey: false },
     );
   });
 });

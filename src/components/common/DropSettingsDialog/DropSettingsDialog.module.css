@@ -1,0 +1,149 @@
+.dialog {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  max-width: 460px;
+  width: calc(100% - var(--space-8));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 var(--space-1);
+  text-align: center;
+}
+
+.subtitle {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-4);
+  text-align: center;
+}
+
+.sectionLabel {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.row {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-glass-bg);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.rowHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.rowHeaderDisabled {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: default;
+}
+
+.rowHeaderDisabled input[type="checkbox"] {
+  opacity: 0.4;
+  filter: grayscale(1);
+  cursor: default;
+}
+
+.rowLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.rowLabelDisabled {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+}
+
+.segmented {
+  display: flex;
+  gap: 1px;
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  align-self: flex-start;
+}
+
+.segment,
+.segmentActive {
+  font-size: 11px;
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.segment:hover:not(:disabled) {
+  background: var(--color-glass-bg);
+}
+
+.segment:disabled,
+.segmentActive:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.segmentActive {
+  background: var(--color-accent);
+  color: white;
+}
+
+.preview,
+.previewDisabled {
+  font-size: 11px;
+  line-height: 1.4;
+  word-break: break-word;
+  color: var(--color-text-secondary);
+}
+
+.previewDisabled {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.note {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.hint {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  text-align: center;
+  margin: var(--space-4) 0 0;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}

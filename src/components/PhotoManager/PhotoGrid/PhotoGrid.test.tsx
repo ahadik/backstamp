@@ -29,6 +29,7 @@ const defaultUIState: UIState = {
   gridColumns: 5,
   panelWidth: 800,
   mapPanelHeight: 200,
+  photoFilters: { dateAfter: null, dateBefore: null, cameras: null },
   mapboxToken: null,
   googleMapsKey: null,
   claudeApiKey: null,

@@ -71,6 +71,60 @@ fn is_supported(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Extensions worth surfacing when expanding a dropped/selected directory:
+/// importable photos plus XMP sidecars and GPX tracks, which the frontend
+/// routes through their own import flows.
+fn is_importable(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            let ext = e.to_lowercase();
+            SUPPORTED_EXTENSIONS.contains(&ext.as_str()) || ext == "xmp" || ext == "gpx"
+        })
+        .unwrap_or(false)
+}
+
+fn collect_importable_files(dir: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        // Skip hidden files and directories (.DS_Store, .Trashes, …)
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        // file_type() does not follow symlinks, so a symlinked directory is
+        // never recursed into — avoids cycles from links back up the tree.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if file_type.is_dir() {
+            collect_importable_files(&path, out);
+        } else if file_type.is_file() && is_importable(&path) {
+            out.push(path.to_string_lossy().into_owned());
+        }
+    }
+}
+
+/// Expand any directories among `paths` into the importable files they contain
+/// (recursively). Non-directory paths pass through unchanged.
+#[tauri::command]
+pub async fn expand_import_paths(paths: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in paths {
+        let path = PathBuf::from(&p);
+        if path.is_dir() {
+            collect_importable_files(&path, &mut out);
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
 fn already_imported_by_path(db: &Arc<Mutex<rusqlite::Connection>>, path: &str) -> bool {
     db.lock()
         .ok()
@@ -835,6 +889,51 @@ mod tests {
         let kws = extract_keywords(&json);
         assert!(kws.contains(&"cats".to_string()));
         assert!(kws.contains(&"dogs".to_string()));
+    }
+
+    // ── directory expansion ──────────────────────────────────────────────────
+
+    fn touch(path: &Path) {
+        std::fs::write(path, b"").unwrap();
+    }
+
+    #[test]
+    fn collect_importable_files_recurses_and_filters() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("a.jpg"));
+        touch(&root.join("a.xmp"));
+        touch(&root.join("track.gpx"));
+        touch(&root.join("notes.txt"));
+        touch(&root.join(".DS_Store"));
+        std::fs::create_dir(root.join("nested")).unwrap();
+        touch(&root.join("nested/b.CR3"));
+        std::fs::create_dir(root.join(".hidden")).unwrap();
+        touch(&root.join(".hidden/c.jpg"));
+
+        let mut out = Vec::new();
+        collect_importable_files(root, &mut out);
+        let names: Vec<&str> = out
+            .iter()
+            .map(|p| Path::new(p).strip_prefix(root).unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["a.jpg", "a.xmp", "nested/b.CR3", "track.gpx"]);
+    }
+
+    #[test]
+    fn expand_import_paths_passes_files_through_and_expands_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("inside.jpg"));
+        let loose = root.join("loose.nef");
+        touch(&loose);
+
+        let result = tauri::async_runtime::block_on(expand_import_paths(vec![
+            loose.to_string_lossy().into_owned(),
+            root.to_string_lossy().into_owned(),
+        ]));
+        assert_eq!(result.len(), 3); // loose.nef passed through + inside.jpg + loose.nef found in dir
+        assert_eq!(result[0], loose.to_string_lossy());
     }
 
     // ── insert_photo duplicate-path guard ────────────────────────────────────

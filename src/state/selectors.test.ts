@@ -1,4 +1,16 @@
-import { groupPhotosByDay, flatOrderedIds, getDateKey, formatLabel } from "./selectors";
+import {
+  groupPhotosByDay,
+  flatOrderedIds,
+  getDateKey,
+  formatLabel,
+  filterPhotos,
+  hasActiveFilters,
+  cameraOptionsFrom,
+  cameraKeyOf,
+  photoDateRange,
+  NO_CAMERA_KEY,
+  EMPTY_PHOTO_FILTERS,
+} from "./selectors";
 import type { Photo, Metadata } from "./SessionContext";
 
 const nullMeta: Metadata = {
@@ -248,5 +260,131 @@ describe("formatLabel", () => {
 
   it("includes the full month name", () => {
     expect(formatLabel("2024-06-15")).toMatch(/June/);
+  });
+});
+
+// ── photo filters ─────────────────────────────────────────────────────────────
+
+describe("hasActiveFilters", () => {
+  it("is false for the empty filter set", () => {
+    expect(hasActiveFilters(EMPTY_PHOTO_FILTERS)).toBe(false);
+  });
+
+  it("is false when cameras is an empty array", () => {
+    expect(hasActiveFilters({ ...EMPTY_PHOTO_FILTERS, cameras: [] })).toBe(false);
+  });
+
+  it("is true when any date bound is set", () => {
+    expect(hasActiveFilters({ ...EMPTY_PHOTO_FILTERS, dateAfter: "2024-01-01" })).toBe(true);
+    expect(hasActiveFilters({ ...EMPTY_PHOTO_FILTERS, dateBefore: "2024-01-01" })).toBe(true);
+  });
+
+  it("is true when cameras are selected", () => {
+    expect(hasActiveFilters({ ...EMPTY_PHOTO_FILTERS, cameras: [NO_CAMERA_KEY] })).toBe(true);
+  });
+});
+
+describe("filterPhotos", () => {
+  const photos = [
+    makePhoto("a", { captureDate: "2024-03-14", cameraMake: "Canon", cameraModel: "EOS R5" }),
+    makePhoto("b", { captureDate: "2024-03-15", cameraMake: "Nikon", cameraModel: null }),
+    makePhoto("c", { captureDate: "2024-03-16" }),
+    makePhoto("d"), // no date, no camera
+  ];
+
+  it("returns the same array when no filters are active", () => {
+    expect(filterPhotos(photos, EMPTY_PHOTO_FILTERS, TZ)).toBe(photos);
+  });
+
+  it("keeps photos on or after dateAfter and drops no-date photos", () => {
+    const out = filterPhotos(photos, { ...EMPTY_PHOTO_FILTERS, dateAfter: "2024-03-15" }, TZ);
+    expect(out.map((p) => p.id)).toEqual(["b", "c"]);
+  });
+
+  it("keeps photos on or before dateBefore", () => {
+    const out = filterPhotos(photos, { ...EMPTY_PHOTO_FILTERS, dateBefore: "2024-03-15" }, TZ);
+    expect(out.map((p) => p.id)).toEqual(["a", "b"]);
+  });
+
+  it("applies both bounds inclusively", () => {
+    const out = filterPhotos(
+      photos,
+      { ...EMPTY_PHOTO_FILTERS, dateAfter: "2024-03-15", dateBefore: "2024-03-15" },
+      TZ
+    );
+    expect(out.map((p) => p.id)).toEqual(["b"]);
+  });
+
+  it("filters by camera key", () => {
+    const key = cameraKeyOf(photos[0].currentMetadata);
+    const out = filterPhotos(photos, { ...EMPTY_PHOTO_FILTERS, cameras: [key] }, TZ);
+    expect(out.map((p) => p.id)).toEqual(["a"]);
+  });
+
+  it("matches photos without camera info via NO_CAMERA_KEY", () => {
+    const out = filterPhotos(photos, { ...EMPTY_PHOTO_FILTERS, cameras: [NO_CAMERA_KEY] }, TZ);
+    expect(out.map((p) => p.id)).toEqual(["c", "d"]);
+  });
+
+  it("combines date and camera filters", () => {
+    const out = filterPhotos(
+      photos,
+      { ...EMPTY_PHOTO_FILTERS, dateAfter: "2024-03-16", cameras: [NO_CAMERA_KEY] },
+      TZ
+    );
+    expect(out.map((p) => p.id)).toEqual(["c"]);
+  });
+
+  it("distinguishes make-only from model-only cameras", () => {
+    const makeOnly = makePhoto("m1", { cameraMake: "Canon" });
+    const modelOnly = makePhoto("m2", { cameraModel: "Canon" });
+    const key = cameraKeyOf(makeOnly.currentMetadata);
+    const out = filterPhotos([makeOnly, modelOnly], { ...EMPTY_PHOTO_FILTERS, cameras: [key] }, TZ);
+    expect(out.map((p) => p.id)).toEqual(["m1"]);
+  });
+});
+
+describe("cameraOptionsFrom", () => {
+  it("returns distinct cameras with counts, sorted by label", () => {
+    const options = cameraOptionsFrom([
+      makePhoto("a", { cameraMake: "Nikon", cameraModel: "F3" }),
+      makePhoto("b", { cameraMake: "Canon", cameraModel: "EOS R5" }),
+      makePhoto("c", { cameraMake: "Canon", cameraModel: "EOS R5" }),
+    ]);
+    expect(options.map((o) => ({ label: o.label, count: o.count }))).toEqual([
+      { label: "Canon EOS R5", count: 2 },
+      { label: "Nikon F3", count: 1 },
+    ]);
+  });
+
+  it("puts the no-camera option last", () => {
+    const options = cameraOptionsFrom([
+      makePhoto("a"),
+      makePhoto("b", { cameraMake: "Zeiss" }),
+    ]);
+    expect(options.map((o) => o.label)).toEqual(["Zeiss", "No camera"]);
+    expect(options[1].key).toBe(NO_CAMERA_KEY);
+  });
+
+  it("returns an empty array for no photos", () => {
+    expect(cameraOptionsFrom([])).toEqual([]);
+  });
+});
+
+describe("photoDateRange", () => {
+  it("returns min and max day keys, ignoring no-date photos", () => {
+    const range = photoDateRange(
+      [
+        makePhoto("a", { captureDate: "2024-03-15" }),
+        makePhoto("b", { captureDate: "2024-01-02" }),
+        makePhoto("c"),
+      ],
+      TZ
+    );
+    expect(range).toEqual({ min: "2024-01-02", max: "2024-03-15" });
+  });
+
+  it("returns null when no photo has a date", () => {
+    expect(photoDateRange([makePhoto("a")], TZ)).toBeNull();
   });
 });

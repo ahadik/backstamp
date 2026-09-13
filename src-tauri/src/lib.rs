@@ -105,6 +105,7 @@ pub fn run() {
             session_commands::load_session,
             session_commands::clear_session,
             photos::import_photos,
+            photos::expand_import_paths,
             photos::find_xmp_sidecars,
             photos::remove_photos,
             photos::reorder_photos,

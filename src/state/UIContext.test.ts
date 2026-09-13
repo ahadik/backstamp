@@ -52,6 +52,44 @@ describe("uiReducer", () => {
     });
   });
 
+  describe("SET_PHOTO_FILTERS", () => {
+    it("merges partial filter updates", () => {
+      const next = uiReducer(uiInitialState, {
+        type: "SET_PHOTO_FILTERS",
+        filters: { dateAfter: "2024-01-01" },
+      });
+      expect(next.photoFilters).toEqual({
+        dateAfter: "2024-01-01",
+        dateBefore: null,
+        cameras: null,
+      });
+    });
+
+    it("preserves other filter fields when one changes", () => {
+      const withDate = uiReducer(uiInitialState, {
+        type: "SET_PHOTO_FILTERS",
+        filters: { dateAfter: "2024-01-01" },
+      });
+      const next = uiReducer(withDate, {
+        type: "SET_PHOTO_FILTERS",
+        filters: { cameras: ["Canon"] },
+      });
+      expect(next.photoFilters.dateAfter).toBe("2024-01-01");
+      expect(next.photoFilters.cameras).toEqual(["Canon"]);
+    });
+  });
+
+  describe("RESET_PHOTO_FILTERS", () => {
+    it("clears all filters", () => {
+      const withFilters = uiReducer(uiInitialState, {
+        type: "SET_PHOTO_FILTERS",
+        filters: { dateAfter: "2024-01-01", cameras: ["Canon"] },
+      });
+      const next = uiReducer(withFilters, { type: "RESET_PHOTO_FILTERS" });
+      expect(next.photoFilters).toEqual({ dateAfter: null, dateBefore: null, cameras: null });
+    });
+  });
+
   describe("SET_MAPBOX_TOKEN", () => {
     it("stores the token", () => {
       const next = uiReducer(uiInitialState, { type: "SET_MAPBOX_TOKEN", token: "pk.test" });
@@ -85,6 +123,17 @@ describe("uiReducer", () => {
         type: "RESTORE_UI", workingTimezone: "America/Los_Angeles", gridColumns: 5, mapPanelHeight: 350,
       });
       expect(next.mapPanelHeight).toBe(350);
+    });
+
+    it("resets photo filters", () => {
+      const withFilters = uiReducer(uiInitialState, {
+        type: "SET_PHOTO_FILTERS",
+        filters: { dateAfter: "2024-01-01" },
+      });
+      const next = uiReducer(withFilters, {
+        type: "RESTORE_UI", workingTimezone: "UTC", gridColumns: 5, mapPanelHeight: 200,
+      });
+      expect(next.photoFilters).toEqual({ dateAfter: null, dateBefore: null, cameras: null });
     });
 
     it("preserves mapboxToken and claudeApiKey from current state", () => {

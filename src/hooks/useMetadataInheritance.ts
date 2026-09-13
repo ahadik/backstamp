@@ -9,20 +9,96 @@ export interface CameraData {
   filmType: string | null;
 }
 
-export interface CameraConflict {
-  draggingIds: string[];
-  /** Camera data from the neighbor before the gap. null means "no camera data set". */
-  optionBefore: CameraData | null;
-  /** Camera data from the neighbor after the gap. null means "no camera data set". */
-  optionAfter: CameraData | null;
+/** How a group of fields is sourced on a gap drop. */
+export type GapMode = "before" | "interpolate" | "after";
+
+export interface GroupSetting {
+  enabled: boolean;
+  gapMode: GapMode;
 }
 
-export interface InheritanceResult {
-  /** Per-photo metadata changes — always contains timestamp and GPS assignments.
-   *  Camera fields are ONLY included here when there is no conflict. */
-  changes: Map<string, Partial<Metadata>>;
-  /** Present only for gap drops when the two neighbors have different camera data. */
-  cameraConflict: CameraConflict | null;
+/** Per-group inheritance choices. Photo (clone) drops use only `enabled`;
+ *  gap drops also use `gapMode`. Camera never interpolates. */
+export interface DropSettings {
+  timestamp: GroupSetting;
+  location: GroupSetting;
+  camera: GroupSetting;
+}
+
+export type InheritGroup = keyof DropSettings;
+
+export const DEFAULT_DROP_SETTINGS: DropSettings = {
+  timestamp: { enabled: true, gapMode: "interpolate" },
+  location: { enabled: true, gapMode: "interpolate" },
+  camera: { enabled: true, gapMode: "before" },
+};
+
+export const GROUP_FIELDS: Record<InheritGroup, (keyof Metadata)[]> = {
+  timestamp: ["captureDate", "captureTime", "utcOffset", "timezone"],
+  location: ["gpsLat", "gpsLng"],
+  camera: ["cameraMake", "cameraModel", "lens", "filmVendor", "filmType"],
+};
+
+/** Parses a persisted settings JSON string, falling back to defaults for
+ *  anything missing or malformed. */
+export function parseDropSettings(raw: string | null | undefined): DropSettings {
+  const result: DropSettings = {
+    timestamp: { ...DEFAULT_DROP_SETTINGS.timestamp },
+    location: { ...DEFAULT_DROP_SETTINGS.location },
+    camera: { ...DEFAULT_DROP_SETTINGS.camera },
+  };
+  if (!raw) return result;
+  try {
+    const parsed = JSON.parse(raw) as Partial<Record<InheritGroup, Partial<GroupSetting>>>;
+    for (const group of ["timestamp", "location", "camera"] as InheritGroup[]) {
+      const g = parsed[group];
+      if (!g || typeof g !== "object") continue;
+      if (typeof g.enabled === "boolean") result[group].enabled = g.enabled;
+      if (g.gapMode === "before" || g.gapMode === "after") {
+        result[group].gapMode = g.gapMode;
+      } else if (g.gapMode === "interpolate" && group !== "camera") {
+        result[group].gapMode = "interpolate";
+      }
+    }
+  } catch {
+    // Malformed JSON — keep defaults
+  }
+  return result;
+}
+
+export function hasGroupData(photo: Photo | null, group: InheritGroup): boolean {
+  if (!photo) return false;
+  const m = photo.currentMetadata;
+  if (group === "timestamp") return m.captureDate !== null || m.captureTime !== null;
+  if (group === "location") return m.gpsLat !== null && m.gpsLng !== null;
+  return extractCameraData(photo) !== null;
+}
+
+function copyGroupFields(source: Photo, group: InheritGroup, into: Partial<Metadata>) {
+  const m = source.currentMetadata;
+  for (const field of GROUP_FIELDS[group]) {
+    if (m[field] !== null) {
+      (into as Record<string, unknown>)[field] = m[field];
+    }
+  }
+}
+
+/** Resolves which neighbor an "adopt before/after" choice actually reads from:
+ *  the chosen side, falling back to the other side when the chosen neighbor is
+ *  missing or has no data for the group. Choosing an empty side would set
+ *  nothing; falling back preserves the "inherit whatever is available" behavior
+ *  and matches the preview shown in the drop dialog. */
+function adoptSource(
+  mode: "before" | "after",
+  before: Photo | null,
+  after: Photo | null,
+  group: InheritGroup,
+): Photo | null {
+  const primary = mode === "before" ? before : after;
+  const secondary = mode === "before" ? after : before;
+  if (hasGroupData(primary, group)) return primary;
+  if (hasGroupData(secondary, group)) return secondary;
+  return null;
 }
 
 export function computeInheritance(
@@ -31,23 +107,18 @@ export function computeInheritance(
   targetPhoto: Photo | null,
   neighborBefore: Photo | null,
   neighborAfter: Photo | null,
-): InheritanceResult {
+  settings: DropSettings = DEFAULT_DROP_SETTINGS,
+): Map<string, Partial<Metadata>> {
   const changes = new Map<string, Partial<Metadata>>();
 
   if (target.kind === "photo") {
-    if (!targetPhoto) return { changes, cameraConflict: null };
-    const masterMeta = targetPhoto.currentMetadata;
-    const fields: (keyof Metadata)[] = [
-      "captureDate", "captureTime", "utcOffset", "timezone", "gpsLat", "gpsLng",
-      "cameraMake", "cameraModel", "lens", "filmVendor", "filmType",
-    ];
-    const photoChanges = Object.fromEntries(
-      fields
-        .filter((f) => masterMeta[f] !== null)
-        .map((f) => [f, masterMeta[f]])
-    ) as Partial<Metadata>;
+    if (!targetPhoto) return changes;
+    const photoChanges: Partial<Metadata> = {};
+    for (const group of ["timestamp", "location", "camera"] as InheritGroup[]) {
+      if (settings[group].enabled) copyGroupFields(targetPhoto, group, photoChanges);
+    }
     for (const p of draggingPhotos) changes.set(p.id, photoChanges);
-    return { changes, cameraConflict: null };
+    return changes;
   }
 
   // gap drop
@@ -57,72 +128,68 @@ export function computeInheritance(
     for (const p of draggingPhotos) {
       changes.set(p.id, { captureDate: null, captureTime: null });
     }
-    return { changes, cameraConflict: null };
+    return changes;
   }
-
-  // Resolve camera data: detect conflicts or pick the available neighbor's data
-  const cameraA = extractCameraData(neighborBefore);
-  const cameraB = extractCameraData(neighborAfter);
-  let mergedCamera: CameraData | null = null;
-  let hasCameraConflict = false;
-
-  if (cameraDataEqual(cameraA, cameraB)) {
-    mergedCamera = cameraA; // both null → no change; both equal → inherit
-  } else if (cameraA === null) {
-    mergedCamera = cameraB; // only after-neighbor has data → inherit it
-  } else if (cameraB === null) {
-    mergedCamera = cameraA; // only before-neighbor has data → inherit it
-  } else {
-    hasCameraConflict = true; // both have data but differ → conflict
-  }
-
-  const cameraFields: (keyof CameraData)[] = [
-    "cameraMake", "cameraModel", "lens", "filmVendor", "filmType",
-  ];
 
   const tz = resolveTimezone(neighborBefore, neighborAfter);
   const resolvedUtcOffset =
     neighborBefore?.currentMetadata.utcOffset ?? neighborAfter?.currentMetadata.utcOffset ?? null;
 
+  // Adopt-mode sources are the same for every dragged photo — resolve once.
+  const timestampSource =
+    settings.timestamp.gapMode === "interpolate"
+      ? null
+      : adoptSource(settings.timestamp.gapMode, neighborBefore, neighborAfter, "timestamp");
+  const locationSource =
+    settings.location.gapMode === "interpolate"
+      ? null
+      : adoptSource(settings.location.gapMode, neighborBefore, neighborAfter, "location");
+  const cameraSource =
+    settings.camera.gapMode === "interpolate"
+      ? null
+      : adoptSource(settings.camera.gapMode, neighborBefore, neighborAfter, "camera");
+
   for (let i = 0; i < draggingPhotos.length; i++) {
     const p = draggingPhotos[i];
-    const t = interpolateTimestamp(
-      neighborBefore,
-      neighborAfter,
-      i,
-      draggingPhotos.length,
-      gap.dayKey,
-    );
-    const gps = interpolateGps(neighborBefore, neighborAfter, i, draggingPhotos.length);
-    const photoChanges: Partial<Metadata> = {
-      captureDate: t.captureDate,
-      captureTime: t.captureTime,
-      ...gps,
-    };
-    if (tz !== null) photoChanges.timezone = tz;
-    if (resolvedUtcOffset !== null) photoChanges.utcOffset = resolvedUtcOffset;
-    if (!hasCameraConflict && mergedCamera !== null) {
-      for (const field of cameraFields) {
-        if (mergedCamera[field] != null) {
-          (photoChanges as Record<string, unknown>)[field] = mergedCamera[field];
-        }
+    const photoChanges: Partial<Metadata> = {};
+
+    if (settings.timestamp.enabled) {
+      if (settings.timestamp.gapMode === "interpolate") {
+        const t = interpolateTimestamp(
+          neighborBefore,
+          neighborAfter,
+          i,
+          draggingPhotos.length,
+          gap.dayKey,
+        );
+        photoChanges.captureDate = t.captureDate;
+        photoChanges.captureTime = t.captureTime;
+        if (tz !== null) photoChanges.timezone = tz;
+        if (resolvedUtcOffset !== null) photoChanges.utcOffset = resolvedUtcOffset;
+      } else if (timestampSource) {
+        copyGroupFields(timestampSource, "timestamp", photoChanges);
       }
     }
+
+    if (settings.location.enabled) {
+      if (settings.location.gapMode === "interpolate") {
+        Object.assign(
+          photoChanges,
+          interpolateGps(neighborBefore, neighborAfter, i, draggingPhotos.length),
+        );
+      } else if (locationSource) {
+        copyGroupFields(locationSource, "location", photoChanges);
+      }
+    }
+
+    if (settings.camera.enabled && cameraSource) {
+      copyGroupFields(cameraSource, "camera", photoChanges);
+    }
+
     changes.set(p.id, photoChanges);
   }
 
-  if (hasCameraConflict) {
-    return {
-      changes,
-      cameraConflict: {
-        draggingIds: draggingPhotos.map((p) => p.id),
-        optionBefore: cameraA,
-        optionAfter: cameraB,
-      },
-    };
-  }
-
-  return { changes, cameraConflict: null };
+  return changes;
 }
 
 export function extractCameraData(photo: Photo | null): CameraData | null {
@@ -139,18 +206,6 @@ export function extractCameraData(photo: Photo | null): CameraData | null {
     filmVendor: m.filmVendor,
     filmType: m.filmType,
   };
-}
-
-export function cameraDataEqual(a: CameraData | null, b: CameraData | null): boolean {
-  if (a === null && b === null) return true;
-  if (a === null || b === null) return false;
-  return (
-    a.cameraMake === b.cameraMake &&
-    a.cameraModel === b.cameraModel &&
-    a.lens === b.lens &&
-    a.filmVendor === b.filmVendor &&
-    a.filmType === b.filmType
-  );
 }
 
 function resolveTimezone(before: Photo | null, after: Photo | null): string | null {

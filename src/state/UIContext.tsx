@@ -1,12 +1,14 @@
 import React, { createContext, useContext, useReducer, useEffect, useRef } from "react";
 import { tauriCommands } from "../lib/tauri";
 import { reportError, setErrorHandler } from "../lib/errors";
+import { EMPTY_PHOTO_FILTERS, type PhotoFilters } from "./selectors";
 
 export interface UIState {
   workingTimezone: string;  // IANA name, display-only
   gridColumns: number;      // target number of columns in the photo grid
   panelWidth: number;       // current photo grid panel width in px (updated by PhotoGrid)
   mapPanelHeight: number;   // px
+  photoFilters: PhotoFilters; // session-only view filters, never persisted
   mapboxToken: string | null;
   googleMapsKey: string | null;
   claudeApiKey: string | null;
@@ -18,6 +20,8 @@ type UIAction =
   | { type: "SET_GRID_COLUMNS"; columns: number }
   | { type: "SET_PANEL_WIDTH"; width: number }
   | { type: "SET_MAP_PANEL_HEIGHT"; height: number }
+  | { type: "SET_PHOTO_FILTERS"; filters: Partial<PhotoFilters> }
+  | { type: "RESET_PHOTO_FILTERS" }
   | { type: "SET_MAPBOX_TOKEN"; token: string | null }
   | { type: "SET_GOOGLE_MAPS_KEY"; key: string | null }
   | { type: "SET_CLAUDE_API_KEY"; key: string | null }
@@ -29,6 +33,7 @@ const initialState: UIState = {
   gridColumns: 5,
   panelWidth: 800,
   mapPanelHeight: 200,
+  photoFilters: EMPTY_PHOTO_FILTERS,
   mapboxToken: null,
   googleMapsKey: null,
   claudeApiKey: null,
@@ -45,6 +50,10 @@ function uiReducer(state: UIState, action: UIAction): UIState {
       return { ...state, panelWidth: action.width };
     case "SET_MAP_PANEL_HEIGHT":
       return { ...state, mapPanelHeight: Math.max(60, action.height) };
+    case "SET_PHOTO_FILTERS":
+      return { ...state, photoFilters: { ...state.photoFilters, ...action.filters } };
+    case "RESET_PHOTO_FILTERS":
+      return { ...state, photoFilters: EMPTY_PHOTO_FILTERS };
     case "SET_MAPBOX_TOKEN":
       return { ...state, mapboxToken: action.token };
     case "SET_GOOGLE_MAPS_KEY":
@@ -54,11 +63,14 @@ function uiReducer(state: UIState, action: UIAction): UIState {
     case "SET_ERROR":
       return { ...state, error: action.error };
     case "RESTORE_UI":
+      // Fires on session hydrate and Clear Session; filters are session-scoped
+      // view state, so both start from a clean slate.
       return {
         ...state,
         workingTimezone: action.workingTimezone,
         gridColumns: action.gridColumns,
         mapPanelHeight: action.mapPanelHeight,
+        photoFilters: EMPTY_PHOTO_FILTERS,
       };
     default:
       return state;

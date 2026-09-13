@@ -41,6 +41,29 @@ function makePhoto(id: string, overrides: Partial<Photo> = {}): Photo {
 }
 
 describe("sessionReducer", () => {
+  describe("SELECT_ALL", () => {
+    const base: SessionState = {
+      ...initialState,
+      photos: [makePhoto("a"), makePhoto("b"), makePhoto("c")],
+    };
+
+    it("selects every photo when no ids are given", () => {
+      const next = sessionReducer(base, { type: "SELECT_ALL" });
+      expect(next.selectedIds).toEqual(new Set(["a", "b", "c"]));
+    });
+
+    it("selects exactly the given ids when provided", () => {
+      const next = sessionReducer(base, { type: "SELECT_ALL", ids: ["b"] });
+      expect(next.selectedIds).toEqual(new Set(["b"]));
+    });
+
+    it("clears the selection when given an empty id list", () => {
+      const selected = { ...base, selectedIds: new Set(["a", "c"]) };
+      const next = sessionReducer(selected, { type: "SELECT_ALL", ids: [] });
+      expect(next.selectedIds.size).toBe(0);
+    });
+  });
+
   describe("RESTORE_SESSION", () => {
     it("sets photos from the action", () => {
       const photos = [makePhoto("a"), makePhoto("b")];
