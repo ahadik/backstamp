@@ -19,11 +19,16 @@ export interface DragState {
   overZone: DropZone | null;
 }
 
+export interface DropModifiers {
+  /** ⌘ held at release — apply remembered settings without the dialog. */
+  metaKey: boolean;
+}
+
 interface Params {
   orderedIds: string[];
   selectedIds: Set<string>;
   dayBlocks: DayBlock[];
-  onDrop: (draggingIds: string[], target: DropTarget) => void;
+  onDrop: (draggingIds: string[], target: DropTarget, modifiers: DropModifiers) => void;
   onSelectSingle: (id: string) => void;
 }
 
@@ -195,7 +200,7 @@ export function useDragDrop({
             zone === "on-photo"
               ? { kind: "photo", photoId: tileId }
               : { kind: "gap", gap: buildGapTargetRef.current(tileId, zone as "gap-before" | "gap-after") };
-          onDropRef.current(ids, target);
+          onDropRef.current(ids, target, { metaKey: e.metaKey });
         }
       }
 
@@ -215,12 +220,15 @@ export function useDragDrop({
   const dragHandlers = useCallback(
     (photoId: string) => ({
       onMouseDown: (e: React.MouseEvent) => {
-        // Let shift/meta/ctrl clicks pass through for multi-select
+        // Let shift/ctrl clicks pass through for multi-select
         if (e.shiftKey) {
           e.preventDefault(); // prevent text selection on shift+click
           return;
         }
-        if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
+        if (e.button !== 0 || e.ctrlKey) return;
+        // ⌘ (meta) is allowed to enter drag tracking: the 5px threshold
+        // disambiguates a ⌘-drag from a ⌘-click toggle-select, and after a
+        // completed drag dragCompletedRef suppresses the spurious click.
         e.preventDefault(); // prevent text selection while dragging
         const ids = selectedIds.has(photoId) ? [...selectedIds] : [photoId];
         pendingDragRef.current = { photoId, startX: e.clientX, startY: e.clientY, ids };

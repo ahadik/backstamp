@@ -60,6 +60,7 @@ const baseUI: UIState = {
   gridColumns: 5,
   panelWidth: 800,
   mapPanelHeight: 200,
+  photoFilters: { dateAfter: null, dateBefore: null, cameras: null },
   mapboxToken: "pk.test",
   googleMapsKey: null,
   claudeApiKey: "sk-ant-test",

@@ -8,6 +8,7 @@ import { useSession } from "../../../state/SessionContext";
 import { WORKING_TIMEZONES } from "../../../lib/timezones";
 import { formatZoneOffset, resolveZoneOffsets, todayDate } from "../../../lib/datetime";
 import { GridSizeControl } from "./GridSizeControl";
+import { FilterControls } from "./FilterControls";
 import styles from "./FloatingControls.module.css";
 
 const SUPPORTED_EXTENSIONS = [
@@ -15,7 +16,12 @@ const SUPPORTED_EXTENSIONS = [
   "dng", "cr3", "cr2", "nef", "arw", "raf", "orf", "rw2", "pef",
 ];
 
-export function FloatingControls() {
+interface FloatingControlsProps {
+  /** Routes paths (files or folders) through the shared import pipeline. */
+  onImportPaths: (paths: string[]) => void;
+}
+
+export function FloatingControls({ onImportPaths }: FloatingControlsProps) {
   const { state: ui, dispatch } = useUI();
   const { state, dispatch: sessionDispatch } = useSession();
   const { selectedIds } = state;
@@ -29,13 +35,22 @@ export function FloatingControls() {
   async function handleImportPhotos() {
     const selected = await open({
       multiple: true,
-      filters: [{ name: "Photos", extensions: SUPPORTED_EXTENSIONS }],
+      filters: [{ name: "Photos", extensions: [...SUPPORTED_EXTENSIONS, "xmp", "gpx"] }],
     });
     if (!selected) return;
     const paths = Array.isArray(selected) ? selected : [selected];
     if (paths.length === 0) return;
-    tauriCommands.importPhotos(paths)
-      .catch((err) => reportError("Failed to import photos", err));
+    onImportPaths(paths);
+  }
+
+  // The dialog plugin can't offer files and folders in one picker, so folder
+  // import gets its own button.
+  async function handleImportFolder() {
+    const selected = await open({ directory: true, multiple: true });
+    if (!selected) return;
+    const paths = Array.isArray(selected) ? selected : [selected];
+    if (paths.length === 0) return;
+    onImportPaths(paths);
   }
 
   async function handleRemoveSelected() {
@@ -68,6 +83,9 @@ export function FloatingControls() {
         <button className="btn btn-glass" onClick={handleImportPhotos}>
           Import Photos
         </button>
+        <button className="btn btn-glass" onClick={handleImportFolder}>
+          Import Folder
+        </button>
         <button
           className="btn btn-glass"
           onClick={handleRemoveSelected}
@@ -77,6 +95,7 @@ export function FloatingControls() {
         </button>
       </div>
       <div className={styles.rightGroup}>
+        <FilterControls />
         <select
           className={styles.tzSelect}
           value={ui.workingTimezone}

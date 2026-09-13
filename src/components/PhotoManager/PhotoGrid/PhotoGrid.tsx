@@ -1,18 +1,27 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "../../../state/SessionContext";
 import { useUI } from "../../../state/UIContext";
-import { groupPhotosByDay, flatOrderedIds } from "../../../state/selectors";
+import {
+  groupPhotosByDay,
+  flatOrderedIds,
+  filterPhotos,
+  hasActiveFilters,
+} from "../../../state/selectors";
 import { useDragDrop } from "../../../hooks/useDragDrop";
-import { computeInheritance } from "../../../hooks/useMetadataInheritance";
-import type { CameraConflict } from "../../../hooks/useMetadataInheritance";
+import {
+  computeInheritance,
+  parseDropSettings,
+  DEFAULT_DROP_SETTINGS,
+  type DropSettings,
+} from "../../../hooks/useMetadataInheritance";
 import { tauriCommands } from "../../../lib/tauri";
 import { reportError } from "../../../lib/errors";
-import { CameraConflictDialog } from "../../common/CameraConflictDialog/CameraConflictDialog";
+import { DropSettingsDialog, type PendingDrop } from "../../common/DropSettingsDialog/DropSettingsDialog";
 import { DayBlockHeader } from "./DayBlockHeader";
 import { GpxTile } from "./GpxTile";
 import { PhotoTile } from "./PhotoTile";
 import styles from "./PhotoGrid.module.css";
-import type { DropTarget } from "../../../hooks/useDragDrop";
+import type { DropTarget, DropModifiers } from "../../../hooks/useDragDrop";
 
 const GRID_GAP_PX = 8;
 
@@ -23,7 +32,22 @@ export function PhotoGrid() {
   const gpxSectionRef = useRef<HTMLDivElement>(null);
   const inspectorFocusedAtMouseDown = useRef(false);
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
-  const [cameraConflict, setCameraConflict] = useState<CameraConflict | null>(null);
+  const [pendingDrop, setPendingDrop] = useState<PendingDrop | null>(null);
+
+  // Remembered per-drop-kind dialog choices, restored from the session settings
+  // table. Loaded lazily; until then ⌘-drops use the defaults (= old behavior).
+  const cloneSettingsRef = useRef<DropSettings>(DEFAULT_DROP_SETTINGS);
+  const gapSettingsRef = useRef<DropSettings>(DEFAULT_DROP_SETTINGS);
+
+  useEffect(() => {
+    // A missing or unreadable preference silently falls back to defaults.
+    tauriCommands.getSetting("ui.dropSettings.clone")
+      .then((raw) => { cloneSettingsRef.current = parseDropSettings(raw); })
+      .catch(() => {});
+    tauriCommands.getSetting("ui.dropSettings.gap")
+      .then((raw) => { gapSettingsRef.current = parseDropSettings(raw); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -41,43 +65,38 @@ export function PhotoGrid() {
     Math.floor((ui.panelWidth - (ui.gridColumns - 1) * GRID_GAP_PX) / ui.gridColumns)
   );
 
-  const blocks = groupPhotosByDay(session.photos, ui.workingTimezone);
+  const filtersActive = hasActiveFilters(ui.photoFilters);
+  const visiblePhotos = filterPhotos(session.photos, ui.photoFilters, ui.workingTimezone);
+  const blocks = groupPhotosByDay(visiblePhotos, ui.workingTimezone);
+  // Visible ids drive drop targets, shift-select ranges, and ⌘A.
   const orderedIds = flatOrderedIds(blocks);
+  // Reordering splices into the full order so photos hidden by a filter keep
+  // their positions instead of being dropped from the session.
+  const allOrderedIds = filtersActive
+    ? flatOrderedIds(groupPhotosByDay(session.photos, ui.workingTimezone))
+    : orderedIds;
 
   const photoById = useCallback(
     (id: string) => session.photos.find((p) => p.id === id) ?? null,
     [session.photos]
   );
 
-  const handleDrop = useCallback(
-    (draggingIds: string[], target: DropTarget) => {
-      const draggingPhotos = draggingIds.flatMap((id) => {
-        const p = photoById(id);
-        return p ? [p] : [];
-      });
-
-      let targetPhoto = null;
-      let neighborBefore = null;
-      let neighborAfter = null;
-
-      if (target.kind === "photo") {
-        targetPhoto = photoById(target.photoId);
-      } else {
-        const { gap } = target;
-        neighborBefore = gap.beforeId ? photoById(gap.beforeId) : null;
-        neighborAfter = gap.afterId ? photoById(gap.afterId) : null;
-      }
-
-      const result = computeInheritance(
-        draggingPhotos,
+  // Commits a drop: writes the inherited metadata and reorders the grid.
+  // Nothing is persisted before this runs, so a cancelled dialog is a no-op.
+  const applyDrop = useCallback(
+    (drop: PendingDrop, settings: DropSettings) => {
+      const { draggingIds, target } = drop;
+      const changes = computeInheritance(
+        drop.draggingPhotos,
         target,
-        targetPhoto,
-        neighborBefore,
-        neighborAfter,
+        drop.targetPhoto,
+        drop.neighborBefore,
+        drop.neighborAfter,
+        settings,
       );
 
       const batchUpdates: Array<{ id: string; changes: Partial<import("../../../state/SessionContext").Metadata> }> = [];
-      for (const [id, meta] of result.changes) {
+      for (const [id, meta] of changes) {
         batchUpdates.push({ id, changes: meta });
         const fields = Object.entries(meta).map(([field, value]) => ({
           field,
@@ -90,7 +109,7 @@ export function PhotoGrid() {
         dispatch({ type: "SET_PENDING_BATCH", updates: batchUpdates });
       }
 
-      const withoutDragging = orderedIds.filter((id) => !draggingIds.includes(id));
+      const withoutDragging = allOrderedIds.filter((id) => !draggingIds.includes(id));
       let insertIdx: number;
 
       if (target.kind === "photo") {
@@ -119,12 +138,50 @@ export function PhotoGrid() {
       tauriCommands
         .reorderPhotos(newOrder)
         .catch((err) => reportError("Failed to save the new photo order", err));
-
-      if (result.cameraConflict) {
-        setCameraConflict(result.cameraConflict);
-      }
     },
-    [orderedIds, photoById, dispatch]
+    [allOrderedIds, dispatch]
+  );
+
+  const handleDrop = useCallback(
+    (draggingIds: string[], target: DropTarget, modifiers: DropModifiers) => {
+      const draggingPhotos = draggingIds.flatMap((id) => {
+        const p = photoById(id);
+        return p ? [p] : [];
+      });
+
+      let targetPhoto = null;
+      let neighborBefore = null;
+      let neighborAfter = null;
+
+      if (target.kind === "photo") {
+        targetPhoto = photoById(target.photoId);
+      } else {
+        const { gap } = target;
+        neighborBefore = gap.beforeId ? photoById(gap.beforeId) : null;
+        neighborAfter = gap.afterId ? photoById(gap.afterId) : null;
+      }
+
+      const drop: PendingDrop = {
+        draggingIds,
+        draggingPhotos,
+        target,
+        targetPhoto,
+        neighborBefore,
+        neighborAfter,
+      };
+
+      // No Date drops only clear date/time — nothing to configure, no dialog.
+      const isNoDate = target.kind === "gap" && target.gap.dayKey === "no-date";
+      if (isNoDate || modifiers.metaKey) {
+        const remembered =
+          target.kind === "photo" ? cloneSettingsRef.current : gapSettingsRef.current;
+        applyDrop(drop, remembered);
+        return;
+      }
+
+      setPendingDrop(drop);
+    },
+    [photoById, applyDrop]
   );
 
   const handleSelectSingle = useCallback(
@@ -166,11 +223,15 @@ export function PhotoGrid() {
     }
   }, [session.selectedGpxId]);
 
+  // ⌘A selects what's on screen, so an active filter never selects hidden photos.
+  const orderedIdsRef = useRef(orderedIds);
+  orderedIdsRef.current = orderedIds;
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "a") {
         e.preventDefault();
-        dispatch({ type: "SELECT_ALL" });
+        dispatch({ type: "SELECT_ALL", ids: orderedIdsRef.current });
       } else if (e.key === "Escape") {
         dispatch({ type: "DESELECT_ALL" });
       }
@@ -178,6 +239,17 @@ export function PhotoGrid() {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [dispatch]);
+
+  // Drop photos a filter just hid from the selection — otherwise inspector
+  // edits would keep applying to photos the user can no longer see.
+  useEffect(() => {
+    if (!filtersActive) return;
+    const visible = new Set(visiblePhotos.map((p) => p.id));
+    const kept = [...session.selectedIds].filter((id) => visible.has(id));
+    if (kept.length !== session.selectedIds.size) {
+      dispatch({ type: "SELECT_ALL", ids: kept });
+    }
+  }, [filtersActive, visiblePhotos, session.selectedIds, dispatch]);
 
   return (
     <div
@@ -195,20 +267,24 @@ export function PhotoGrid() {
         dispatch({ type: "DESELECT_ALL" });
       }}
     >
-      {cameraConflict && (
-        <CameraConflictDialog
-          conflict={cameraConflict}
-          onResolve={(choice) => {
-            if (choice !== null) {
-              dispatch({ type: "SET_PENDING", ids: cameraConflict.draggingIds, changes: choice });
-              const fields = Object.entries(choice).map(([field, value]) => ({
-                field,
-                value: value == null ? null : String(value),
-              }));
-              tauriCommands.setPendingChanges(cameraConflict.draggingIds, fields)
-                .catch((err) => reportError("Failed to save camera edits", err));
-            }
-            setCameraConflict(null);
+      {pendingDrop && (
+        <DropSettingsDialog
+          drop={pendingDrop}
+          initialSettings={
+            pendingDrop.target.kind === "photo"
+              ? cloneSettingsRef.current
+              : gapSettingsRef.current
+          }
+          onResolve={(settings) => {
+            setPendingDrop(null);
+            if (!settings) return; // cancelled — the drop never happened
+            const kind = pendingDrop.target.kind === "photo" ? "clone" : "gap";
+            const ref = kind === "clone" ? cloneSettingsRef : gapSettingsRef;
+            ref.current = settings;
+            tauriCommands
+              .setSetting(`ui.dropSettings.${kind}`, JSON.stringify(settings))
+              .catch((err) => reportError("Failed to save the drop preferences", err));
+            applyDrop(pendingDrop, settings);
           }}
         />
       )}
@@ -216,6 +292,11 @@ export function PhotoGrid() {
         <div className={styles.empty}>
           <span>No photos imported</span>
           <span className="text-xs">Click "Import Photos" to get started</span>
+        </div>
+      ) : visiblePhotos.length === 0 ? (
+        <div className={styles.empty}>
+          <span>No photos match the current filters</span>
+          <span className="text-xs">Adjust or clear the filters in the top bar</span>
         </div>
       ) : (
         <div className={styles.gridLayer}>

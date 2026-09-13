@@ -3,6 +3,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { useRef, useEffect, useCallback, useState } from "react";
 import { useSession } from "../../state/SessionContext";
 import { useUI } from "../../state/UIContext";
+import { filterPhotos } from "../../state/selectors";
 import type { Photo, GpxFile, Metadata } from "../../state/SessionContext";
 import styles from "./MapPanel.module.css";
 import { palette, colors } from "../../lib/colors";
@@ -249,9 +250,11 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   const tokenIsSecret = isSecretMapboxToken(ui.mapboxToken);
 
   const hasSelection = session.selectedIds.size > 0;
+  // Pins mirror the grid: photos hidden by the top-bar filters stay off the map.
+  const visiblePhotos = filterPhotos(session.photos, ui.photoFilters, ui.workingTimezone);
   const focusPhotos = hasSelection
     ? session.photos.filter((p) => session.selectedIds.has(p.id))
-    : session.photos;
+    : visiblePhotos;
 
   // Stable key that changes only when the set of pins to fit actually changes
   const fitKey =
@@ -265,8 +268,8 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   // Refs so the async "load" handler sees current data without stale closures
   const focusPhotosRef = useRef<Photo[]>(focusPhotos);
   focusPhotosRef.current = focusPhotos;
-  const allPhotosRef = useRef<Photo[]>(session.photos);
-  allPhotosRef.current = session.photos;
+  const visiblePhotosRef = useRef<Photo[]>(visiblePhotos);
+  visiblePhotosRef.current = visiblePhotos;
   const gpxFilesRef = useRef<GpxFile[]>(session.gpxFiles);
   gpxFilesRef.current = session.gpxFiles;
 
@@ -339,7 +342,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
       setupSources(map.current!);
       setupScrubLayer(map.current!);
       (map.current!.getSource("photos") as mapboxgl.GeoJSONSource).setData(
-        buildPhotoGeoJSON(allPhotosRef.current)
+        buildPhotoGeoJSON(visiblePhotosRef.current)
       );
       // setStyle removed the old gpx layers; reset the tracking set so syncGpxLayers re-adds them.
       gpxLayerIds.current.clear();
@@ -390,11 +393,11 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     if (!m) return;
     const sync = () => {
       const source = m.getSource("photos") as mapboxgl.GeoJSONSource | undefined;
-      if (source) source.setData(buildPhotoGeoJSON(allPhotosRef.current));
+      if (source) source.setData(buildPhotoGeoJSON(visiblePhotosRef.current));
     };
     if (m.isStyleLoaded()) sync();
     else m.once("idle", sync);
-  }, [session.photos]);
+  }, [session.photos, ui.photoFilters, ui.workingTimezone]);
 
   useEffect(() => {
     const m = map.current;

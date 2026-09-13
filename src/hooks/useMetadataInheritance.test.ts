@@ -1,4 +1,10 @@
-import { computeInheritance, cameraDataEqual, extractCameraData } from "./useMetadataInheritance";
+import {
+  computeInheritance,
+  extractCameraData,
+  parseDropSettings,
+  DEFAULT_DROP_SETTINGS,
+  type DropSettings,
+} from "./useMetadataInheritance";
 import type { Photo, Metadata } from "../state/SessionContext";
 
 const nullMeta: Metadata = {
@@ -18,6 +24,16 @@ function makePhoto(id: string, meta: Partial<Metadata> = {}): Photo {
   };
 }
 
+function settingsWith(overrides: {
+  [K in keyof DropSettings]?: Partial<DropSettings[K]>;
+}): DropSettings {
+  return {
+    timestamp: { ...DEFAULT_DROP_SETTINGS.timestamp, ...overrides.timestamp },
+    location: { ...DEFAULT_DROP_SETTINGS.location, ...overrides.location },
+    camera: { ...DEFAULT_DROP_SETTINGS.camera, ...overrides.camera },
+  };
+}
+
 describe("computeInheritance — photo drop", () => {
   it("copies all metadata from the target photo to every dragging photo", () => {
     const dragging = [makePhoto("a"), makePhoto("b")];
@@ -32,87 +48,108 @@ describe("computeInheritance — photo drop", () => {
       filmVendor: "Kodak",
       filmType: "Portra 400",
     });
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "photo", photoId: "t" },
       target,
       null,
       null,
     );
-    expect(result.changes.size).toBe(2);
-    expect(result.cameraConflict).toBeNull();
+    expect(changes.size).toBe(2);
     for (const id of ["a", "b"]) {
-      expect(result.changes.get(id)?.captureDate).toBe("2024-03-15");
-      expect(result.changes.get(id)?.captureTime).toBe("10:30:00");
-      expect(result.changes.get(id)?.gpsLat).toBe(37.7);
-      expect(result.changes.get(id)?.cameraMake).toBe("Canon");
-      expect(result.changes.get(id)?.cameraModel).toBe("EOS R5");
-      expect(result.changes.get(id)?.filmVendor).toBe("Kodak");
-      expect(result.changes.get(id)?.filmType).toBe("Portra 400");
+      expect(changes.get(id)?.captureDate).toBe("2024-03-15");
+      expect(changes.get(id)?.captureTime).toBe("10:30:00");
+      expect(changes.get(id)?.gpsLat).toBe(37.7);
+      expect(changes.get(id)?.cameraMake).toBe("Canon");
+      expect(changes.get(id)?.cameraModel).toBe("EOS R5");
+      expect(changes.get(id)?.filmVendor).toBe("Kodak");
+      expect(changes.get(id)?.filmType).toBe("Portra 400");
     }
   });
 
   it("preserves dragging photo fields when master has null for those fields", () => {
     const dragging = [makePhoto("a", { cameraMake: "Nikon", cameraModel: "F3", captureDate: "2024-01-01" })];
     const master = makePhoto("t", { captureDate: "2024-03-15", captureTime: "10:30:00" });
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "photo", photoId: "t" },
       master,
       null,
       null,
     );
-    expect(result.changes.get("a")?.captureDate).toBe("2024-03-15");
-    expect(result.changes.get("a")?.captureTime).toBe("10:30:00");
+    expect(changes.get("a")?.captureDate).toBe("2024-03-15");
+    expect(changes.get("a")?.captureTime).toBe("10:30:00");
     // master has null cameraMake/cameraModel — must be absent from changes so existing values survive
-    expect(result.changes.get("a")?.cameraMake).toBeUndefined();
-    expect(result.changes.get("a")?.cameraModel).toBeUndefined();
+    expect(changes.get("a")?.cameraMake).toBeUndefined();
+    expect(changes.get("a")?.cameraModel).toBeUndefined();
   });
 
   it("preserves dragging photo GPS when master has no location", () => {
     // photo with location but no date, dropped on photo with date but no location
     const dragging = [makePhoto("a", { gpsLat: 37.7, gpsLng: -122.4 })];
     const master = makePhoto("t", { captureDate: "2024-03-15", captureTime: "10:30:00" });
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "photo", photoId: "t" },
       master,
       null,
       null,
     );
-    expect(result.changes.get("a")?.captureDate).toBe("2024-03-15");
+    expect(changes.get("a")?.captureDate).toBe("2024-03-15");
     // master gpsLat/gpsLng are null — must not appear in changes
-    expect(result.changes.get("a")?.gpsLat).toBeUndefined();
-    expect(result.changes.get("a")?.gpsLng).toBeUndefined();
+    expect(changes.get("a")?.gpsLat).toBeUndefined();
+    expect(changes.get("a")?.gpsLng).toBeUndefined();
+  });
+
+  it("skips disabled groups entirely", () => {
+    const dragging = [makePhoto("a")];
+    const target = makePhoto("t", {
+      captureDate: "2024-03-15",
+      captureTime: "10:30:00",
+      gpsLat: 37.7,
+      gpsLng: -122.4,
+      cameraMake: "Canon",
+    });
+    const changes = computeInheritance(
+      dragging,
+      { kind: "photo", photoId: "t" },
+      target,
+      null,
+      null,
+      settingsWith({ timestamp: { enabled: false }, camera: { enabled: false } }),
+    );
+    expect(changes.get("a")?.captureDate).toBeUndefined();
+    expect(changes.get("a")?.captureTime).toBeUndefined();
+    expect(changes.get("a")?.cameraMake).toBeUndefined();
+    expect(changes.get("a")?.gpsLat).toBe(37.7);
+    expect(changes.get("a")?.gpsLng).toBe(-122.4);
   });
 
   it("returns empty map when targetPhoto is null", () => {
     const dragging = [makePhoto("a")];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "photo", photoId: "t" },
       null,
       null,
       null,
     );
-    expect(result.changes.size).toBe(0);
-    expect(result.cameraConflict).toBeNull();
+    expect(changes.size).toBe(0);
   });
 });
 
 describe("computeInheritance — no-date block drop", () => {
   it("clears captureDate and captureTime, leaves other fields unchanged", () => {
     const dragging = [makePhoto("a", { captureDate: "2024-01-01", captureTime: "08:00:00" })];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: null, afterId: null, dayKey: "no-date" } },
       null,
       null,
       null,
     );
-    expect(result.changes.get("a")?.captureDate).toBeNull();
-    expect(result.changes.get("a")?.captureTime).toBeNull();
-    expect(result.cameraConflict).toBeNull();
+    expect(changes.get("a")?.captureDate).toBeNull();
+    expect(changes.get("a")?.captureTime).toBeNull();
   });
 });
 
@@ -121,7 +158,7 @@ describe("computeInheritance — gap drop with no GPS on neighbors", () => {
     const before = makePhoto("b", { captureDate: "2024-03-15", captureTime: "10:00:00" });
     const after = makePhoto("a", { captureDate: "2024-03-15", captureTime: "12:00:00" });
     const dragging = [makePhoto("x", { gpsLat: 37.7, gpsLng: -122.4 })];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null,
@@ -129,23 +166,22 @@ describe("computeInheritance — gap drop with no GPS on neighbors", () => {
       after,
     );
     // Neither neighbor has GPS — must not appear in changes so dragging photo's GPS survives
-    expect(result.changes.get("x")?.gpsLat).toBeUndefined();
-    expect(result.changes.get("x")?.gpsLng).toBeUndefined();
+    expect(changes.get("x")?.gpsLat).toBeUndefined();
+    expect(changes.get("x")?.gpsLng).toBeUndefined();
   });
 
-  it("preserves dragging photo camera metadata when closer neighbor has no camera data", () => {
+  it("preserves dragging photo camera metadata when neighbors have no camera data", () => {
     const before = makePhoto("b", { captureDate: "2024-03-15", captureTime: "10:00:00" });
     const dragging = [makePhoto("x", { cameraMake: "Nikon", cameraModel: "F3" })];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: "b", afterId: null, dayKey: "2024-03-15" } },
       null,
       before,
       null,
     );
-    expect(result.changes.get("x")?.cameraMake).toBeUndefined();
-    expect(result.changes.get("x")?.cameraModel).toBeUndefined();
-    expect(result.cameraConflict).toBeNull();
+    expect(changes.get("x")?.cameraMake).toBeUndefined();
+    expect(changes.get("x")?.cameraModel).toBeUndefined();
   });
 });
 
@@ -154,15 +190,15 @@ describe("computeInheritance — gap drop between two dated photos", () => {
     const before = makePhoto("b", { captureDate: "2024-03-15", captureTime: "10:00:00" });
     const after = makePhoto("a", { captureDate: "2024-03-15", captureTime: "12:00:00" });
     const dragging = [makePhoto("x")];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null,
       before,
       after,
     );
-    expect(result.changes.get("x")?.captureDate).toBe("2024-03-15");
-    expect(result.changes.get("x")?.captureTime).toBe("11:00:00");
+    expect(changes.get("x")?.captureDate).toBe("2024-03-15");
+    expect(changes.get("x")?.captureTime).toBe("11:00:00");
   });
 
   it("interpolates correctly across midnight when photos span two calendar days in their local timezone", () => {
@@ -173,26 +209,23 @@ describe("computeInheritance — gap drop between two dated photos", () => {
     const before = makePhoto("b", { captureDate: "2024-01-14", captureTime: "22:00:00", utcOffset: "-08:00" });
     const after = makePhoto("a", { captureDate: "2024-01-15", captureTime: "02:00:00", utcOffset: "-08:00" });
     const dragging = [makePhoto("x")];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-01-15" } },
       null,
       before,
       after,
     );
-    expect(result.changes.get("x")?.captureDate).toBe("2024-01-15");
-    expect(result.changes.get("x")?.captureTime).toBe("00:00:00");
-    expect(result.changes.get("x")?.utcOffset).toBe("-08:00");
+    expect(changes.get("x")?.captureDate).toBe("2024-01-15");
+    expect(changes.get("x")?.captureTime).toBe("00:00:00");
+    expect(changes.get("x")?.utcOffset).toBe("-08:00");
   });
 
   it("propagates utcOffset from neighbors so getDateKey can group the photo in the correct working-timezone day", () => {
-    // 23:00 PST Feb 15 = 07:00 UTC Feb 16 = 12:30 IST Feb 16
-    // Without utcOffset on the dropped photo, getDateKey returns captureDate as-is ("2024-02-15")
-    // and the photo appears in the wrong day block.
     const before = makePhoto("b", { captureDate: "2024-02-15", captureTime: "21:00:00", utcOffset: "-08:00" });
     const after = makePhoto("a", { captureDate: "2024-02-16", captureTime: "01:00:00", utcOffset: "-08:00" });
     const dragging = [makePhoto("x")];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-02-16" } },
       null,
@@ -200,44 +233,127 @@ describe("computeInheritance — gap drop between two dated photos", () => {
       after,
     );
     // Midpoint UTC = Feb 16 05:00 → PST Feb 15 21:00 + 2h = Feb 15 23:00
-    expect(result.changes.get("x")?.captureDate).toBe("2024-02-15");
-    expect(result.changes.get("x")?.captureTime).toBe("23:00:00");
-    expect(result.changes.get("x")?.utcOffset).toBe("-08:00");
+    expect(changes.get("x")?.captureDate).toBe("2024-02-15");
+    expect(changes.get("x")?.captureTime).toBe("23:00:00");
+    expect(changes.get("x")?.utcOffset).toBe("-08:00");
   });
 
   it("interpolates GPS coordinates linearly", () => {
     const before = makePhoto("b", { gpsLat: 0, gpsLng: 0 });
     const after = makePhoto("a", { gpsLat: 2, gpsLng: 4 });
     const dragging = [makePhoto("x")];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null,
       before,
       after,
     );
-    expect(result.changes.get("x")?.gpsLat).toBeCloseTo(1);
-    expect(result.changes.get("x")?.gpsLng).toBeCloseTo(2);
+    expect(changes.get("x")?.gpsLat).toBeCloseTo(1);
+    expect(changes.get("x")?.gpsLng).toBeCloseTo(2);
+  });
+});
+
+describe("computeInheritance — gap adopt modes", () => {
+  const before = makePhoto("b", {
+    captureDate: "2024-03-15", captureTime: "10:00:00", utcOffset: "-08:00", timezone: "America/Los_Angeles",
+    gpsLat: 10, gpsLng: 20, cameraMake: "Nikon", cameraModel: "Z9",
+  });
+  const after = makePhoto("a", {
+    captureDate: "2024-03-15", captureTime: "12:00:00", utcOffset: "-08:00", timezone: "America/Los_Angeles",
+    gpsLat: 30, gpsLng: 40, cameraMake: "Canon", cameraModel: "R5",
+  });
+  const gapTarget = { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } } as const;
+
+  it("adopts the before neighbor's values verbatim when gapMode is 'before'", () => {
+    const changes = computeInheritance(
+      [makePhoto("x"), makePhoto("y")],
+      gapTarget,
+      null, before, after,
+      settingsWith({
+        timestamp: { gapMode: "before" },
+        location: { gapMode: "before" },
+        camera: { gapMode: "before" },
+      }),
+    );
+    for (const id of ["x", "y"]) {
+      expect(changes.get(id)?.captureDate).toBe("2024-03-15");
+      expect(changes.get(id)?.captureTime).toBe("10:00:00");
+      expect(changes.get(id)?.gpsLat).toBe(10);
+      expect(changes.get(id)?.gpsLng).toBe(20);
+      expect(changes.get(id)?.cameraMake).toBe("Nikon");
+    }
   });
 
-  it("returns cameraConflict when both neighbors have different camera data", () => {
-    const before = makePhoto("b", { cameraMake: "Nikon", cameraModel: "Z9", lens: "50mm" });
-    const after = makePhoto("a", { cameraMake: "Canon", cameraModel: "R5", lens: "85mm" });
-    const dragging = [makePhoto("x")];
-    const result = computeInheritance(
-      dragging,
-      { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
-      null,
-      before,
-      after,
+  it("adopts the after neighbor's values verbatim when gapMode is 'after'", () => {
+    const changes = computeInheritance(
+      [makePhoto("x")],
+      gapTarget,
+      null, before, after,
+      settingsWith({
+        timestamp: { gapMode: "after" },
+        location: { gapMode: "after" },
+        camera: { gapMode: "after" },
+      }),
     );
-    expect(result.cameraConflict).not.toBeNull();
-    expect(result.cameraConflict?.optionBefore?.cameraMake).toBe("Nikon");
-    expect(result.cameraConflict?.optionAfter?.cameraMake).toBe("Canon");
-    expect(result.cameraConflict?.draggingIds).toEqual(["x"]);
-    // Camera fields must NOT be in changes when there is a conflict
-    expect(result.changes.get("x")?.cameraMake).toBeUndefined();
-    expect(result.changes.get("x")?.cameraModel).toBeUndefined();
+    expect(changes.get("x")?.captureTime).toBe("12:00:00");
+    expect(changes.get("x")?.gpsLat).toBe(30);
+    expect(changes.get("x")?.cameraMake).toBe("Canon");
+  });
+
+  it("falls back to the other side when the chosen side has no data for a group", () => {
+    const bareBeforeNeighbor = makePhoto("b", { captureDate: "2024-03-15", captureTime: "10:00:00" });
+    const changes = computeInheritance(
+      [makePhoto("x")],
+      gapTarget,
+      null, bareBeforeNeighbor, after,
+      settingsWith({
+        location: { gapMode: "before" },
+        camera: { gapMode: "before" },
+      }),
+    );
+    // before has no GPS or camera data — the after neighbor's values are used
+    expect(changes.get("x")?.gpsLat).toBe(30);
+    expect(changes.get("x")?.cameraMake).toBe("Canon");
+  });
+
+  it("falls back to the sole neighbor at an edge-of-block gap", () => {
+    const changes = computeInheritance(
+      [makePhoto("x")],
+      { kind: "gap", gap: { beforeId: "b", afterId: null, dayKey: "2024-03-15" } },
+      null, before, null,
+      settingsWith({
+        timestamp: { gapMode: "after" },
+        camera: { gapMode: "after" },
+      }),
+    );
+    expect(changes.get("x")?.captureTime).toBe("10:00:00");
+    expect(changes.get("x")?.cameraMake).toBe("Nikon");
+  });
+
+  it("skips disabled groups on gap drops", () => {
+    const changes = computeInheritance(
+      [makePhoto("x")],
+      gapTarget,
+      null, before, after,
+      settingsWith({
+        timestamp: { enabled: false },
+        location: { enabled: false },
+        camera: { enabled: false },
+      }),
+    );
+    expect(changes.get("x")).toEqual({});
+  });
+
+  it("resolves a camera conflict silently with the chosen side (no more conflict prompt)", () => {
+    const changes = computeInheritance(
+      [makePhoto("x")],
+      gapTarget,
+      null, before, after,
+      settingsWith({ camera: { gapMode: "after" } }),
+    );
+    expect(changes.get("x")?.cameraMake).toBe("Canon");
+    expect(changes.get("x")?.cameraModel).toBe("R5");
   });
 });
 
@@ -245,15 +361,15 @@ describe("computeInheritance — gap at start of block (no before neighbor)", ()
   it("sets captureDate to dayKey and captureTime to first photo time minus 1 min", () => {
     const after = makePhoto("a", { captureTime: "10:00:00" });
     const dragging = [makePhoto("x")];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: null, afterId: "a", dayKey: "2024-03-15" } },
       null,
       null,
       after,
     );
-    expect(result.changes.get("x")?.captureDate).toBe("2024-03-15");
-    expect(result.changes.get("x")?.captureTime).toBe("09:59:00");
+    expect(changes.get("x")?.captureDate).toBe("2024-03-15");
+    expect(changes.get("x")?.captureTime).toBe("09:59:00");
   });
 });
 
@@ -261,30 +377,30 @@ describe("computeInheritance — gap at end of block (no after neighbor)", () =>
   it("sets captureDate to dayKey and captureTime to last photo time plus 1 min", () => {
     const before = makePhoto("b", { captureTime: "10:00:00" });
     const dragging = [makePhoto("x")];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: "b", afterId: null, dayKey: "2024-03-15" } },
       null,
       before,
       null,
     );
-    expect(result.changes.get("x")?.captureDate).toBe("2024-03-15");
-    expect(result.changes.get("x")?.captureTime).toBe("10:01:00");
+    expect(changes.get("x")?.captureDate).toBe("2024-03-15");
+    expect(changes.get("x")?.captureTime).toBe("10:01:00");
   });
 });
 
 describe("computeInheritance — gap drop with no neighbors", () => {
   it("uses the dayKey and sets captureTime to null when neither neighbor has a time", () => {
     const dragging = [makePhoto("x")];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: null, afterId: null, dayKey: "2024-03-15" } },
       null,
       null,
       null,
     );
-    expect(result.changes.get("x")?.captureDate).toBe("2024-03-15");
-    expect(result.changes.get("x")?.captureTime).toBeNull();
+    expect(changes.get("x")?.captureDate).toBe("2024-03-15");
+    expect(changes.get("x")?.captureTime).toBeNull();
   });
 });
 
@@ -293,7 +409,7 @@ describe("computeInheritance — multiple dragging photos in a gap", () => {
     const before = makePhoto("b", { captureDate: "2024-03-15", captureTime: "10:00:00" });
     const after = makePhoto("a", { captureDate: "2024-03-15", captureTime: "10:03:00" });
     const dragging = [makePhoto("x"), makePhoto("y"), makePhoto("z")];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null,
@@ -301,112 +417,99 @@ describe("computeInheritance — multiple dragging photos in a gap", () => {
       after,
     );
     // With 3 photos between 10:00 and 10:03 → interpolation at t=1/4, 2/4, 3/4
-    // x: 10:00 + 0.25 * 180s = 10:00:45
-    // y: 10:00 + 0.50 * 180s = 10:01:30
-    // z: 10:00 + 0.75 * 180s = 10:02:15
-    expect(result.changes.get("x")?.captureTime).toBe("10:00:45");
-    expect(result.changes.get("y")?.captureTime).toBe("10:01:30");
-    expect(result.changes.get("z")?.captureTime).toBe("10:02:15");
+    expect(changes.get("x")?.captureTime).toBe("10:00:45");
+    expect(changes.get("y")?.captureTime).toBe("10:01:30");
+    expect(changes.get("z")?.captureTime).toBe("10:02:15");
   });
 
   it("staggers end-of-block times: each dragging photo is 1 min later than the previous", () => {
     const before = makePhoto("b", { captureTime: "10:00:00" });
     const dragging = [makePhoto("x"), makePhoto("y")];
-    const result = computeInheritance(
+    const changes = computeInheritance(
       dragging,
       { kind: "gap", gap: { beforeId: "b", afterId: null, dayKey: "2024-03-15" } },
       null,
       before,
       null,
     );
-    expect(result.changes.get("x")?.captureTime).toBe("10:01:00");
-    expect(result.changes.get("y")?.captureTime).toBe("10:02:00");
+    expect(changes.get("x")?.captureTime).toBe("10:01:00");
+    expect(changes.get("y")?.captureTime).toBe("10:02:00");
   });
 });
 
-describe("computeInheritance — gap drop camera conflict detection", () => {
+describe("computeInheritance — gap drop camera inheritance (default settings)", () => {
   it("inherits camera data when both neighbors have the same camera data", () => {
     const cam = { cameraMake: "Nikon", cameraModel: "Z9", lens: "50mm" };
     const before = makePhoto("b", { captureTime: "10:00:00", ...cam });
     const after = makePhoto("a", { captureTime: "12:00:00", ...cam });
-    const dragging = [makePhoto("x")];
-    const result = computeInheritance(
-      dragging,
+    const changes = computeInheritance(
+      [makePhoto("x")],
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null,
       before,
       after,
     );
-    expect(result.cameraConflict).toBeNull();
-    expect(result.changes.get("x")?.cameraMake).toBe("Nikon");
-    expect(result.changes.get("x")?.cameraModel).toBe("Z9");
+    expect(changes.get("x")?.cameraMake).toBe("Nikon");
+    expect(changes.get("x")?.cameraModel).toBe("Z9");
   });
 
   it("inherits before-neighbor camera data when after has none", () => {
     const before = makePhoto("b", { cameraMake: "Leica", cameraModel: "M6" });
     const after = makePhoto("a", { captureTime: "12:00:00" });
-    const dragging = [makePhoto("x")];
-    const result = computeInheritance(
-      dragging,
+    const changes = computeInheritance(
+      [makePhoto("x")],
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null,
       before,
       after,
     );
-    expect(result.cameraConflict).toBeNull();
-    expect(result.changes.get("x")?.cameraMake).toBe("Leica");
-    expect(result.changes.get("x")?.cameraModel).toBe("M6");
+    expect(changes.get("x")?.cameraMake).toBe("Leica");
+    expect(changes.get("x")?.cameraModel).toBe("M6");
   });
 
   it("inherits after-neighbor camera data when before has none", () => {
     const before = makePhoto("b", { captureTime: "10:00:00" });
     const after = makePhoto("a", { cameraMake: "Sony", cameraModel: "A7 IV" });
-    const dragging = [makePhoto("x")];
-    const result = computeInheritance(
-      dragging,
+    const changes = computeInheritance(
+      [makePhoto("x")],
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null,
       before,
       after,
     );
-    expect(result.cameraConflict).toBeNull();
-    expect(result.changes.get("x")?.cameraMake).toBe("Sony");
-    expect(result.changes.get("x")?.cameraModel).toBe("A7 IV");
+    expect(changes.get("x")?.cameraMake).toBe("Sony");
+    expect(changes.get("x")?.cameraModel).toBe("A7 IV");
   });
 
   it("no camera fields when neither neighbor has camera data", () => {
     const before = makePhoto("b", { captureTime: "10:00:00" });
     const after = makePhoto("a", { captureTime: "12:00:00" });
-    const dragging = [makePhoto("x")];
-    const result = computeInheritance(
-      dragging,
+    const changes = computeInheritance(
+      [makePhoto("x")],
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null,
       before,
       after,
     );
-    expect(result.cameraConflict).toBeNull();
-    expect(result.changes.get("x")?.cameraMake).toBeUndefined();
-    expect(result.changes.get("x")?.cameraModel).toBeUndefined();
+    expect(changes.get("x")?.cameraMake).toBeUndefined();
+    expect(changes.get("x")?.cameraModel).toBeUndefined();
   });
 
-  it("sets cameraConflict with both options when neighbors differ", () => {
+  it("defaults to the before (left) camera when neighbors differ", () => {
     const before = makePhoto("b", { cameraMake: "Canon", filmVendor: "Kodak", filmType: "Portra 400" });
     const after = makePhoto("a", { cameraMake: "Fujifilm", filmVendor: "Fujifilm", filmType: "Velvia 50" });
-    const dragging = [makePhoto("x"), makePhoto("y")];
-    const result = computeInheritance(
-      dragging,
+    const changes = computeInheritance(
+      [makePhoto("x"), makePhoto("y")],
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null,
       before,
       after,
     );
-    expect(result.cameraConflict).not.toBeNull();
-    expect(result.cameraConflict?.optionBefore?.cameraMake).toBe("Canon");
-    expect(result.cameraConflict?.optionAfter?.cameraMake).toBe("Fujifilm");
-    expect(result.cameraConflict?.draggingIds).toEqual(["x", "y"]);
-    expect(result.changes.get("x")?.cameraMake).toBeUndefined();
-    expect(result.changes.get("y")?.cameraMake).toBeUndefined();
+    for (const id of ["x", "y"]) {
+      expect(changes.get(id)?.cameraMake).toBe("Canon");
+      expect(changes.get(id)?.filmVendor).toBe("Kodak");
+      expect(changes.get(id)?.filmType).toBe("Portra 400");
+    }
   });
 });
 
@@ -414,93 +517,98 @@ describe("computeInheritance — gap drop timezone resolution", () => {
   it("inherits timezone when both neighbors share the same timezone", () => {
     const before = makePhoto("b", { captureTime: "10:00:00", timezone: "America/New_York" });
     const after = makePhoto("a", { captureTime: "12:00:00", timezone: "America/New_York" });
-    const dragging = [makePhoto("x")];
-    const result = computeInheritance(
-      dragging,
+    const changes = computeInheritance(
+      [makePhoto("x")],
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null, before, after,
     );
-    expect(result.changes.get("x")?.timezone).toBe("America/New_York");
+    expect(changes.get("x")?.timezone).toBe("America/New_York");
   });
 
   it("uses before (left) timezone when both neighbors have different timezones", () => {
     const before = makePhoto("b", { captureTime: "10:00:00", timezone: "America/New_York" });
     const after = makePhoto("a", { captureTime: "12:00:00", timezone: "Europe/Paris" });
-    const dragging = [makePhoto("x")];
-    const result = computeInheritance(
-      dragging,
+    const changes = computeInheritance(
+      [makePhoto("x")],
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null, before, after,
     );
-    expect(result.changes.get("x")?.timezone).toBe("America/New_York");
+    expect(changes.get("x")?.timezone).toBe("America/New_York");
   });
 
   it("adopts after-neighbor timezone when only after has one", () => {
     const before = makePhoto("b", { captureTime: "10:00:00" });
     const after = makePhoto("a", { captureTime: "12:00:00", timezone: "Asia/Tokyo" });
-    const dragging = [makePhoto("x")];
-    const result = computeInheritance(
-      dragging,
+    const changes = computeInheritance(
+      [makePhoto("x")],
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null, before, after,
     );
-    expect(result.changes.get("x")?.timezone).toBe("Asia/Tokyo");
+    expect(changes.get("x")?.timezone).toBe("Asia/Tokyo");
   });
 
   it("omits timezone from changes when neither neighbor has one", () => {
     const before = makePhoto("b", { captureTime: "10:00:00" });
     const after = makePhoto("a", { captureTime: "12:00:00" });
-    const dragging = [makePhoto("x")];
-    const result = computeInheritance(
-      dragging,
+    const changes = computeInheritance(
+      [makePhoto("x")],
       { kind: "gap", gap: { beforeId: "b", afterId: "a", dayKey: "2024-03-15" } },
       null, before, after,
     );
-    expect(result.changes.get("x")?.timezone).toBeUndefined();
+    expect(changes.get("x")?.timezone).toBeUndefined();
   });
 
   it("adopts the sole neighbor timezone for a start-of-block gap", () => {
     const after = makePhoto("a", { captureTime: "10:00:00", timezone: "Pacific/Auckland" });
-    const dragging = [makePhoto("x")];
-    const result = computeInheritance(
-      dragging,
+    const changes = computeInheritance(
+      [makePhoto("x")],
       { kind: "gap", gap: { beforeId: null, afterId: "a", dayKey: "2024-03-15" } },
       null, null, after,
     );
-    expect(result.changes.get("x")?.timezone).toBe("Pacific/Auckland");
+    expect(changes.get("x")?.timezone).toBe("Pacific/Auckland");
   });
 
   it("adopts the sole neighbor timezone for an end-of-block gap", () => {
     const before = makePhoto("b", { captureTime: "10:00:00", timezone: "America/Chicago" });
-    const dragging = [makePhoto("x")];
-    const result = computeInheritance(
-      dragging,
+    const changes = computeInheritance(
+      [makePhoto("x")],
       { kind: "gap", gap: { beforeId: "b", afterId: null, dayKey: "2024-03-15" } },
       null, before, null,
     );
-    expect(result.changes.get("x")?.timezone).toBe("America/Chicago");
+    expect(changes.get("x")?.timezone).toBe("America/Chicago");
   });
 });
 
-describe("cameraDataEqual", () => {
-  it("returns true when both are null", () => {
-    expect(cameraDataEqual(null, null)).toBe(true);
+describe("parseDropSettings", () => {
+  it("returns defaults for null, empty, or malformed input", () => {
+    expect(parseDropSettings(null)).toEqual(DEFAULT_DROP_SETTINGS);
+    expect(parseDropSettings("")).toEqual(DEFAULT_DROP_SETTINGS);
+    expect(parseDropSettings("not json")).toEqual(DEFAULT_DROP_SETTINGS);
+    expect(parseDropSettings("[1,2]")).toEqual(DEFAULT_DROP_SETTINGS);
   });
 
-  it("returns false when one is null", () => {
-    expect(cameraDataEqual({ cameraMake: "Canon", cameraModel: null, lens: null, filmVendor: null, filmType: null }, null)).toBe(false);
-    expect(cameraDataEqual(null, { cameraMake: "Canon", cameraModel: null, lens: null, filmVendor: null, filmType: null })).toBe(false);
+  it("round-trips a settings object", () => {
+    const settings: DropSettings = {
+      timestamp: { enabled: false, gapMode: "before" },
+      location: { enabled: true, gapMode: "after" },
+      camera: { enabled: false, gapMode: "after" },
+    };
+    expect(parseDropSettings(JSON.stringify(settings))).toEqual(settings);
   });
 
-  it("returns true when all fields match", () => {
-    const data = { cameraMake: "Nikon", cameraModel: "Z9", lens: "50mm", filmVendor: null, filmType: null };
-    expect(cameraDataEqual(data, { ...data })).toBe(true);
+  it("fills in missing groups with defaults", () => {
+    const parsed = parseDropSettings(JSON.stringify({ timestamp: { enabled: false } }));
+    expect(parsed.timestamp.enabled).toBe(false);
+    expect(parsed.timestamp.gapMode).toBe("interpolate");
+    expect(parsed.location).toEqual(DEFAULT_DROP_SETTINGS.location);
+    expect(parsed.camera).toEqual(DEFAULT_DROP_SETTINGS.camera);
   });
 
-  it("returns false when fields differ", () => {
-    const a = { cameraMake: "Nikon", cameraModel: "Z9", lens: null, filmVendor: null, filmType: null };
-    const b = { cameraMake: "Canon", cameraModel: "R5", lens: null, filmVendor: null, filmType: null };
-    expect(cameraDataEqual(a, b)).toBe(false);
+  it("rejects an interpolate gapMode for the camera group", () => {
+    const parsed = parseDropSettings(
+      JSON.stringify({ camera: { enabled: true, gapMode: "interpolate" } }),
+    );
+    expect(parsed.camera.gapMode).toBe("before");
   });
 });
 

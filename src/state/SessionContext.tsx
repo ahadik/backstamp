@@ -56,7 +56,7 @@ type SessionAction =
   | { type: "SELECT_SINGLE"; id: string }
   | { type: "TOGGLE_SELECT"; id: string }
   | { type: "SELECT_RANGE"; fromId: string; toId: string; orderedIds: string[] }
-  | { type: "SELECT_ALL" }
+  | { type: "SELECT_ALL"; ids?: string[] }
   | { type: "DESELECT_ALL" }
   | { type: "SELECT_GPX"; id: string }
   | { type: "SET_PENDING"; ids: string[]; changes: Partial<Metadata> }
@@ -161,7 +161,13 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     }
 
     case "SELECT_ALL":
-      return { ...state, selectedIds: new Set(state.photos.map((p) => p.id)), selectedGpxId: null };
+      // With ids, selects exactly that set — used when filters limit the
+      // visible photos so hidden ones are never selected invisibly.
+      return {
+        ...state,
+        selectedIds: new Set(action.ids ?? state.photos.map((p) => p.id)),
+        selectedGpxId: null,
+      };
 
     case "DESELECT_ALL":
       return { ...state, selectedIds: new Set() };

@@ -28,19 +28,30 @@ const RAW_EXTENSIONS = new Set([
 
 const GPX_EXTENSIONS = new Set(["gpx"]);
 
-/** Overlay wording based on what's being dragged: photos, GPX tracks, or a mix. */
+/** Overlay wording based on what's being dragged: photos, GPX tracks, folders, or a mix. */
 function dropOverlayLabel(paths: string[]): string {
   let hasPhoto = false;
   let hasGpx = false;
+  let hasFolder = false;
   for (const path of paths) {
-    const ext = path.split(".").pop()?.toLowerCase() ?? "";
+    const name = path.split("/").pop() ?? "";
+    const dotIdx = name.lastIndexOf(".");
+    // No extension on the final path segment — almost certainly a folder.
+    if (dotIdx <= 0) {
+      hasFolder = true;
+      continue;
+    }
+    const ext = name.slice(dotIdx + 1).toLowerCase();
     if (SUPPORTED_EXTENSIONS.has(ext) || ext === "xmp") hasPhoto = true;
     else if (GPX_EXTENSIONS.has(ext)) hasGpx = true;
   }
-  if (hasGpx && !hasPhoto) {
+  if (hasFolder && !hasPhoto && !hasGpx) {
+    return paths.length === 1 ? "Drop folder to import" : "Drop folders to import";
+  }
+  if (hasGpx && !hasPhoto && !hasFolder) {
     return paths.length === 1 ? "Drop GPX file to import" : "Drop GPX files to import";
   }
-  if (hasPhoto && !hasGpx) return "Drop photos to import";
+  if (hasPhoto && !hasGpx && !hasFolder) return "Drop photos to import";
   return "Drop files to import";
 }
 
@@ -300,7 +311,17 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
   const handleGpxDropRef = useRef(handleGpxDrop);
   handleGpxDropRef.current = handleGpxDrop;
 
-  const handleFinderDrop = useCallback((paths: string[]) => {
+  const handleFinderDrop = useCallback(async (rawInputPaths: string[]) => {
+    // Expand any dropped/selected directories into the importable files they
+    // contain; plain file paths pass through unchanged.
+    let paths: string[];
+    try {
+      paths = await tauriCommands.expandImportPaths(rawInputPaths);
+    } catch (err) {
+      reportError("Failed to read dropped folders", err);
+      return;
+    }
+
     const rawPaths: string[] = [];
     const regularPhotoPaths: string[] = [];
     const xmpPaths: string[] = [];
@@ -404,7 +425,8 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
           setDropOverlay({ label: dropOverlayLabel(event.payload.paths) });
         } else if (type === "drop" && event.payload.paths.length > 0) {
           setDropOverlay(null);
-          handleFinderDropRef.current(event.payload.paths);
+          handleFinderDropRef.current(event.payload.paths)
+            .catch((err) => reportError("Failed to import dropped files", err));
         } else if (type === "leave") {
           setDropOverlay(null);
         }
@@ -422,7 +444,12 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
 
   return (
     <div className={styles.photoManager}>
-      <FloatingControls />
+      <FloatingControls
+        onImportPaths={(paths) => {
+          handleFinderDropRef.current(paths)
+            .catch((err) => reportError("Failed to import selected files", err));
+        }}
+      />
       {!dropOverlay && <PhotoGrid />}
       <DropImportOverlay isVisible={dropOverlay !== null} label={dropOverlay?.label ?? ""} />
       <ImportModal

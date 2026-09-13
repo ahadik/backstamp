@@ -87,6 +87,9 @@ export const tauriCommands = {
   importPhotos: (paths: string[], sidecarMap: Record<string, string> = {}) =>
     invoke<void>("import_photos", { paths, sidecarMap }),
 
+  expandImportPaths: (paths: string[]) =>
+    invoke<string[]>("expand_import_paths", { paths }),
+
   findXmpSidecars: (rawPaths: string[]) =>
     invoke<SidecarSearchResult>("find_xmp_sidecars", { rawPaths }),
 
