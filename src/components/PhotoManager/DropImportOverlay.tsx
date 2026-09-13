@@ -2,13 +2,14 @@ import styles from "./DropImportOverlay.module.css";
 
 interface Props {
   isVisible: boolean;
+  label: string;
 }
 
-export function DropImportOverlay({ isVisible }: Props) {
+export function DropImportOverlay({ isVisible, label }: Props) {
   if (!isVisible) return null;
   return (
     <div className={styles.overlay}>
-      <span className={styles.label}>Drop photos to import</span>
+      <span className={styles.label}>{label}</span>
     </div>
   );
 }

@@ -77,6 +77,36 @@ function fitToGpxTrack(map: mapboxgl.Map, gpx: GpxFile) {
   map.fitBounds(bounds, { padding: 60, maxZoom: 14 });
 }
 
+// Grayscale terrain relief so mountains and coastlines read on the flat
+// monotone base styles. Colors come from the neutral ramp per theme.
+function setupHillshade(map: mapboxgl.Map) {
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  map.addSource("mapbox-dem", {
+    type: "raster-dem",
+    url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+    tileSize: 512,
+    maxzoom: 14,
+  });
+  // Slot the relief beneath water/roads/labels; light-v11 and dark-v11 both
+  // have these layers, but fall back gracefully if a style rename drops one.
+  const beforeId = ["land-structure-polygon", "waterway", "water"].find((id) =>
+    map.getLayer(id)
+  );
+  map.addLayer(
+    {
+      id: "hillshade",
+      type: "hillshade",
+      source: "mapbox-dem",
+      paint: {
+        "hillshade-exaggeration": dark ? 0.4 : 0.25,
+        "hillshade-shadow-color": dark ? palette.surfaceNeutral[7] : palette.surfaceNeutral[4],
+        "hillshade-highlight-color": dark ? palette.surfaceNeutral[6] : palette.white,
+      },
+    },
+    beforeId
+  );
+}
+
 function setupSources(map: mapboxgl.Map) {
   map.addSource("photos", {
     type: "geojson",
@@ -244,6 +274,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     let didInitialFit = false;
     map.current.on("style.load", () => {
       map.current!.resize();
+      setupHillshade(map.current!);
       setupSources(map.current!);
       (map.current!.getSource("photos") as mapboxgl.GeoJSONSource).setData(
         buildPhotoGeoJSON(allPhotosRef.current)

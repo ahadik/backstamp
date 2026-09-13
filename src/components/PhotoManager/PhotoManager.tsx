@@ -28,6 +28,22 @@ const RAW_EXTENSIONS = new Set([
 
 const GPX_EXTENSIONS = new Set(["gpx"]);
 
+/** Overlay wording based on what's being dragged: photos, GPX tracks, or a mix. */
+function dropOverlayLabel(paths: string[]): string {
+  let hasPhoto = false;
+  let hasGpx = false;
+  for (const path of paths) {
+    const ext = path.split(".").pop()?.toLowerCase() ?? "";
+    if (SUPPORTED_EXTENSIONS.has(ext) || ext === "xmp") hasPhoto = true;
+    else if (GPX_EXTENSIONS.has(ext)) hasGpx = true;
+  }
+  if (hasGpx && !hasPhoto) {
+    return paths.length === 1 ? "Drop GPX file to import" : "Drop GPX files to import";
+  }
+  if (hasPhoto && !hasGpx) return "Drop photos to import";
+  return "Drop files to import";
+}
+
 interface RawPhotoData {
   id: string;
   filePath: string;
@@ -142,7 +158,7 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
   const { dispatch: corpusDispatch } = useCorpus();
   const { state: uiState } = useUI();
 
-  const [showDropOverlay, setShowDropOverlay] = useState(false);
+  const [dropOverlay, setDropOverlay] = useState<{ label: string } | null>(null);
   const [showGpxKeyPrompt, setShowGpxKeyPrompt] = useState(false);
   const [pendingSidecarSearch, setPendingSidecarSearch] = useState<{
     rawsWithoutXmp: string[];
@@ -385,12 +401,12 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
       const fn = await webview.onDragDropEvent((event) => {
         const { type } = event.payload;
         if (type === "enter" && event.payload.paths.length > 0) {
-          setShowDropOverlay(true);
+          setDropOverlay({ label: dropOverlayLabel(event.payload.paths) });
         } else if (type === "drop" && event.payload.paths.length > 0) {
-          setShowDropOverlay(false);
+          setDropOverlay(null);
           handleFinderDropRef.current(event.payload.paths);
         } else if (type === "leave") {
-          setShowDropOverlay(false);
+          setDropOverlay(null);
         }
       });
       if (cancelled) fn();
@@ -407,8 +423,8 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
   return (
     <div className={styles.photoManager}>
       <FloatingControls />
-      {!showDropOverlay && <PhotoGrid />}
-      <DropImportOverlay isVisible={showDropOverlay} />
+      {!dropOverlay && <PhotoGrid />}
+      <DropImportOverlay isVisible={dropOverlay !== null} label={dropOverlay?.label ?? ""} />
       <ImportModal
         isOpen={importState.isOpen}
         done={importState.done}
