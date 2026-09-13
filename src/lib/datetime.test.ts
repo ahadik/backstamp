@@ -12,6 +12,7 @@ import {
   formatUtcOffset,
   offsetToMinutes,
   wallClockInZone,
+  wallClockFromUtcSeconds,
 } from "./datetime";
 
 // ── utcOffsetFor ──────────────────────────────────────────────────────────────
@@ -349,5 +350,43 @@ describe("wallClockInZone", () => {
 
   it("returns null for an unparseable offset", () => {
     expect(wallClockInZone("2026-08-03", "10:02:00", "PST", "America/Anchorage")).toBeNull();
+  });
+});
+
+describe("wallClockFromUtcSeconds", () => {
+  it("standard time (PST, UTC-8)", () => {
+    // 2024-01-15T20:00:00Z = noon PST
+    expect(wallClockFromUtcSeconds(1705348800, "America/Los_Angeles")).toEqual({
+      date: "2024-01-15",
+      time: "12:00:00",
+      utcOffset: "-08:00",
+    });
+  });
+
+  it("daylight time (PDT, UTC-7)", () => {
+    // 2024-07-15T19:00:00Z = noon PDT
+    expect(wallClockFromUtcSeconds(1721070000, "America/Los_Angeles")).toEqual({
+      date: "2024-07-15",
+      time: "12:00:00",
+      utcOffset: "-07:00",
+    });
+  });
+
+  it("rolls the date across midnight in the target zone", () => {
+    // 2024-01-15T20:00:00Z = 05:00 next day in Tokyo
+    expect(wallClockFromUtcSeconds(1705348800, "Asia/Tokyo")).toEqual({
+      date: "2024-01-16",
+      time: "05:00:00",
+      utcOffset: "+09:00",
+    });
+  });
+
+  it("round-trips with toUtcSeconds", () => {
+    const wall = wallClockFromUtcSeconds(1705348800, "Europe/Paris")!;
+    expect(toUtcSeconds(wall.date, wall.time, "Europe/Paris")).toBe(1705348800);
+  });
+
+  it("returns null for an unknown zone", () => {
+    expect(wallClockFromUtcSeconds(1705348800, "Not/AZone")).toBeNull();
   });
 });
