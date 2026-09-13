@@ -47,7 +47,6 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
   const [mapError, setMapError] = useState<string | null>(null);
   const [gpxLocateDialog, setGpxLocateDialog] = useState<{
     matchCount: number;
-    totalCount: number;
     tracks: TrackPoint[][];
   } | null>(null);
 
@@ -504,8 +503,8 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                       : undefined
                   }
                   onClick={() => {
-                    const { matching, total } = countMatches(selectedPhotos, gpxTracks);
-                    setGpxLocateDialog({ matchCount: matching, totalCount: total, tracks: gpxTracks });
+                    const { matching } = countMatches(selectedPhotos, gpxTracks);
+                    setGpxLocateDialog({ matchCount: matching, tracks: gpxTracks });
                   }}
                 >
                   Locate Photos on GPX
@@ -516,7 +515,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
             {gpxLocateDialog && (
               <ConfirmDialog
                 title="Auto-Tag from GPX?"
-                message={`${gpxLocateDialog.matchCount} out of ${gpxLocateDialog.totalCount} selected photo${gpxLocateDialog.totalCount === 1 ? "" : "s"} have timestamps that overlap with imported GPX tracks. Auto-tag their locations?`}
+                message={`${gpxLocateDialog.matchCount} selected photo${gpxLocateDialog.matchCount === 1 ? " has a timestamp that overlaps" : "s have timestamps that overlap"} with imported GPX tracks. Auto-tag ${gpxLocateDialog.matchCount === 1 ? "its location" : "their locations"}?`}
                 confirmLabel="Yes"
                 cancelLabel="No"
                 onConfirm={() => {
