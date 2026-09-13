@@ -36,6 +36,12 @@ describe("tauriCommands", () => {
     });
   });
 
+  it("importCancel invokes import_cancel with no args", async () => {
+    mockInvoke.mockResolvedValue(undefined);
+    await tauriCommands.importCancel();
+    expect(mockInvoke).toHaveBeenCalledWith("import_cancel");
+  });
+
   it("removePhotos passes ids array", async () => {
     mockInvoke.mockResolvedValue(undefined);
     await tauriCommands.removePhotos(["id-1", "id-2"]);

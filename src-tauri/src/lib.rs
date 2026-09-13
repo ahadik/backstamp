@@ -19,6 +19,7 @@ pub struct AppState {
     pub exiftool: Arc<Mutex<ExiftoolProcess>>,
     pub thumbnails_dir: PathBuf,
     pub apply_cancel_flag: Arc<AtomicBool>,
+    pub import_cancel_flag: Arc<AtomicBool>,
     pub context_menu_path: Arc<Mutex<Option<String>>>,
 }
 
@@ -46,6 +47,7 @@ fn init_app_state(app: &tauri::App) -> Result<AppState, String> {
         exiftool: Arc::new(Mutex::new(exiftool)),
         thumbnails_dir,
         apply_cancel_flag: Arc::new(AtomicBool::new(false)),
+        import_cancel_flag: Arc::new(AtomicBool::new(false)),
         context_menu_path: Arc::new(Mutex::new(None)),
     })
 }
@@ -105,6 +107,7 @@ pub fn run() {
             session_commands::load_session,
             session_commands::clear_session,
             photos::import_photos,
+            photos::import_cancel,
             photos::expand_import_paths,
             photos::find_xmp_sidecars,
             photos::remove_photos,

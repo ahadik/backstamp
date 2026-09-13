@@ -355,7 +355,7 @@ backstamp/
 │   ├── components/
 │   │   ├── TopBar/                         # Apply, Roll Back, Reset buttons + photo count
 │   │   ├── ApplyModal/                     # Two-phase apply progress overlay (applying → undoing)
-│   │   ├── ImportModal/                    # Import progress overlay with error list
+│   │   ├── ImportModal/                    # Import progress overlay with cancel button and error list
 │   │   ├── SettingsModal/                  # API key management (Mapbox, Google Maps, Anthropic)
 │   │   ├── common/
 │   │   │   ├── CameraConflictDialog/       # Gap-drop camera data conflict resolution
@@ -407,7 +407,7 @@ backstamp/
     │   └── import_integration.rs           # Integration tests (DB schema, path key stability)
     └── src/
         ├── commands/                       # Tauri IPC handlers
-        │   ├── photos.rs                   # import_photos, find_xmp_sidecars, remove_photos, reorder_photos
+        │   ├── photos.rs                   # import_photos, import_cancel, find_xmp_sidecars, remove_photos, reorder_photos
         │   ├── session.rs                  # load_session, clear_session
         │   ├── metadata.rs                 # apply_changes, apply_cancel, rollback, reset_photos, set/clear_pending_changes
         │   ├── thumbnails.rs               # get_thumbnail
