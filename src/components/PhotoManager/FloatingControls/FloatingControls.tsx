@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { tauriCommands } from "../../../lib/tauri";
+import { reportError } from "../../../lib/errors";
 import { useUI } from "../../../state/UIContext";
 import { useSession } from "../../../state/SessionContext";
 import { WORKING_TIMEZONES } from "../../../lib/timezones";
@@ -33,7 +34,8 @@ export function FloatingControls() {
     if (!selected) return;
     const paths = Array.isArray(selected) ? selected : [selected];
     if (paths.length === 0) return;
-    tauriCommands.importPhotos(paths).catch((err) => console.error("[importPhotos]", err));
+    tauriCommands.importPhotos(paths)
+      .catch((err) => reportError("Failed to import photos", err));
   }
 
   async function handleRemoveSelected() {
@@ -41,7 +43,7 @@ export function FloatingControls() {
     if (ids.length === 0) return;
     await tauriCommands
       .removePhotos(ids)
-      .catch((err) => console.error("[removePhotos]", err));
+      .catch((err) => reportError("Failed to remove photos", err));
     sessionDispatch({ type: "REMOVE_PHOTOS", ids });
   }
 

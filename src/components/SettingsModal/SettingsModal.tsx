@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useUI } from "../../state/UIContext";
 import { tauriCommands } from "../../lib/tauri";
+import { reportError } from "../../lib/errors";
 import { Modal } from "../common/Modal/Modal";
 import styles from "./SettingsModal.module.css";
 
@@ -73,7 +74,8 @@ function KeyField({
     const trimmed = value.trim();
     if (trimmed) {
       onSaved(trimmed);
-      tauriCommands.setApiKey(settingKey, trimmed).catch(console.error);
+      tauriCommands.setApiKey(settingKey, trimmed)
+        .catch((err) => reportError("Failed to save the API key", err));
     } else {
       // User cleared the field — revert display without removing the saved key
       setValue(savedValue ?? "");
@@ -82,7 +84,12 @@ function KeyField({
   }
 
   async function handleRemove() {
-    await tauriCommands.deleteApiKey(settingKey);
+    try {
+      await tauriCommands.deleteApiKey(settingKey);
+    } catch (err) {
+      reportError("Failed to remove the API key", err);
+      return;
+    }
     setValue("");
     setIsDirty(false);
     setTestState({ kind: "idle" });

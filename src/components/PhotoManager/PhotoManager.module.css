@@ -1,3 +1,22 @@
+.gpxPreviewImage {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  object-fit: cover;
+  border-radius: var(--radius-md, 6px);
+  background: var(--color-bg);
+  margin-bottom: var(--space-3);
+}
+
+.gpxPreviewLoading {
+  animation: gpxPreviewPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes gpxPreviewPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .photoManager {
   position: absolute;
   top: 0;

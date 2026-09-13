@@ -1,4 +1,4 @@
-import { deriveFieldValue } from "./inspectorUtils";
+import { deriveFieldValue, deriveStrictFieldValue } from "./inspectorUtils";
 import type { Photo, Metadata } from "../state/SessionContext";
 
 const nullMeta: Metadata = {
@@ -127,5 +127,38 @@ describe("deriveFieldValue", () => {
       makePhoto("b", { gpsLat: 0 }),
     ];
     expect(deriveFieldValue(photos, (m) => m.gpsLat)).toBe(0);
+  });
+});
+
+describe("deriveStrictFieldValue", () => {
+  it("returns null for an empty selection", () => {
+    expect(deriveStrictFieldValue([], (m) => m.timezone)).toBeNull();
+  });
+
+  it("returns null when all photos have null for the field", () => {
+    const photos = [makePhoto("a"), makePhoto("b")];
+    expect(deriveStrictFieldValue(photos, (m) => m.timezone)).toBeNull();
+  });
+
+  it("returns the shared value when all photos agree", () => {
+    const photos = [
+      makePhoto("a", { timezone: "America/Denver" }),
+      makePhoto("b", { timezone: "America/Denver" }),
+    ];
+    expect(deriveStrictFieldValue(photos, (m) => m.timezone)).toBe("America/Denver");
+  });
+
+  it("returns multiple for two distinct values", () => {
+    const photos = [
+      makePhoto("a", { timezone: "America/Denver" }),
+      makePhoto("b", { timezone: "America/New_York" }),
+    ];
+    expect(deriveStrictFieldValue(photos, (m) => m.timezone)).toBe("multiple");
+  });
+
+  it("returns multiple for a mix of set and unset, unlike deriveFieldValue", () => {
+    const photos = [makePhoto("a", { timezone: "America/Denver" }), makePhoto("b")];
+    expect(deriveStrictFieldValue(photos, (m) => m.timezone)).toBe("multiple");
+    expect(deriveFieldValue(photos, (m) => m.timezone)).toBe("America/Denver");
   });
 });

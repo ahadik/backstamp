@@ -59,6 +59,38 @@ export function toUtcSeconds(
   return dt ? Math.round(dt.toSeconds()) : null;
 }
 
+/** Minutes east of UTC for a stored "±HH:MM" offset, null if unrecognised. */
+export function offsetToMinutes(utcOffset: string): number | null {
+  const m = utcOffset.match(/^([+-])(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  const sign = m[1] === "-" ? -1 : 1;
+  return sign * (parseInt(m[2], 10) * 60 + parseInt(m[3], 10));
+}
+
+/** Render a stored "±HH:MM" offset as "UTC−8" / "UTC+5:30", null if unrecognised. */
+export function formatUtcOffset(utcOffset: string): string | null {
+  const minutes = offsetToMinutes(utcOffset);
+  return minutes === null ? null : formatOffsetLabel(minutes);
+}
+
+/**
+ * Re-express a wall-clock time in `zone` while preserving the instant it names
+ * under `utcOffset`. This is the "adjust clock time" half of a timezone change:
+ * the moment of capture stays fixed and the displayed time moves.
+ */
+export function wallClockInZone(
+  date: string,
+  time: string,
+  utcOffset: string,
+  zone: string
+): { date: string; time: string } | null {
+  const millis = instantFromStoredOffset(date, time, utcOffset);
+  if (millis === null) return null;
+  const dt = DateTime.fromMillis(millis, { zone });
+  if (!dt.isValid) return null;
+  return { date: dt.toFormat("yyyy-MM-dd"), time: dt.toFormat("HH:mm:ss") };
+}
+
 /** Milliseconds for a stored date + time + frozen offset, as written to EXIF. */
 export function instantFromStoredOffset(
   date: string | null,
@@ -137,6 +169,51 @@ function formatOffsetLabel(offsetMinutes: number): string {
 }
 
 /**
+ * Session-lifetime caches behind resolveZoneOffsets, which runs on every
+ * keystroke of the timezone search across hundreds of zones and every distinct
+ * capture timestamp in the selection. Both cached values are pure functions of
+ * their keys, and typing only narrows the zone list while the selection stays
+ * fixed, so after the first pass a keystroke is almost entirely cache hits.
+ *
+ * The abbreviation is the expensive one: `offsetNameShort` makes luxon
+ * construct a fresh Intl.DateTimeFormat per call — around a millisecond each.
+ * It is keyed per (zone, offset) because the abbreviation is fully determined
+ * by the zone and which offset variant is in effect.
+ */
+const zoneOffsetCache = new Map<string, number | null>();
+const zoneAbbrCache = new Map<string, string | null>();
+
+/** Offset in minutes for a wall-clock timestamp in `zone`, null if invalid. */
+function cachedOffset(zone: string, date: string, time: string | null): number | null {
+  const key = `${zone}|${date}T${time ?? ""}`;
+  let offset = zoneOffsetCache.get(key);
+  if (offset === undefined) {
+    const dt = zonedInstant(date, time, zone);
+    offset = dt ? dt.offset : null;
+    zoneOffsetCache.set(key, offset);
+  }
+  return offset;
+}
+
+function cachedAbbr(
+  zone: string,
+  offsetMinutes: number,
+  date: string,
+  time: string | null
+): string | null {
+  const key = `${zone}|${offsetMinutes}`;
+  let abbr = zoneAbbrCache.get(key);
+  if (abbr === undefined) {
+    const raw = zonedInstant(date, time, zone)?.offsetNameShort ?? "";
+    // ICU falls back to "GMT+9" for zones without a real abbreviation;
+    // that would just duplicate the offset we already render.
+    abbr = /^(GMT|UTC)/.test(raw) ? null : raw;
+    zoneAbbrCache.set(key, abbr);
+  }
+  return abbr;
+}
+
+/**
  * Resolve display offsets for a set of zones against the dates currently in
  * play (typically the capture dates of the selected photos).
  *
@@ -157,31 +234,34 @@ export function resolveZoneOffsets(
   }
 
   for (const zone of zones) {
-    let label: ZoneOffsetLabel | null = null;
+    // Consistency is judged on the numeric offset alone; the abbreviation
+    // lookup is the expensive part, so it happens once per zone, after the loop.
+    let offset: number | null = null;
     let consistent = true;
 
     for (const { date, time } of dates) {
-      const dt = zonedInstant(date, time, zone);
-      if (!dt) {
+      const current = cachedOffset(zone, date, time);
+      if (current === null) {
         consistent = false;
         break;
       }
-      const abbr = dt.offsetNameShort ?? "";
-      const current: ZoneOffsetLabel = {
-        // ICU falls back to "GMT+9" for zones without a real abbreviation;
-        // that would just duplicate the offset we already render.
-        abbr: /^(GMT|UTC)/.test(abbr) ? null : abbr,
-        offset: formatOffsetLabel(dt.offset),
-      };
-      if (label === null) {
-        label = current;
-      } else if (label.offset !== current.offset || label.abbr !== current.abbr) {
+      if (offset === null) {
+        offset = current;
+      } else if (current !== offset) {
         consistent = false;
         break;
       }
     }
 
-    result.set(zone, consistent ? label : null);
+    result.set(
+      zone,
+      consistent && offset !== null
+        ? {
+            abbr: cachedAbbr(zone, offset, dates[0].date, dates[0].time),
+            offset: formatOffsetLabel(offset),
+          }
+        : null
+    );
   }
 
   return result;

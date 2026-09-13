@@ -26,6 +26,29 @@ export function deriveFieldValue<T>(
   return allSame ? first : "multiple";
 }
 
+/**
+ * Like deriveFieldValue, but strict: a mix of set and unset values also reads
+ * as "multiple". Used for fields where an unset value is a meaningful state of
+ * its own (timezone, UTC offset) rather than mere absence.
+ */
+export function deriveStrictFieldValue<T>(
+  photos: Photo[],
+  getter: (m: Metadata) => T | null
+): T | "multiple" | null {
+  if (photos.length === 0) return null;
+
+  const values = photos.map((p) => getter(p.currentMetadata));
+  const first = values[0];
+  const allSame = values.every((v) => {
+    if (typeof v === "object" && v !== null) {
+      return JSON.stringify(v) === JSON.stringify(first);
+    }
+    return v === first;
+  });
+
+  return allSame ? first : "multiple";
+}
+
 export function buildPendingChange(
   field: keyof Metadata,
   value: Metadata[keyof Metadata]

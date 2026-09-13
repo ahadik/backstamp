@@ -77,6 +77,36 @@ function fitToGpxTrack(map: mapboxgl.Map, gpx: GpxFile) {
   map.fitBounds(bounds, { padding: 60, maxZoom: 14 });
 }
 
+// Grayscale terrain relief so mountains and coastlines read on the flat
+// monotone base styles. Colors come from the neutral ramp per theme.
+function setupHillshade(map: mapboxgl.Map) {
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  map.addSource("mapbox-dem", {
+    type: "raster-dem",
+    url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+    tileSize: 512,
+    maxzoom: 14,
+  });
+  // Slot the relief beneath water/roads/labels; light-v11 and dark-v11 both
+  // have these layers, but fall back gracefully if a style rename drops one.
+  const beforeId = ["land-structure-polygon", "waterway", "water"].find((id) =>
+    map.getLayer(id)
+  );
+  map.addLayer(
+    {
+      id: "hillshade",
+      type: "hillshade",
+      source: "mapbox-dem",
+      paint: {
+        "hillshade-exaggeration": dark ? 0.4 : 0.25,
+        "hillshade-shadow-color": dark ? palette.surfaceNeutral[7] : palette.surfaceNeutral[4],
+        "hillshade-highlight-color": dark ? palette.surfaceNeutral[6] : palette.white,
+      },
+    },
+    beforeId
+  );
+}
+
 function setupSources(map: mapboxgl.Map) {
   map.addSource("photos", {
     type: "geojson",
@@ -244,6 +274,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     let didInitialFit = false;
     map.current.on("style.load", () => {
       map.current!.resize();
+      setupHillshade(map.current!);
       setupSources(map.current!);
       (map.current!.getSource("photos") as mapboxgl.GeoJSONSource).setData(
         buildPhotoGeoJSON(allPhotosRef.current)
@@ -285,16 +316,28 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitKey]);
 
+  // isStyleLoaded() is false whenever the map is mid-render (e.g. tiles still
+  // streaming after a pan/zoom), not just before the initial style load. These
+  // sync effects only re-run when session data changes, so a dropped sync would
+  // never be retried — defer to the next "idle" instead of bailing. The deferred
+  // callbacks read from refs so they always sync the latest data.
   useEffect(() => {
-    if (!map.current?.isStyleLoaded()) return;
-    const source = map.current.getSource("photos") as mapboxgl.GeoJSONSource;
-    if (!source) return;
-    source.setData(buildPhotoGeoJSON(session.photos));
+    const m = map.current;
+    if (!m) return;
+    const sync = () => {
+      const source = m.getSource("photos") as mapboxgl.GeoJSONSource | undefined;
+      if (source) source.setData(buildPhotoGeoJSON(allPhotosRef.current));
+    };
+    if (m.isStyleLoaded()) sync();
+    else m.once("idle", sync);
   }, [session.photos]);
 
   useEffect(() => {
-    if (!map.current?.isStyleLoaded()) return;
-    syncGpxLayers(map.current, session.gpxFiles, gpxLayerIds.current);
+    const m = map.current;
+    if (!m) return;
+    const sync = () => syncGpxLayers(m, gpxFilesRef.current, gpxLayerIds.current);
+    if (m.isStyleLoaded()) sync();
+    else m.once("idle", sync);
   }, [session.gpxFiles]);
 
   useEffect(() => {
@@ -309,9 +352,11 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     const hasData = session.photos.length > 0 || session.gpxFiles.length > 0;
     const wasCleared = hadDataRef.current && !hasData;
     hadDataRef.current = hasData;
-    if (wasCleared && map.current?.isStyleLoaded()) {
-      map.current.flyTo({ center: GLOBE_VIEW.center, zoom: GLOBE_VIEW.zoom });
-    }
+    const m = map.current;
+    if (!wasCleared || !m) return;
+    const flyHome = () => m.flyTo({ center: GLOBE_VIEW.center, zoom: GLOBE_VIEW.zoom });
+    if (m.isStyleLoaded()) flyHome();
+    else m.once("idle", flyHome);
   }, [session.photos.length, session.gpxFiles.length]);
 
   const handleDragStart = useCallback(
