@@ -83,6 +83,14 @@ interface ImportProgressEvent {
   error: string | null;
 }
 
+interface ImportCompleteEvent {
+  total: number;
+  skipped: number;
+  cancelled: boolean;
+  /** Photos the backend removed again because the import was cancelled. */
+  removedIds: string[];
+}
+
 function mapRawPhoto(raw: RawPhotoData): Photo {
   const meta: Metadata = {
     captureDate: raw.metadata.captureDate,
@@ -160,6 +168,28 @@ type PendingGpxImport =
       previewUrl: string | null;
     };
 
+interface ImportState {
+  isOpen: boolean;
+  done: number;
+  total: number;
+  skipped: number;
+  isComplete: boolean;
+  isCancelling: boolean;
+  isCancelled: boolean;
+  errors: string[];
+}
+
+const IDLE_IMPORT_STATE: ImportState = {
+  isOpen: false,
+  done: 0,
+  total: 0,
+  skipped: 0,
+  isComplete: false,
+  isCancelling: false,
+  isCancelled: false,
+  errors: [],
+};
+
 interface PhotoManagerProps {
   onOpenSettings: () => void;
 }
@@ -183,17 +213,18 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
   const [pendingGpxImports, setPendingGpxImports] = useState<PendingGpxImport[]>([]);
   const gpxBatchIdRef = useRef(0);
   const [gpxImportError, setGpxImportError] = useState<string | null>(null);
-  const [importState, setImportState] = useState<{
-    isOpen: boolean;
-    done: number;
-    total: number;
-    skipped: number;
-    isComplete: boolean;
-    errors: string[];
-  }>({ isOpen: false, done: 0, total: 0, skipped: 0, isComplete: false, errors: [] });
+  const [importState, setImportState] = useState<ImportState>(IDLE_IMPORT_STATE);
 
   const handleDismiss = useCallback(() => {
-    setImportState({ isOpen: false, done: 0, total: 0, skipped: 0, isComplete: false, errors: [] });
+    setImportState(IDLE_IMPORT_STATE);
+  }, []);
+
+  const handleCancelImport = useCallback(() => {
+    setImportState((prev) => ({ ...prev, isCancelling: true }));
+    tauriCommands.importCancel().catch((err) => {
+      setImportState((prev) => ({ ...prev, isCancelling: false }));
+      reportError("Failed to cancel import", err);
+    });
   }, []);
 
   const fetchAndSaveGpxThumbnail = useCallback(async (
@@ -380,7 +411,7 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
     const unlisteners = [
       listen<{ total: number }>("import:start", (e) => {
         if (e.payload.total === 0) return;
-        setImportState({ isOpen: true, done: 0, total: e.payload.total, skipped: 0, isComplete: false, errors: [] });
+        setImportState({ ...IDLE_IMPORT_STATE, isOpen: true, total: e.payload.total });
       }),
 
       listen<ImportProgressEvent>("import:progress", (e) => {
@@ -396,11 +427,17 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
         }));
       }),
 
-      listen<{ total: number; skipped: number }>("import:complete", (e) => {
+      listen<ImportCompleteEvent>("import:complete", (e) => {
+        const { skipped, cancelled, removedIds } = e.payload;
+        if (cancelled && removedIds.length > 0) {
+          sessionDispatch({ type: "REMOVE_PHOTOS", ids: removedIds });
+        }
         setImportState((prev) => ({
           ...prev,
           isComplete: true,
-          skipped: e.payload.skipped ?? 0,
+          isCancelling: false,
+          isCancelled: cancelled,
+          skipped: skipped ?? 0,
         }));
       }),
     ];
@@ -458,7 +495,10 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
         total={importState.total}
         skipped={importState.skipped}
         isComplete={importState.isComplete}
+        isCancelling={importState.isCancelling}
+        isCancelled={importState.isCancelled}
         errors={importState.errors}
+        onCancel={handleCancelImport}
         onDismiss={handleDismiss}
       />
       {pendingGpxImports.length > 0 && (() => {

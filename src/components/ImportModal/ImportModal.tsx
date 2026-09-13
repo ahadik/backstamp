@@ -8,7 +8,12 @@ interface Props {
   total: number;
   skipped?: number;
   isComplete?: boolean;
+  /** Cancel requested; the backend is finishing the in-flight file and cleaning up. */
+  isCancelling?: boolean;
+  /** Import ended because the user cancelled it. */
+  isCancelled?: boolean;
   errors: string[];
+  onCancel?: () => void;
   onDismiss: () => void;
 }
 
@@ -18,12 +23,21 @@ export function ImportModal({
   total,
   skipped = 0,
   isComplete,
+  isCancelling = false,
+  isCancelled = false,
   errors,
+  onCancel,
   onDismiss,
 }: Props) {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   const complete = isComplete ?? (total > 0 && done >= total);
   const logRef = useRef<HTMLPreElement>(null);
+
+  const title = isCancelled
+    ? "Import Cancelled"
+    : isCancelling
+      ? "Cancelling Import…"
+      : "Importing Photos";
 
   useEffect(() => {
     if (complete && errors.length === 0) {
@@ -41,15 +55,15 @@ export function ImportModal({
   return (
     <Modal isOpen={isOpen} closeOnBackdrop={false} closeOnEscape={false}>
       <div className={styles.panel}>
-        <p className={styles.title}>Importing Photos</p>
+        <p className={styles.title}>{title}</p>
 
         <div className={styles.track}>
           <div className={styles.bar} style={{ width: `${pct}%` }} />
         </div>
 
         <p className={styles.counter}>
-          {done} of {total}
-          {complete && skipped > 0 && ` · ${skipped} duplicate${skipped !== 1 ? "s" : ""} skipped`}
+          {isCancelled ? "Imported photos removed" : `${done} of ${total}`}
+          {complete && !isCancelled && skipped > 0 && ` · ${skipped} duplicate${skipped !== 1 ? "s" : ""} skipped`}
           {errors.length > 0 && ` · ${errors.length} error${errors.length !== 1 ? "s" : ""}`}
         </p>
 
@@ -57,6 +71,18 @@ export function ImportModal({
           <pre ref={logRef} className={styles.errorLog}>
             {errors.join("\n")}
           </pre>
+        )}
+
+        {!complete && onCancel && (
+          <div className={styles.footer}>
+            <button
+              className="btn btn-low btn-glass"
+              onClick={onCancel}
+              disabled={isCancelling}
+            >
+              {isCancelling ? "Cancelling…" : "Cancel"}
+            </button>
+          </div>
         )}
 
         {complete && errors.length > 0 && (

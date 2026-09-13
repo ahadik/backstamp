@@ -75,6 +75,83 @@ describe("ImportModal", () => {
       vi.useRealTimers();
     });
 
+    it("shows a Cancel button while import is in progress", () => {
+      render(
+        <ImportModal isOpen done={2} total={5} errors={[]} onCancel={vi.fn()} onDismiss={vi.fn()} />,
+      );
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    });
+
+    it("does not show a Cancel button when onCancel is not provided", () => {
+      render(<ImportModal isOpen done={2} total={5} errors={[]} onDismiss={vi.fn()} />);
+      expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+    });
+
+    it("calls onCancel when Cancel is clicked", async () => {
+      const onCancel = vi.fn();
+      render(
+        <ImportModal isOpen done={2} total={5} errors={[]} onCancel={onCancel} onDismiss={vi.fn()} />,
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(onCancel).toHaveBeenCalledOnce();
+    });
+
+    it("disables the Cancel button and shows Cancelling while a cancel is pending", () => {
+      render(
+        <ImportModal
+          isOpen
+          done={2}
+          total={5}
+          isCancelling
+          errors={[]}
+          onCancel={vi.fn()}
+          onDismiss={vi.fn()}
+        />,
+      );
+      expect(screen.getByText("Cancelling Import…")).toBeInTheDocument();
+      const button = screen.getByRole("button", { name: "Cancelling…" });
+      expect(button).toBeDisabled();
+    });
+
+    it("hides the Cancel button once the import is complete", () => {
+      render(
+        <ImportModal
+          isOpen
+          done={5}
+          total={5}
+          isComplete
+          errors={["err"]}
+          onCancel={vi.fn()}
+          onDismiss={vi.fn()}
+        />,
+      );
+      expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
+    });
+
+    it("shows the cancelled state and auto-dismisses when cancelled without errors", () => {
+      vi.useFakeTimers();
+      const onDismiss = vi.fn();
+      render(
+        <ImportModal
+          isOpen
+          done={2}
+          total={5}
+          isComplete
+          isCancelled
+          errors={[]}
+          onCancel={vi.fn()}
+          onDismiss={onDismiss}
+        />,
+      );
+      expect(screen.getByText("Import Cancelled")).toBeInTheDocument();
+      expect(screen.getByText("Imported photos removed")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(600));
+      expect(onDismiss).toHaveBeenCalledOnce();
+      vi.useRealTimers();
+    });
+
     it("does not auto-dismiss when complete but errors are present", () => {
       vi.useFakeTimers();
       const onDismiss = vi.fn();

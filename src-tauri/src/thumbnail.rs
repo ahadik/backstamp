@@ -1,5 +1,5 @@
 use image::imageops::FilterType;
-use image::ImageReader;
+use image::{ImageReader, Limits};
 use sha2::{Digest, Sha256};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -13,6 +13,12 @@ pub struct ThumbnailPaths {
 
 const SMALL_PX: u32 = 400;
 const LARGE_PX: u32 = 2560;
+
+/// Upper bound on a single image dimension we are willing to decode.
+/// 65,535 is the hard maximum for JPEG; a TIFF beyond that is almost certainly
+/// corrupt rather than a real scan. This stays as a sanity guard while the
+/// memory cap is removed (see `decode_limits`).
+const MAX_DIMENSION_PX: u32 = 65_535;
 
 pub fn generate_thumbnails(
     file_path: &Path,
@@ -28,10 +34,14 @@ pub fn generate_thumbnails(
     }
 
     let img = load_source_image(file_path, exiftool)?;
-    let orientation = exiftool.read_orientation(file_path).unwrap_or(1);
-    let img = apply_orientation(img, orientation);
 
+    // Resize before applying orientation. Rotating allocates a full copy of the
+    // image, so doing it on the 2560px version instead of the source keeps peak
+    // memory at roughly one decoded copy rather than two.
     let large_img = resize_to(&img, LARGE_PX, FilterType::Lanczos3);
+    drop(img);
+    let orientation = exiftool.read_orientation(file_path).unwrap_or(1);
+    let large_img = apply_orientation(large_img, orientation);
     save_jpeg(&large_img, &large_path)?;
 
     let small_img = resize_to(&large_img, SMALL_PX, FilterType::Triangle);
@@ -91,19 +101,37 @@ fn try_extract_preview(
     }
     let bytes = std::fs::read(tmp.path())
         .map_err(|e| format!("read preview: {}", e))?;
-    let img = ImageReader::new(Cursor::new(bytes))
+    let mut reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
-        .map_err(|e| format!("guess preview format: {}", e))?
+        .map_err(|e| format!("guess preview format: {}", e))?;
+    reader.limits(decode_limits());
+    let img = reader
         .decode()
         .map_err(|e| format!("decode preview: {}", e))?;
     Ok(Some(img))
 }
 
+/// Decoding limits for source images.
+///
+/// The `image` crate defaults to a 512 MiB allocation cap, which exists to
+/// protect servers from hostile uploads. For a desktop app decoding the user's
+/// own photos it rejects perfectly ordinary large scans (roughly 170 MP at
+/// 8-bit RGB, or 85 MP at 16-bit) with "Memory limit exceeded". We drop the
+/// memory cap and keep only a dimension sanity check.
+fn decode_limits() -> Limits {
+    let mut limits = Limits::no_limits();
+    limits.max_image_width = Some(MAX_DIMENSION_PX);
+    limits.max_image_height = Some(MAX_DIMENSION_PX);
+    limits
+}
+
 fn decode_file(file_path: &Path) -> Result<image::DynamicImage, String> {
-    ImageReader::open(file_path)
+    let mut reader = ImageReader::open(file_path)
         .map_err(|e| format!("open {}: {}", file_path.display(), e))?
         .with_guessed_format()
-        .map_err(|e| format!("guess format: {}", e))?
+        .map_err(|e| format!("guess format: {}", e))?;
+    reader.limits(decode_limits());
+    reader
         .decode()
         .map_err(|e| format!("decode {}: {}", file_path.display(), e))
 }
@@ -218,6 +246,64 @@ mod tests {
         assert_eq!(result.height(), 400);
         assert!(result.width() >= 265 && result.width() <= 268,
             "expected ~267, got {}", result.width());
+    }
+
+    #[test]
+    fn orientation_applied_after_resize_swaps_dimensions() {
+        // Simulates the generate_thumbnails pipeline order: resize, then orient.
+        let img = make_image(1200, 800);
+        let resized = resize_to(&img, 400, FilterType::Triangle);
+        let oriented = apply_orientation(resized, 6);
+        assert_eq!(oriented.width(), 267);
+        assert_eq!(oriented.height(), 400);
+    }
+
+    #[test]
+    fn decode_file_rejects_absurd_dimensions_but_not_large_allocations() {
+        let limits = decode_limits();
+        assert_eq!(limits.max_alloc, None);
+        assert_eq!(limits.max_image_width, Some(MAX_DIMENSION_PX));
+        assert_eq!(limits.max_image_height, Some(MAX_DIMENSION_PX));
+    }
+
+    /// Regression test for GitHub issue #13: a source image whose decoded size
+    /// exceeds the `image` crate's 512 MiB default allocation cap must still
+    /// decode. 14000 x 13000 x 3 bytes = ~546 MB, just over the old limit.
+    ///
+    /// Ignored by default because encoding and decoding a 182 MP image takes
+    /// ~20 s in a debug build. Run it with:
+    ///   cargo test --lib decode_file_handles_image_over_512mib -- --ignored
+    #[test]
+    #[ignore]
+    fn decode_file_handles_image_over_512mib() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("huge.jpg");
+        let (w, h) = (14_000u32, 13_000u32);
+        assert!(w as u64 * h as u64 * 3 > 512 * 1024 * 1024);
+        save_jpeg(&make_image(w, h), &src).unwrap();
+
+        // Sanity check: the default limits really do reject this file, so the
+        // test is exercising the fix rather than passing vacuously.
+        let default_err = ImageReader::open(&src)
+            .unwrap()
+            .with_guessed_format()
+            .unwrap()
+            .decode()
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(
+            default_err.contains("Memory limit exceeded"),
+            "expected default limits to fail, got: {:?}",
+            default_err
+        );
+
+        let img = decode_file(&src).unwrap();
+        assert_eq!(img.width(), w);
+        assert_eq!(img.height(), h);
+
+        let thumb = resize_to(&img, LARGE_PX, FilterType::Triangle);
+        assert_eq!(thumb.width(), LARGE_PX);
     }
 
     #[test]

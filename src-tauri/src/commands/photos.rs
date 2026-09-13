@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -62,6 +63,11 @@ struct ImportProgressPayload {
 struct ImportCompletePayload {
     total: usize,
     skipped: usize,
+    /// True when the user cancelled before every file was processed. Every
+    /// photo this import had already added is removed again, and the ids of
+    /// those photos are listed in `removed_ids` so the frontend can drop them.
+    cancelled: bool,
+    removed_ids: Vec<String>,
 }
 
 fn is_supported(path: &Path) -> bool {
@@ -482,6 +488,8 @@ pub async fn import_photos(
     let db = Arc::clone(&state.db);
     let exiftool = Arc::clone(&state.exiftool);
     let thumbnails_dir = state.thumbnails_dir.clone();
+    let cancel_flag = Arc::clone(&state.import_cancel_flag);
+    cancel_flag.store(false, Ordering::Relaxed);
 
     std::thread::spawn(move || {
         // Phase 1: extension filter
@@ -507,7 +515,20 @@ pub async fn import_photos(
         println!("[import] {} to consider, {} already imported by path", total, skipped);
         let _ = app_handle.emit("import:start", ImportStartPayload { total });
 
+        // Ids of photos this import has inserted so far. If the user cancels,
+        // all of them are removed again so a cancelled import leaves no trace.
+        let mut imported_ids: Vec<String> = Vec::new();
+        let mut cancelled = false;
+
         for (i, path_str) in to_import.iter().enumerate() {
+            // Checked between files: the in-flight file always finishes (it
+            // holds the exiftool lock), and is cleaned up below if cancelled.
+            if cancel_flag.load(Ordering::Relaxed) {
+                cancelled = true;
+                println!("[import] cancelled after {} of {}", i, total);
+                break;
+            }
+
             let file_path = Path::new(path_str);
             let sidecar_path = sidecar_map.get(path_str.as_str()).map(PathBuf::from);
             let done = i + 1;
@@ -544,6 +565,7 @@ pub async fn import_photos(
             match result {
                 Ok(photo) => {
                     println!("[import] ({}/{}) done: {}", done, total, path_str);
+                    imported_ids.push(photo.id.clone());
                     let _ = app_handle.emit(
                         "import:progress",
                         ImportProgressPayload {
@@ -569,10 +591,44 @@ pub async fn import_photos(
             }
         }
 
-        println!("[import] complete ({} skipped)", skipped);
-        let _ = app_handle.emit("import:complete", ImportCompletePayload { total, skipped });
+        // A cancel that lands while the last file is being processed still
+        // counts: the user asked for nothing from this import to remain.
+        if !cancelled && cancel_flag.load(Ordering::Relaxed) {
+            cancelled = true;
+            println!("[import] cancelled after final file");
+        }
+
+        let removed_ids = if cancelled {
+            println!("[import] removing {} photos from cancelled import", imported_ids.len());
+            match db.lock() {
+                Ok(conn) => {
+                    if let Err(e) = remove_photo_records(&conn, &thumbnails_dir, &imported_ids) {
+                        println!("[import] error removing cancelled photos: {}", e);
+                    }
+                }
+                Err(e) => println!("[import] db lock failed during cancel cleanup: {}", e),
+            }
+            std::mem::take(&mut imported_ids)
+        } else {
+            Vec::new()
+        };
+
+        println!("[import] complete ({} skipped, cancelled: {})", skipped, cancelled);
+        let _ = app_handle.emit(
+            "import:complete",
+            ImportCompletePayload { total, skipped, cancelled, removed_ids },
+        );
     });
 
+    Ok(())
+}
+
+/// Ask a running import to stop. The import thread checks the flag between
+/// files, removes every photo it had added, and emits `import:complete` with
+/// `cancelled: true`.
+#[tauri::command]
+pub async fn import_cancel(state: State<'_, AppState>) -> Result<(), String> {
+    state.import_cancel_flag.store(true, Ordering::Relaxed);
     Ok(())
 }
 
@@ -634,13 +690,15 @@ pub async fn reorder_photos(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn remove_photos(
-    ids: Vec<String>,
-    state: State<'_, AppState>,
+/// Delete photos (and their thumbnails and metadata rows) by id. Ids that no
+/// longer exist are skipped. Shared by the user-facing remove command and by
+/// import cancellation.
+fn remove_photo_records(
+    conn: &rusqlite::Connection,
+    thumbnails_dir: &Path,
+    ids: &[String],
 ) -> Result<(), String> {
-    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
-    for id in &ids {
+    for id in ids {
         let file_path: Option<String> = conn
             .query_row(
                 "SELECT file_path FROM photos WHERE id = ?1",
@@ -650,12 +708,8 @@ pub async fn remove_photos(
             .ok();
         if let Some(path) = file_path {
             let key = thumbnail::path_key(Path::new(&path));
-            let _ = std::fs::remove_file(
-                state.thumbnails_dir.join(format!("{}_small.jpg", key)),
-            );
-            let _ = std::fs::remove_file(
-                state.thumbnails_dir.join(format!("{}_large.jpg", key)),
-            );
+            let _ = std::fs::remove_file(thumbnails_dir.join(format!("{}_small.jpg", key)));
+            let _ = std::fs::remove_file(thumbnails_dir.join(format!("{}_large.jpg", key)));
         }
         conn.execute("DELETE FROM photo_keywords WHERE photo_id = ?1", params![id])
             .map_err(|e| format!("delete keywords: {}", e))?;
@@ -675,9 +729,101 @@ pub async fn remove_photos(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn remove_photos(
+    ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| format!("db lock: {}", e))?;
+    remove_photo_records(&conn, &state.thumbnails_dir, &ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn seeded_db(ids: &[&str]) -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::session::apply_schema(&conn).unwrap();
+        for (i, id) in ids.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO photos (id, file_path, added_at) VALUES (?1, ?2, ?3)",
+                params![id, format!("/photos/{}.jpg", id), i as i64],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO metadata_original (photo_id, field, value) VALUES (?1, 'lens', 'x')",
+                params![id],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO metadata_current (photo_id, field, value, is_pending) VALUES (?1, 'lens', 'x', 0)",
+                params![id],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO photo_keywords (photo_id, keyword) VALUES (?1, 'kw')",
+                params![id],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    fn count(conn: &rusqlite::Connection, table: &str, id_col: &str, id: &str) -> i64 {
+        conn.query_row(
+            &format!("SELECT COUNT(*) FROM {} WHERE {} = ?1", table, id_col),
+            params![id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    /// Cancelling an import removes exactly the photos that import added,
+    /// including their metadata and keyword rows, and leaves others untouched.
+    #[test]
+    fn remove_photo_records_removes_only_given_ids() {
+        let conn = seeded_db(&["keep", "gone-1", "gone-2"]);
+        let dir = tempfile::TempDir::new().unwrap();
+
+        remove_photo_records(
+            &conn,
+            dir.path(),
+            &["gone-1".to_string(), "gone-2".to_string()],
+        )
+        .unwrap();
+
+        for id in ["gone-1", "gone-2"] {
+            assert_eq!(count(&conn, "photos", "id", id), 0);
+            assert_eq!(count(&conn, "metadata_original", "photo_id", id), 0);
+            assert_eq!(count(&conn, "metadata_current", "photo_id", id), 0);
+            assert_eq!(count(&conn, "photo_keywords", "photo_id", id), 0);
+        }
+        assert_eq!(count(&conn, "photos", "id", "keep"), 1);
+        assert_eq!(count(&conn, "metadata_current", "photo_id", "keep"), 1);
+    }
+
+    #[test]
+    fn remove_photo_records_deletes_thumbnails_and_tolerates_unknown_ids() {
+        let conn = seeded_db(&["gone-1"]);
+        let dir = tempfile::TempDir::new().unwrap();
+        let key = thumbnail::path_key(Path::new("/photos/gone-1.jpg"));
+        let small = dir.path().join(format!("{}_small.jpg", key));
+        let large = dir.path().join(format!("{}_large.jpg", key));
+        std::fs::write(&small, b"s").unwrap();
+        std::fs::write(&large, b"l").unwrap();
+
+        remove_photo_records(
+            &conn,
+            dir.path(),
+            &["gone-1".to_string(), "never-existed".to_string()],
+        )
+        .unwrap();
+
+        assert!(!small.exists());
+        assert!(!large.exists());
+        assert_eq!(count(&conn, "photos", "id", "gone-1"), 0);
+    }
 
     const SAMPLE_JSON: &str = r#"[{
         "SourceFile": "/photos/test.jpg",
