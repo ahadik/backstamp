@@ -5,6 +5,7 @@ import { deriveFieldValue } from "../../../lib/inspectorUtils";
 import { CorpusComboBox } from "../../common/CorpusComboBox/CorpusComboBox";
 import { ConfirmDialog } from "../../common/ConfirmDialog/ConfirmDialog";
 import { tauriCommands } from "../../../lib/tauri";
+import { reportError } from "../../../lib/errors";
 import type { Photo, Metadata } from "../../../state/SessionContext";
 import type { CorpusEntry } from "../../../state/CorpusContext";
 import styles from "./CameraSection.module.css";
@@ -14,7 +15,8 @@ function persistPending(ids: string[], changes: Partial<Metadata>) {
     field,
     value: value == null ? null : String(value),
   }));
-  tauriCommands.setPendingChanges(ids, fields).catch(console.error);
+  tauriCommands.setPendingChanges(ids, fields)
+    .catch((err) => reportError("Failed to save camera edits", err));
 }
 
 interface CameraSectionProps {
@@ -127,29 +129,34 @@ export function CameraSection({ selectedPhotos }: CameraSectionProps) {
 
   function handleAdd(category: "camera_make" | "lens", value: string) {
     corpusDispatch({ type: "ADD_ENTRY", category, value });
-    tauriCommands.addCorpusEntry(category, value).catch(console.error);
+    tauriCommands.addCorpusEntry(category, value)
+      .catch((err) => reportError("Failed to save equipment list changes", err));
   }
 
   function handleRemove(category: "camera_make" | "lens", value: string) {
     corpusDispatch({ type: "REMOVE_ENTRY", category, value });
-    tauriCommands.removeCorpusEntry(category, value).catch(console.error);
+    tauriCommands.removeCorpusEntry(category, value)
+      .catch((err) => reportError("Failed to save equipment list changes", err));
   }
 
   function handleAddModel(value: string) {
     if (!activeMake) return;
     corpusDispatch({ type: "ADD_ENTRY", category: "camera_model", value, vendor: activeMake });
-    tauriCommands.addCorpusEntry("camera_model", value, activeMake).catch(console.error);
+    tauriCommands.addCorpusEntry("camera_model", value, activeMake)
+      .catch((err) => reportError("Failed to save equipment list changes", err));
   }
 
   function handleRemoveModel(value: string) {
     if (!activeMake) return;
     corpusDispatch({ type: "REMOVE_ENTRY", category: "camera_model", value, vendor: activeMake });
-    tauriCommands.removeCorpusEntry("camera_model", value, activeMake).catch(console.error);
+    tauriCommands.removeCorpusEntry("camera_model", value, activeMake)
+      .catch((err) => reportError("Failed to save equipment list changes", err));
   }
 
   function handleAddVendor(value: string) {
     corpusDispatch({ type: "ADD_ENTRY", category: "film_vendor", value });
-    tauriCommands.addCorpusEntry("film_vendor", value).catch(console.error);
+    tauriCommands.addCorpusEntry("film_vendor", value)
+      .catch((err) => reportError("Failed to save film list changes", err));
   }
 
   function handleRemoveVendor(value: string) {
@@ -158,22 +165,26 @@ export function CameraSection({ selectedPhotos }: CameraSectionProps) {
       .filter((t) => (t.vendor ?? "").toLowerCase() === value.toLowerCase())
       .forEach((t) => {
         corpusDispatch({ type: "REMOVE_ENTRY", category: "film_type", value: t.value, vendor: value });
-        tauriCommands.removeCorpusEntry("film_type", t.value, value).catch(console.error);
+        tauriCommands.removeCorpusEntry("film_type", t.value, value)
+          .catch((err) => reportError("Failed to save film list changes", err));
       });
     corpusDispatch({ type: "REMOVE_ENTRY", category: "film_vendor", value });
-    tauriCommands.removeCorpusEntry("film_vendor", value).catch(console.error);
+    tauriCommands.removeCorpusEntry("film_vendor", value)
+      .catch((err) => reportError("Failed to save film list changes", err));
   }
 
   function handleAddType(value: string) {
     if (!activeVendor) return;
     corpusDispatch({ type: "ADD_ENTRY", category: "film_type", value, vendor: activeVendor });
-    tauriCommands.addCorpusEntry("film_type", value, activeVendor).catch(console.error);
+    tauriCommands.addCorpusEntry("film_type", value, activeVendor)
+      .catch((err) => reportError("Failed to save film list changes", err));
   }
 
   function handleRemoveType(value: string) {
     if (!activeVendor) return;
     corpusDispatch({ type: "REMOVE_ENTRY", category: "film_type", value, vendor: activeVendor });
-    tauriCommands.removeCorpusEntry("film_type", value, activeVendor).catch(console.error);
+    tauriCommands.removeCorpusEntry("film_type", value, activeVendor)
+      .catch((err) => reportError("Failed to save film list changes", err));
   }
 
   const isEmpty = selectedPhotos.length === 0;

@@ -352,3 +352,228 @@ describe("DateTimeSection timezone field", () => {
     expect(screen.getByText("Tokyo · UTC+9")).toBeInTheDocument();
   });
 });
+
+// ── Offset row ────────────────────────────────────────────────────────────────
+
+describe("DateTimeSection offset row", () => {
+  function photoWith(id: string, metadata: Partial<Metadata>): Photo {
+    const m = { ...baseMetadata, ...metadata };
+    return {
+      id, filePath: `/${id}.jpg`, fileStatus: "ok",
+      thumbnail: { small: "/s.jpg", large: "/l.jpg" },
+      originalMetadata: m, currentMetadata: m, pendingChanges: null,
+    };
+  }
+
+  it("shows the camera-recorded offset when no timezone is set", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-08-03", captureTime: "10:02:00", utcOffset: "-08:00" }),
+    ]} />);
+    expect(screen.getByText("UTC−8")).toBeInTheDocument();
+    expect(screen.getByText("from camera")).toBeInTheDocument();
+  });
+
+  it("shows the selected timezone's offset once a timezone is set", () => {
+    // The camera recorded -08:00 but the photo is assigned Los Angeles, which
+    // is -07:00 on Aug 3. The zone wins; the camera value is no longer shown.
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", {
+        captureDate: "2026-08-03", captureTime: "10:02:00",
+        utcOffset: "-08:00", timezone: "America/Los_Angeles",
+      }),
+    ]} />);
+    expect(screen.getByText("from selected timezone")).toBeInTheDocument();
+    expect(screen.queryByText("from camera")).not.toBeInTheDocument();
+    // The row shows the zone-derived offset; the tz input shows it too, so
+    // scope the assertion to the offset row's own element.
+    const row = screen.getByText("from selected timezone").parentElement!;
+    expect(row).toHaveTextContent("UTC−7");
+  });
+
+  it("shows Multiple Values when photos record different camera offsets", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-08-03", utcOffset: "-08:00" }),
+      photoWith("p2", { captureDate: "2026-08-03", utcOffset: "+09:00" }),
+    ]} />);
+    expect(screen.getByText("Multiple Values")).toBeInTheDocument();
+  });
+
+  it("shows Multiple Values when only some photos record an offset", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-08-03", utcOffset: "-08:00" }),
+      photoWith("p2", { captureDate: "2026-08-03" }),
+    ]} />);
+    expect(screen.getByText("Multiple Values")).toBeInTheDocument();
+    expect(screen.queryByText("from camera")).not.toBeInTheDocument();
+  });
+
+  it("treats a mix of set and unset timezones as multiple", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-08-03", timezone: "America/Denver" }),
+      photoWith("p2", { captureDate: "2026-08-03" }),
+    ]} />);
+    expect(screen.getByText("Selection contains multiple timezones")).toBeInTheDocument();
+    // The offset row follows: no single timezone, so no derived offset either.
+    expect(screen.getByText("Multiple Values")).toBeInTheDocument();
+  });
+
+  it("shows a placeholder when no offset information exists", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-08-03" }),
+    ]} />);
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+});
+
+// ── Timezone/offset reconciliation ────────────────────────────────────────────
+
+describe("DateTimeSection timezone offset reconciliation", () => {
+  function photoWith(id: string, metadata: Partial<Metadata>): Photo {
+    const m = { ...baseMetadata, ...metadata };
+    return {
+      id, filePath: `/${id}.jpg`, fileStatus: "ok",
+      thumbnail: { small: "/s.jpg", large: "/l.jpg" },
+      originalMetadata: m, currentMetadata: m, pendingChanges: null,
+    };
+  }
+
+  function tzInput(): HTMLInputElement {
+    return document.querySelector('input[class*="tzInput"]') as HTMLInputElement;
+  }
+
+  // The camera scenario this feature exists for: clock configured for winter
+  // Pacific time (-08:00), photo actually taken in Alaska in August, where
+  // AKDT is also -08:00.
+  const alaskaPhoto = () =>
+    photoWith("p1", { captureDate: "2026-08-03", captureTime: "10:02:00", utcOffset: "-08:00" });
+
+  function selectZone(label: string) {
+    fireEvent.focus(tzInput());
+    fireEvent.mouseDown(screen.getByText(label));
+  }
+
+  it("applies silently when the zone's offset matches the recorded offset", () => {
+    render(<DateTimeSection selectedPhotos={[alaskaPhoto()]} />);
+    selectZone("Alaska · AKDT UTC−8");
+    expect(screen.queryByText("Timezone Changes UTC Offset")).not.toBeInTheDocument();
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: "SET_PENDING_BATCH",
+      updates: [{
+        id: "p1",
+        changes: { timezone: "America/Anchorage", utcOffset: "-08:00" },
+      }],
+    });
+  });
+
+  it("opens the reconciliation dialog when the zone's offset disagrees", () => {
+    render(<DateTimeSection selectedPhotos={[alaskaPhoto()]} />);
+    selectZone("US Pacific · PDT UTC−7");
+    expect(screen.getByText("Timezone Changes UTC Offset")).toBeInTheDocument();
+    expect(mockDispatch).not.toHaveBeenCalled();
+    // The message names both offsets; the adjust radio previews the wall-clock
+    // consequence.
+    const message = screen.getByText(/at the time of capture/).textContent!;
+    expect(message).toContain("UTC−7");
+    expect(message).toContain("UTC−8");
+    expect(
+      screen.getByText("Adjust capture time (from 10:02 AM to 11:02 AM)")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Keep capture time")).toBeInTheDocument();
+  });
+
+  it("confirming with the default (adjust) radio re-expresses the wall clock", () => {
+    render(<DateTimeSection selectedPhotos={[alaskaPhoto()]} />);
+    selectZone("US Pacific · PDT UTC−7");
+    fireEvent.click(screen.getByText("Confirm"));
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: "SET_PENDING_BATCH",
+      updates: [{
+        id: "p1",
+        changes: {
+          timezone: "America/Los_Angeles",
+          utcOffset: "-07:00",
+          captureDate: "2026-08-03",
+          captureTime: "11:02:00",
+        },
+      }],
+    });
+  });
+
+  it("selecting the keep radio leaves the wall clock alone and shifts the moment", () => {
+    render(<DateTimeSection selectedPhotos={[alaskaPhoto()]} />);
+    selectZone("US Pacific · PDT UTC−7");
+    fireEvent.click(screen.getByText("Keep capture time"));
+    fireEvent.click(screen.getByText("Confirm"));
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: "SET_PENDING_BATCH",
+      updates: [{
+        id: "p1",
+        changes: { timezone: "America/Los_Angeles", utcOffset: "-07:00" },
+      }],
+    });
+  });
+
+  it("resets the radio to adjust each time the dialog opens", () => {
+    render(<DateTimeSection selectedPhotos={[alaskaPhoto()]} />);
+    selectZone("US Pacific · PDT UTC−7");
+    fireEvent.click(screen.getByText("Keep capture time"));
+    fireEvent.click(screen.getByText("Cancel"));
+
+    selectZone("US Pacific · PDT UTC−7");
+    fireEvent.click(screen.getByText("Confirm"));
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: "SET_PENDING_BATCH",
+      updates: [{
+        id: "p1",
+        changes: {
+          timezone: "America/Los_Angeles",
+          utcOffset: "-07:00",
+          captureDate: "2026-08-03",
+          captureTime: "11:02:00",
+        },
+      }],
+    });
+  });
+
+  it("Cancel closes the dialog without changing anything", () => {
+    render(<DateTimeSection selectedPhotos={[alaskaPhoto()]} />);
+    selectZone("US Pacific · PDT UTC−7");
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(screen.queryByText("Timezone Changes UTC Offset")).not.toBeInTheDocument();
+    expect(mockDispatch).not.toHaveBeenCalled();
+  });
+
+  it("relabels photos with no recorded offset without asking", () => {
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-08-03", captureTime: "10:02:00" }),
+    ]} />);
+    selectZone("US Pacific · PDT UTC−7");
+    expect(screen.queryByText("Timezone Changes UTC Offset")).not.toBeInTheDocument();
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: "SET_PENDING_BATCH",
+      updates: [{
+        id: "p1",
+        changes: { timezone: "America/Los_Angeles", utcOffset: "-07:00" },
+      }],
+    });
+  });
+
+  it("uses per-photo offsets when a group spans a DST transition", () => {
+    // One January photo, one July photo, both correctly stamped by a camera in
+    // Denver. Assigning the Denver zone must give each photo its own seasonal
+    // offset and ask nothing, since both already agree with the zone.
+    render(<DateTimeSection selectedPhotos={[
+      photoWith("p1", { captureDate: "2026-01-15", captureTime: "12:00:00", utcOffset: "-07:00" }),
+      photoWith("p2", { captureDate: "2026-07-03", captureTime: "12:00:00", utcOffset: "-06:00" }),
+    ]} />);
+    selectZone("US Mountain");
+    expect(screen.queryByText("Timezone Changes UTC Offset")).not.toBeInTheDocument();
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: "SET_PENDING_BATCH",
+      updates: [
+        { id: "p1", changes: { timezone: "America/Denver", utcOffset: "-07:00" } },
+        { id: "p2", changes: { timezone: "America/Denver", utcOffset: "-06:00" } },
+      ],
+    });
+  });
+});

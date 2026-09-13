@@ -13,7 +13,8 @@ import { useUI } from "../../state/UIContext";
 import type { Photo, Metadata, GpxFile } from "../../state/SessionContext";
 import type { TrackPoint } from "../../lib/tauri";
 import { tauriCommands } from "../../lib/tauri";
-import { countMatches, applyGpxAutoTag } from "../../lib/gpxMatching";
+import { reportError } from "../../lib/errors";
+import { countMatches, applyGpxAutoTag, tracksFrom } from "../../lib/gpxMatching";
 import styles from "./PhotoManager.module.css";
 
 const SUPPORTED_EXTENSIONS = new Set([
@@ -83,6 +84,55 @@ function mapRawPhoto(raw: RawPhotoData): Photo {
   };
 }
 
+// Mapbox Static Images API has an ~8192-char URL limit. Downsample dense
+// tracks (e.g. 1-point-per-second GPS logs) to stay well within it.
+function sampleTrack(points: TrackPoint[], maxPoints: number): TrackPoint[] {
+  if (points.length <= maxPoints) return points;
+  return points.filter((_, i) => i % Math.ceil(points.length / maxPoints) === 0);
+}
+
+const ROUTE_PREVIEW_COLORS = ["4264fb", "f74e4e", "31b855", "f7a941", "a05cf7", "1fb6c1"];
+
+/** Static map URL rendering all dropped routes together, one color per route. */
+function buildRoutesPreviewUrl(tracks: TrackPoint[][], mapboxToken: string): string | null {
+  const drawable = tracks.filter((t) => t.length >= 2);
+  if (drawable.length === 0) return null;
+  const perTrack = Math.max(2, Math.floor(100 / drawable.length));
+  const geojson = encodeURIComponent(
+    JSON.stringify({
+      type: "FeatureCollection",
+      features: drawable.map((points, i) => ({
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: sampleTrack(points, perTrack).map((p) => [p.lng, p.lat]),
+        },
+        properties: {
+          stroke: `#${ROUTE_PREVIEW_COLORS[i % ROUTE_PREVIEW_COLORS.length]}`,
+          "stroke-width": 3,
+        },
+      })),
+    })
+  );
+  // streets-v12 (also used by LocationSection's mini map) — the light/dark
+  // styles are monotone by design and read as a black box at this size.
+  return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/geojson(${geojson})/auto/400x200@2x?access_token=${mapboxToken}&padding=30`;
+}
+
+// One entry per drop gesture. The dialog opens immediately in "processing"
+// state and is updated in place once parsing and match-counting finish.
+type PendingGpxImport =
+  | { id: number; status: "processing"; fileCount: number }
+  | {
+      id: number;
+      status: "ready";
+      gpxFiles: GpxFile[];
+      tracks: TrackPoint[][];
+      matchCount: number;
+      totalCount: number;
+      previewUrl: string | null;
+    };
+
 interface PhotoManagerProps {
   onOpenSettings: () => void;
 }
@@ -101,11 +151,10 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
     gpxPaths: string[];
   } | null>(null);
   const [sidecarMissingNotice, setSidecarMissingNotice] = useState<string[] | null>(null);
-  const [pendingGpxImport, setPendingGpxImport] = useState<{
-    gpxFile: GpxFile;
-    matchCount: number;
-    totalCount: number;
-  } | null>(null);
+  // Queue of prompts, one per drop gesture — a bulk drop imports several GPX
+  // files at once and gets a single combined auto-tag confirmation.
+  const [pendingGpxImports, setPendingGpxImports] = useState<PendingGpxImport[]>([]);
+  const gpxBatchIdRef = useRef(0);
   const [gpxImportError, setGpxImportError] = useState<string | null>(null);
   const [importState, setImportState] = useState<{
     isOpen: boolean;
@@ -126,12 +175,7 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
     mapboxToken: string
   ): Promise<void> => {
     try {
-      // Mapbox Static Images API has an ~8192-char URL limit. Downsample dense
-      // tracks (e.g. 1-point-per-second GPS logs) to stay well within it.
-      const MAX_POINTS = 100;
-      const sampled = trackPoints.length <= MAX_POINTS
-        ? trackPoints
-        : trackPoints.filter((_, i) => i % Math.ceil(trackPoints.length / MAX_POINTS) === 0);
+      const sampled = sampleTrack(trackPoints, 100);
       const geojson = encodeURIComponent(
         JSON.stringify({
           type: "Feature",
@@ -154,34 +198,87 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
     }
   }, [sessionDispatch]);
 
-  const handleGpxDrop = useCallback(async (path: string) => {
-    if (!uiState.mapboxToken) {
+  const handleGpxDrop = useCallback(async (paths: string[]) => {
+    if (paths.length === 0) return;
+    const mapboxToken = uiState.mapboxToken;
+    if (!mapboxToken) {
       setShowGpxKeyPrompt(true);
       return;
     }
-    try {
-      const result = await tauriCommands.importGpx(path);
-      const gpxFile: GpxFile = {
-        id: result.id,
-        filePath: result.filePath,
-        addedAt: result.addedAt,
-        trackPoints: result.trackPoints,
-        thumbnailPath: null,
-        timezone: result.timezone,
-      };
-      sessionDispatch({ type: "ADD_GPX", gpxFile });
 
-      const mapboxToken = uiState.mapboxToken;
-      if (mapboxToken && result.trackPoints.length > 0) {
-        fetchAndSaveGpxThumbnail(result.id, result.trackPoints, mapboxToken);
+    // Open the dialog right away; it flips to the confirmation once parsing
+    // and match-counting below finish.
+    const batchId = ++gpxBatchIdRef.current;
+    setPendingGpxImports((prev) => [
+      ...prev,
+      { id: batchId, status: "processing", fileCount: paths.length },
+    ]);
+
+    const imported: GpxFile[] = [];
+    const errors: string[] = [];
+    for (const path of paths) {
+      try {
+        const result = await tauriCommands.importGpx(path);
+        const gpxFile: GpxFile = {
+          id: result.id,
+          filePath: result.filePath,
+          addedAt: result.addedAt,
+          trackPoints: result.trackPoints,
+          thumbnailPath: null,
+          timezone: result.timezone,
+        };
+        sessionDispatch({ type: "ADD_GPX", gpxFile });
+        if (result.trackPoints.length > 0) {
+          fetchAndSaveGpxThumbnail(result.id, result.trackPoints, mapboxToken);
+        }
+        imported.push(gpxFile);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${path.split("/").pop()}: ${msg}`);
       }
-
-      const { matching, total } = countMatches(session.photos, result.trackPoints);
-      setPendingGpxImport({ gpxFile, matchCount: matching, totalCount: total });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setGpxImportError(msg);
     }
+
+    if (errors.length > 0) {
+      setGpxImportError(errors.join("\n"));
+    }
+    if (imported.length === 0) {
+      setPendingGpxImports((prev) => prev.filter((b) => b.id !== batchId));
+      return;
+    }
+
+    // Prefetch the combined-routes preview while the processing dialog is up,
+    // so the confirmation appears with the map already rendered.
+    let previewUrl: string | null = null;
+    const remoteUrl = buildRoutesPreviewUrl(imported.map((g) => g.trackPoints), mapboxToken);
+    if (remoteUrl) {
+      try {
+        const resp = await fetch(remoteUrl);
+        if (!resp.ok) throw new Error(`Mapbox Static Images: ${resp.status}`);
+        previewUrl = URL.createObjectURL(await resp.blob());
+      } catch (err) {
+        console.error("[gpxRoutesPreview]", err);
+      }
+    }
+
+    // Match photos against each dropped track separately: gaps inside a track
+    // interpolate, but separate tracks are never bridged.
+    const tracks = tracksFrom(imported);
+    const { matching, total } = countMatches(session.photos, tracks);
+    setPendingGpxImports((prev) =>
+      prev.map((b) =>
+        b.id === batchId
+          ? {
+              id: batchId,
+              status: "ready" as const,
+              gpxFiles: imported,
+              tracks,
+              matchCount: matching,
+              totalCount: total,
+              previewUrl,
+            }
+          : b
+      )
+    );
   }, [sessionDispatch, session.photos, uiState.mapboxToken, fetchAndSaveGpxThumbnail]);
 
   const handleGpxDropRef = useRef(handleGpxDrop);
@@ -225,11 +322,10 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
       setPendingSidecarSearch({ rawsWithoutXmp, allRawPaths, sidecarMap, gpxPaths });
     } else {
       if (allRawPaths.length > 0) {
-        tauriCommands.importPhotos(allRawPaths, sidecarMap).catch((err) =>
-          console.error("[finderDrop]", err)
-        );
+        tauriCommands.importPhotos(allRawPaths, sidecarMap)
+          .catch((err) => reportError("Failed to import photos", err));
       }
-      for (const gpxPath of gpxPaths) handleGpxDropRef.current(gpxPath);
+      handleGpxDropRef.current(gpxPaths);
     }
   }, []);
 
@@ -240,7 +336,7 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
   useEffect(() => {
     tauriCommands.loadCorpus()
       .then((corpus) => corpusDispatch({ type: "LOAD_CORPUS", corpus }))
-      .catch((err) => console.error("[PhotoManager] loadCorpus failed:", err));
+      .catch((err) => reportError("Failed to load saved camera and film lists", err));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -301,7 +397,7 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
       else unlisten = fn;
     }
 
-    setup().catch(console.error);
+    setup().catch((err) => reportError("Failed to enable drag-and-drop import", err));
     return () => {
       cancelled = true;
       unlisten?.();
@@ -322,41 +418,78 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
         errors={importState.errors}
         onDismiss={handleDismiss}
       />
-      {pendingGpxImport && (
-        <ConfirmDialog
-          title={pendingGpxImport.matchCount === 0 ? "GPX Imported" : "Auto-Tag Locations from GPX?"}
-          message={
-            pendingGpxImport.matchCount === 0
-              ? "GPX file imported successfully. No photos have timestamps that fall within this track's time range."
-              : `${pendingGpxImport.matchCount} photo${pendingGpxImport.matchCount === 1 ? "" : "s"} have timestamps that overlap with this GPX track. Auto-tag their locations now?`
-          }
-          confirmLabel="Yes"
-          cancelLabel={pendingGpxImport.matchCount === 0 ? "Cancel" : "No"}
-          infoOnly={pendingGpxImport.matchCount === 0}
-          onConfirm={() => {
-            applyGpxAutoTag(
-              session.photos,
-              pendingGpxImport.gpxFile.trackPoints,
-              (action) => {
-                sessionDispatch(action);
-                for (const { id, changes } of action.updates) {
-                  const fields = Object.entries(changes).map(([field, value]) => ({
-                    field,
-                    value: value == null ? null : String(value),
-                  }));
-                  tauriCommands.setPendingChanges([id], fields).catch(console.error);
-                }
+      {pendingGpxImports.length > 0 && (() => {
+        const pendingGpxImport = pendingGpxImports[0];
+        if (pendingGpxImport.status === "processing") {
+          const many = pendingGpxImport.fileCount !== 1;
+          return (
+            <ConfirmDialog
+              title="Importing GPX"
+              message={
+                <>
+                  <div className={`${styles.gpxPreviewImage} ${styles.gpxPreviewLoading}`} />
+                  {`Importing ${many ? `${pendingGpxImport.fileCount} GPX files` : "GPX file"}…`}
+                </>
               }
-            );
-            sessionDispatch({ type: "SELECT_GPX", id: pendingGpxImport.gpxFile.id });
-            setPendingGpxImport(null);
-          }}
-          onCancel={() => {
-            sessionDispatch({ type: "SELECT_GPX", id: pendingGpxImport.gpxFile.id });
-            setPendingGpxImport(null);
-          }}
-        />
-      )}
+              busy
+              onConfirm={() => {}}
+              onCancel={() => {}}
+            />
+          );
+        }
+        const { gpxFiles, matchCount, previewUrl } = pendingGpxImport;
+        const single = gpxFiles.length === 1;
+        const trackPhrase = single ? "this GPX track" : `these ${gpxFiles.length} GPX tracks`;
+        const dequeue = () => {
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          setPendingGpxImports((prev) => prev.slice(1));
+        };
+        return (
+          <ConfirmDialog
+            title={matchCount === 0 ? "GPX Imported" : "Auto-Tag Locations from GPX?"}
+            message={
+              <>
+                {previewUrl && (
+                  <img
+                    src={previewUrl}
+                    alt={single ? "Imported GPX route" : "Imported GPX routes"}
+                    className={styles.gpxPreviewImage}
+                  />
+                )}
+                {matchCount === 0
+                  ? `${single ? "GPX file" : `${gpxFiles.length} GPX files`} imported successfully. No photos have timestamps that fall within ${single ? "this track's time range" : "these tracks' time ranges"}.`
+                  : `${matchCount} photo${matchCount === 1 ? "" : "s"} have timestamps that overlap with ${trackPhrase}. Auto-tag their locations now?`}
+              </>
+            }
+            confirmLabel="Yes"
+            cancelLabel={matchCount === 0 ? "Cancel" : "No"}
+            infoOnly={matchCount === 0}
+            onConfirm={() => {
+              applyGpxAutoTag(
+                session.photos,
+                pendingGpxImport.tracks,
+                (action) => {
+                  sessionDispatch(action);
+                  for (const { id, changes } of action.updates) {
+                    const fields = Object.entries(changes).map(([field, value]) => ({
+                      field,
+                      value: value == null ? null : String(value),
+                    }));
+                    tauriCommands.setPendingChanges([id], fields)
+                      .catch((err) => reportError("Failed to save location edits", err));
+                  }
+                }
+              );
+              sessionDispatch({ type: "SELECT_GPX", id: gpxFiles[0].id });
+              dequeue();
+            }}
+            onCancel={() => {
+              sessionDispatch({ type: "SELECT_GPX", id: gpxFiles[0].id });
+              dequeue();
+            }}
+          />
+        );
+      })()}
       {gpxImportError && (
         <ConfirmDialog
           title="GPX Import Failed"
@@ -392,22 +525,20 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
               const mergedMap = { ...sidecarMap, ...result.found };
               if (result.missing.length > 0) setSidecarMissingNotice(result.missing);
               if (allRawPaths.length > 0) {
-                tauriCommands.importPhotos(allRawPaths, mergedMap).catch((err) =>
-                  console.error("[finderDrop]", err)
-                );
+                tauriCommands.importPhotos(allRawPaths, mergedMap)
+                  .catch((err) => reportError("Failed to import photos", err));
               }
-              for (const gpxPath of gpxPaths) handleGpxDropRef.current(gpxPath);
-            })();
+              handleGpxDropRef.current(gpxPaths);
+            })().catch((err) => reportError("Failed to search for XMP sidecars", err));
           }}
           onCancel={() => {
             const { allRawPaths, sidecarMap, gpxPaths } = pendingSidecarSearch;
             setPendingSidecarSearch(null);
             if (allRawPaths.length > 0) {
-              tauriCommands.importPhotos(allRawPaths, sidecarMap).catch((err) =>
-                console.error("[finderDrop]", err)
-              );
+              tauriCommands.importPhotos(allRawPaths, sidecarMap)
+                .catch((err) => reportError("Failed to import photos", err));
             }
-            for (const gpxPath of gpxPaths) handleGpxDropRef.current(gpxPath);
+            handleGpxDropRef.current(gpxPaths);
           }}
         />
       )}

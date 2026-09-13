@@ -157,6 +157,47 @@
   margin: 0;
 }
 
+/* Read-only offset row */
+.offsetValue {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.offsetSource {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+/* Offset-mismatch dialog radio group */
+.tzModeGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  text-align: left;
+}
+
+.tzModeOption {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 11px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.tzModeOption input {
+  flex-shrink: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
 /* Increment control */
 .incrementRow {
   display: flex;

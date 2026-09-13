@@ -4,6 +4,7 @@ import { useUI } from "../../../state/UIContext";
 import { deriveFieldValue } from "../../../lib/inspectorUtils";
 import { runVibeTag } from "../../../lib/vibeTag";
 import { tauriCommands } from "../../../lib/tauri";
+import { reportError } from "../../../lib/errors";
 import type { Photo, Metadata } from "../../../state/SessionContext";
 import type { MetadataProposal, VibeTagMessage, VibeTagDevData } from "../../../lib/vibeTag";
 import styles from "./VibeTagSection.module.css";
@@ -140,7 +141,8 @@ export function VibeTagSection({
       field,
       value: value == null ? null : String(value),
     }));
-    tauriCommands.setPendingChanges(ids, fields).catch(console.error);
+    tauriCommands.setPendingChanges(ids, fields)
+      .catch((err) => reportError("Failed to save Vibe Tag edits", err));
     setProposal(null);
     setMessages([]);
   }

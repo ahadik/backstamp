@@ -58,3 +58,23 @@
 .actions button.destructive {
   color: var(--color-danger) !important;
 }
+
+.busyRow {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3) var(--space-2);
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

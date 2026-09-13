@@ -6,6 +6,7 @@ import { useDragDrop } from "../../../hooks/useDragDrop";
 import { computeInheritance } from "../../../hooks/useMetadataInheritance";
 import type { CameraConflict } from "../../../hooks/useMetadataInheritance";
 import { tauriCommands } from "../../../lib/tauri";
+import { reportError } from "../../../lib/errors";
 import { CameraConflictDialog } from "../../common/CameraConflictDialog/CameraConflictDialog";
 import { DayBlockHeader } from "./DayBlockHeader";
 import { GpxTile } from "./GpxTile";
@@ -82,7 +83,8 @@ export function PhotoGrid() {
           field,
           value: value == null ? null : String(value),
         }));
-        tauriCommands.setPendingChanges([id], fields).catch(console.error);
+        tauriCommands.setPendingChanges([id], fields)
+          .catch((err) => reportError("Failed to save photo edits", err));
       }
       if (batchUpdates.length > 0) {
         dispatch({ type: "SET_PENDING_BATCH", updates: batchUpdates });
@@ -116,7 +118,7 @@ export function PhotoGrid() {
       dispatch({ type: "REORDER_PHOTOS", orderedIds: newOrder });
       tauriCommands
         .reorderPhotos(newOrder)
-        .catch((err) => console.error("[reorderPhotos]", err));
+        .catch((err) => reportError("Failed to save the new photo order", err));
 
       if (result.cameraConflict) {
         setCameraConflict(result.cameraConflict);
@@ -203,7 +205,8 @@ export function PhotoGrid() {
                 field,
                 value: value == null ? null : String(value),
               }));
-              tauriCommands.setPendingChanges(cameraConflict.draggingIds, fields).catch(console.error);
+              tauriCommands.setPendingChanges(cameraConflict.draggingIds, fields)
+                .catch((err) => reportError("Failed to save camera edits", err));
             }
             setCameraConflict(null);
           }}
@@ -258,7 +261,8 @@ export function PhotoGrid() {
                     isSelected={session.selectedGpxId === gpx.id}
                     onSelect={(id) => dispatch({ type: "SELECT_GPX", id })}
                     onRemove={(id) => {
-                      tauriCommands.removeGpx(id).catch(console.error);
+                      tauriCommands.removeGpx(id)
+                        .catch((err) => reportError("Failed to remove the GPX file", err));
                       dispatch({ type: "REMOVE_GPX", id });
                     }}
                   />

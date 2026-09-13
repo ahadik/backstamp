@@ -9,6 +9,9 @@ import {
   distinctCaptureDates,
   zonedInstant,
   formatZoneOffset,
+  formatUtcOffset,
+  offsetToMinutes,
+  wallClockInZone,
 } from "./datetime";
 
 // ── utcOffsetFor ──────────────────────────────────────────────────────────────
@@ -279,5 +282,72 @@ describe("distinctCaptureDates", () => {
 
   it("treats a missing time as distinct from a set one", () => {
     expect(distinctCaptureDates([photo("2026-07-03", null), photo("2026-07-03", "12:00:00")])).toHaveLength(2);
+  });
+});
+
+// ── offsetToMinutes ───────────────────────────────────────────────────────────
+
+describe("offsetToMinutes", () => {
+  it("parses positive and negative whole-hour offsets", () => {
+    expect(offsetToMinutes("+09:00")).toBe(540);
+    expect(offsetToMinutes("-08:00")).toBe(-480);
+  });
+
+  it("parses half-hour offsets", () => {
+    expect(offsetToMinutes("+05:30")).toBe(330);
+  });
+
+  it("rejects unrecognised strings", () => {
+    expect(offsetToMinutes("Z")).toBeNull();
+    expect(offsetToMinutes("-8:00")).toBeNull();
+    expect(offsetToMinutes("PST")).toBeNull();
+  });
+});
+
+// ── formatUtcOffset ───────────────────────────────────────────────────────────
+
+describe("formatUtcOffset", () => {
+  it("renders whole hours without minutes", () => {
+    expect(formatUtcOffset("-08:00")).toBe("UTC−8");
+    expect(formatUtcOffset("+09:00")).toBe("UTC+9");
+  });
+
+  it("keeps minutes for fractional offsets", () => {
+    expect(formatUtcOffset("+05:30")).toBe("UTC+5:30");
+  });
+
+  it("returns null for unrecognised strings", () => {
+    expect(formatUtcOffset("bogus")).toBeNull();
+  });
+});
+
+// ── wallClockInZone ───────────────────────────────────────────────────────────
+
+describe("wallClockInZone", () => {
+  it("re-expresses the wall clock while preserving the instant", () => {
+    // A camera stuck on winter Pacific time (-08:00) in August. Re-labelling to
+    // Los Angeles (PDT, -07:00) must move the clock forward an hour so the
+    // moment of capture (18:02 UTC) stays fixed.
+    expect(wallClockInZone("2026-08-03", "10:02:00", "-08:00", "America/Los_Angeles"))
+      .toEqual({ date: "2026-08-03", time: "11:02:00" });
+  });
+
+  it("is the identity when the zone matches the stored offset", () => {
+    // Same recording interpreted as Anchorage (AKDT, also -08:00): no change.
+    expect(wallClockInZone("2026-08-03", "10:02:00", "-08:00", "America/Anchorage"))
+      .toEqual({ date: "2026-08-03", time: "10:02:00" });
+  });
+
+  it("rolls the date when the conversion crosses midnight", () => {
+    expect(wallClockInZone("2026-08-03", "23:30:00", "-08:00", "Asia/Tokyo"))
+      .toEqual({ date: "2026-08-04", time: "16:30:00" });
+  });
+
+  it("returns null for an unknown zone", () => {
+    expect(wallClockInZone("2026-08-03", "10:02:00", "-08:00", "Not/AZone")).toBeNull();
+  });
+
+  it("returns null for an unparseable offset", () => {
+    expect(wallClockInZone("2026-08-03", "10:02:00", "PST", "America/Anchorage")).toBeNull();
   });
 });

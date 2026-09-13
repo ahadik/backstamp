@@ -13,6 +13,7 @@ import { DevLogModal } from "./components/common/DevLogModal/DevLogModal";
 import { useSession } from "./state/SessionContext";
 import { useUI } from "./state/UIContext";
 import { tauriCommands } from "./lib/tauri";
+import { reportError } from "./lib/errors";
 import type { ApplyPhase, ApplyError } from "./components/ApplyModal/ApplyModal";
 import type { Metadata, Photo, GpxFile } from "./state/SessionContext";
 import type { TrackPoint } from "./lib/tauri";
@@ -83,20 +84,20 @@ function App() {
           mapPanelHeight: session.mapPanelHeight,
         });
       } catch (err) {
-        console.error("[App] session restore failed:", err);
+        reportError("Failed to restore the previous session", err);
       } finally {
         setSessionLoading(false);
       }
 
       tauriCommands.getApiKey("mapbox_token").then((token) => {
         if (token) uiDispatch({ type: "SET_MAPBOX_TOKEN", token });
-      });
+      }).catch((err) => reportError("Failed to load the saved Mapbox token", err));
       tauriCommands.getApiKey("google_maps_key").then((key) => {
         if (key) uiDispatch({ type: "SET_GOOGLE_MAPS_KEY", key });
-      });
+      }).catch((err) => reportError("Failed to load the saved Google Maps key", err));
       tauriCommands.getApiKey("claude_api_key").then((key) => {
         if (key) uiDispatch({ type: "SET_CLAUDE_API_KEY", key });
-      });
+      }).catch((err) => reportError("Failed to load the saved Claude API key", err));
     }
 
     hydrateSession();
@@ -141,7 +142,7 @@ function App() {
               canRollback: session.canRollback,
             });
           } catch (err) {
-            console.error("[App] loadSession after apply failed:", err);
+            reportError("Failed to refresh photos after applying changes", err);
             dispatch({ type: "APPLY_COMPLETE", updatedPhotos: [], canRollback: true });
           }
           const errors: ApplyError[] = payload.failedFiles.map((f) => ({
@@ -196,7 +197,8 @@ function App() {
               ? { type: "undoing", done: 0, total: prev.done }
               : prev
           );
-          await tauriCommands.applyCancel();
+          await tauriCommands.applyCancel()
+            .catch((err) => reportError("Failed to cancel the apply operation", err));
         }}
         onDismiss={() => setApplyPhase({ type: "idle" })}
       />

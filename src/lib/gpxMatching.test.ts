@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { matchToTrack, countMatches } from "./gpxMatching";
+import { matchToTrack, matchToTracks, countMatches } from "./gpxMatching";
 import { toUtcSeconds } from "./datetime";
 import type { TrackPoint } from "./tauri";
 
@@ -54,6 +54,57 @@ describe("matchToTrack", () => {
     expect(result!.lat).toBeCloseTo(5.0, 3);
     expect(result!.lng).toBeCloseTo(5.0, 3);
   });
+
+  it("interpolates across a recording gap far wider than the tolerance", () => {
+    // A logger that auto-paused mid-track (the Nizina kayak case): the photo
+    // falls in a 28-minute hole. Inside a single track we always interpolate.
+    const p = pts([[0, 61.0, -142.0], [1680, 61.2, -142.2]]);
+    const result = matchToTrack(p, 840, 60);
+    expect(result).not.toBeNull();
+    expect(result!.lat).toBeCloseTo(61.1, 6);
+    expect(result!.lng).toBeCloseTo(-142.1, 6);
+  });
+
+  it("still applies the tolerance beyond the track's ends", () => {
+    const p = pts([[100, 37.0, -122.0], [200, 37.1, -122.1]]);
+    expect(matchToTrack(p, 30, 60)).toBeNull();
+    expect(matchToTrack(p, 55, 60)).toEqual({ lat: 37.0, lng: -122.0 });
+    expect(matchToTrack(p, 255, 60)).toEqual({ lat: 37.1, lng: -122.1 });
+    expect(matchToTrack(p, 265, 60)).toBeNull();
+  });
+});
+
+describe("matchToTracks", () => {
+  it("never interpolates between separate tracks", () => {
+    // Two tracks with a target between them. Flattened, the old code would have
+    // interpolated day 1's end to day 2's start — a path no device recorded.
+    const day1 = pts([[0, 61.0, -142.0], [100, 61.1, -142.1]]);
+    const day2 = pts([[10000, 62.0, -143.0], [10100, 62.1, -143.1]]);
+    expect(matchToTracks([day1, day2], 5000, 60)).toBeNull();
+  });
+
+  it("interpolates inside whichever track spans the target", () => {
+    const day1 = pts([[0, 61.0, -142.0], [1000, 61.2, -142.2]]);
+    const day2 = pts([[10000, 62.0, -143.0], [10100, 62.1, -143.1]]);
+    const result = matchToTracks([day1, day2], 500, 60);
+    expect(result).not.toBeNull();
+    expect(result!.lat).toBeCloseTo(61.1, 6);
+  });
+
+  it("prefers the track with the nearest recorded fix when tracks overlap", () => {
+    // Two devices recording at once: one has a fix 5s from the target, the
+    // other only 400s away. The closer witness wins.
+    const sparse = pts([[0, 10.0, 10.0], [800, 11.0, 11.0]]);
+    const dense = pts([[395, 20.0, 20.0], [405, 20.1, 20.1]]);
+    const result = matchToTracks([sparse, dense], 400, 60);
+    expect(result).not.toBeNull();
+    expect(result!.lat).toBeCloseTo(20.05, 3);
+  });
+
+  it("returns null when no track matches", () => {
+    expect(matchToTracks([], 100, 60)).toBeNull();
+    expect(matchToTracks([pts([[0, 1.0, 1.0]])], 500, 60)).toBeNull();
+  });
 });
 
 describe("countMatches", () => {
@@ -65,7 +116,7 @@ describe("countMatches", () => {
       { currentMetadata: { captureDate: "1970-01-01", captureTime: "00:01:00", timezone: "UTC" } },
       { currentMetadata: { captureDate: "1970-01-01", captureTime: "01:00:00", timezone: "UTC" } },
     ];
-    const { matching, total } = countMatches(photos, trackPoints);
+    const { matching, total } = countMatches(photos, [trackPoints]);
     expect(total).toBe(3);
     expect(matching).toBe(2);
   });
@@ -76,7 +127,7 @@ describe("countMatches", () => {
       { currentMetadata: { captureDate: "1970-01-01", captureTime: "00:00:00", timezone: null } },
       { currentMetadata: { captureDate: "1970-01-01", captureTime: "00:00:00", timezone: "UTC" } },
     ];
-    const { matching, total } = countMatches(photos, trackPoints);
+    const { matching, total } = countMatches(photos, [trackPoints]);
     expect(total).toBe(1);
     expect(matching).toBe(1);
   });

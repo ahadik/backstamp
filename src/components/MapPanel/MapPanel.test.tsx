@@ -6,13 +6,27 @@ import type { UIState } from "../../state/UIContext";
 
 const mockMapInstance = {
   on: vi.fn(),
+  once: vi.fn(),
   remove: vi.fn(),
   isStyleLoaded: vi.fn(() => false),
-  getSource: vi.fn(() => null),
+  getSource: vi.fn((_id: string): unknown => null),
   getStyle: vi.fn(() => ({ sources: {} })),
+  getLayer: vi.fn((_id: string): unknown => undefined),
   addSource: vi.fn(),
   addLayer: vi.fn(),
+  removeLayer: vi.fn(),
+  removeSource: vi.fn(),
+  flyTo: vi.fn(),
 };
+
+// Invoke and clear every deferred sync queued via map.once("idle", ...)
+function flushIdleCallbacks() {
+  const cbs = mockMapInstance.once.mock.calls
+    .filter(([event]) => event === "idle")
+    .map(([, cb]) => cb as () => void);
+  mockMapInstance.once.mockClear();
+  cbs.forEach((cb) => cb());
+}
 
 vi.mock("mapbox-gl", () => {
   return {
@@ -137,6 +151,50 @@ describe("MapPanel", () => {
     expect(btn).toBeInTheDocument();
     fireEvent.click(btn);
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  describe("gpx layer sync (Issue #25)", () => {
+    const gpxFile = {
+      id: "g1",
+      filePath: "/tracks/hike.gpx",
+      addedAt: 1,
+      trackPoints: [{ lat: 37.77, lng: -122.42, timestamp: 1000 }],
+      thumbnailPath: null,
+      timezone: null,
+    };
+
+    it("removes gpx layers on session clear even while the style is mid-load", () => {
+      // isStyleLoaded() stays false throughout (the mock default), simulating a
+      // map still streaming tiles — the sync must defer, not drop.
+      const { onOpenSettings } = setupMocks(
+        { gpxFiles: [gpxFile] },
+        { mapboxToken: "pk.test" }
+      );
+      const { rerender } = render(<MapPanel onOpenSettings={onOpenSettings} />);
+      flushIdleCallbacks();
+      expect(mockMapInstance.addSource).toHaveBeenCalledWith(
+        "gpx-g1",
+        expect.objectContaining({ type: "geojson" })
+      );
+      expect(mockMapInstance.addLayer).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "gpx-line-g1" }),
+        undefined
+      );
+
+      // Clear the session: gpxFiles goes empty while the style is still not loaded.
+      mockMapInstance.getLayer.mockImplementation((id: string) =>
+        id === "gpx-line-g1" ? {} : undefined
+      );
+      mockMapInstance.getSource.mockImplementation((id: string) =>
+        id === "gpx-g1" ? {} : null
+      );
+      setupMocks({ gpxFiles: [] }, { mapboxToken: "pk.test" });
+      rerender(<MapPanel onOpenSettings={onOpenSettings} />);
+      flushIdleCallbacks();
+
+      expect(mockMapInstance.removeLayer).toHaveBeenCalledWith("gpx-line-g1");
+      expect(mockMapInstance.removeSource).toHaveBeenCalledWith("gpx-g1");
+    });
   });
 
   describe("drag handle", () => {

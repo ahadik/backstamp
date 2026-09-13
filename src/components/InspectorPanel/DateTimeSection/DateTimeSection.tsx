@@ -1,15 +1,20 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useSession } from "../../../state/SessionContext";
-import { deriveFieldValue } from "../../../lib/inspectorUtils";
+import { deriveFieldValue, deriveStrictFieldValue } from "../../../lib/inspectorUtils";
 import { WORKING_TIMEZONES } from "../../../lib/timezones";
 import {
   distinctCaptureDates,
+  formatUtcOffset,
   formatZoneOffset,
+  offsetToMinutes,
   resolveZoneOffsets,
   shiftWallClock,
+  utcOffsetFor,
+  wallClockInZone,
 } from "../../../lib/datetime";
 import { ConfirmDialog } from "../../common/ConfirmDialog/ConfirmDialog";
 import { tauriCommands } from "../../../lib/tauri";
+import { reportError } from "../../../lib/errors";
 import type { Photo, Metadata } from "../../../state/SessionContext";
 import styles from "./DateTimeSection.module.css";
 
@@ -18,7 +23,8 @@ function persistPending(ids: string[], changes: Partial<Metadata>) {
     field,
     value: value == null ? null : String(value),
   }));
-  tauriCommands.setPendingChanges(ids, fields).catch(console.error);
+  tauriCommands.setPendingChanges(ids, fields)
+    .catch((err) => reportError("Failed to save date/time edits", err));
 }
 
 /** Parse freeform time text to "HH:MM:SS", or null if unrecognised. */
@@ -76,8 +82,26 @@ interface DateTimeSectionProps {
 }
 
 interface PendingConfirm {
-  changes: Partial<Metadata>;
   count: number;
+  /** Runs when the user confirms overwriting the multiple existing values. */
+  proceed: () => void;
+}
+
+/**
+ * A timezone selection whose offset disagrees with what the selected photos
+ * currently carry, awaiting the user's choice of how to reconcile.
+ */
+interface TzMismatch {
+  tz: string;
+  tzName: string;
+  mismatchCount: number;
+  /** "UTC−7" — the chosen zone's offset, when uniform across mismatched photos. */
+  zoneOffsetLabel: string | null;
+  /** "UTC−8" — the photos' current offset, when uniform across mismatched photos. */
+  currentOffsetLabel: string | null;
+  /** Concrete before/after times, shown when exactly one photo mismatches. */
+  sampleCurrentTime: string | null;
+  sampleAdjustedTime: string | null;
 }
 
 export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
@@ -85,9 +109,14 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
 
   const captureDate = deriveFieldValue(selectedPhotos, (m) => m.captureDate);
   const captureTime = deriveFieldValue(selectedPhotos, (m) => m.captureTime);
-  const timezone = deriveFieldValue(selectedPhotos, (m) => m.timezone);
+  // Strict: a photo without a timezone is in a different state than one with,
+  // so mixed set/unset selections read as multiple rather than adopting the
+  // set value. Same for the recorded offset below.
+  const timezone = deriveStrictFieldValue(selectedPhotos, (m) => m.timezone);
 
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+  const [tzMismatch, setTzMismatch] = useState<TzMismatch | null>(null);
+  const [tzMismatchMode, setTzMismatchMode] = useState<"adjust" | "keep">("adjust");
   const [tzSearch, setTzSearch] = useState("");
   const [tzOpen, setTzOpen] = useState(false);
   const [incrementHours, setIncrementHours] = useState(1);
@@ -157,7 +186,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
   ) {
     if (currentValue === "multiple") {
       const count = new Set(selectedPhotos.map((p) => getValue(p.currentMetadata))).size;
-      setPendingConfirm({ changes, count });
+      setPendingConfirm({ count, proceed: () => dispatchChanges(changes) });
     } else {
       dispatchChanges(changes);
     }
@@ -206,7 +235,115 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
   function handleTimezoneSelect(tz: string) {
     setTzOpen(false);
     setTzSearch("");
-    maybeConfirm(timezone, (m) => m.timezone, { timezone: tz });
+    if (timezone === "multiple") {
+      const count = new Set(selectedPhotos.map((p) => p.currentMetadata.timezone)).size;
+      setPendingConfirm({ count, proceed: () => beginTimezoneChange(tz) });
+    } else {
+      beginTimezoneChange(tz);
+    }
+  }
+
+  /** The zone's offset at a photo's own capture instant, null when unresolvable. */
+  function zoneOffsetForPhoto(photo: Photo, tz: string): string | null {
+    const { captureDate: cd, captureTime: ct } = photo.currentMetadata;
+    return cd ? utcOffsetFor(cd, ct, tz) : null;
+  }
+
+  /**
+   * A photo disagrees with the chosen zone when it carries an offset and the
+   * zone resolves to a different one at that photo's capture instant. Photos
+   * with no offset have nothing to disagree with and are relabelled silently.
+   */
+  function beginTimezoneChange(tz: string) {
+    const mismatched = selectedPhotos.filter((p) => {
+      const off = p.currentMetadata.utcOffset;
+      if (!off) return false;
+      const next = zoneOffsetForPhoto(p, tz);
+      return next !== null && offsetToMinutes(next) !== offsetToMinutes(off);
+    });
+
+    if (mismatched.length === 0) {
+      applyTimezone(tz, "keep");
+      return;
+    }
+
+    const uniqueLabel = (values: Array<string | null>) => {
+      const set = new Set(values);
+      if (set.size !== 1) return null;
+      const only = [...set][0];
+      return only ? formatUtcOffset(only) : null;
+    };
+    const zoneOffsetLabel = uniqueLabel(mismatched.map((p) => zoneOffsetForPhoto(p, tz)));
+    const currentOffsetLabel = uniqueLabel(mismatched.map((p) => p.currentMetadata.utcOffset));
+
+    let sampleCurrentTime: string | null = null;
+    let sampleAdjustedTime: string | null = null;
+    if (mismatched.length === 1) {
+      const m = mismatched[0].currentMetadata;
+      if (m.captureDate && m.captureTime && m.utcOffset) {
+        const shifted = wallClockInZone(m.captureDate, m.captureTime, m.utcOffset, tz);
+        if (shifted) {
+          sampleCurrentTime = formatTimeDisplay(m.captureTime);
+          sampleAdjustedTime = formatTimeDisplay(shifted.time);
+        }
+      }
+    }
+
+    const option = WORKING_TIMEZONES.find((t) => t.value === tz);
+    setTzMismatchMode("adjust");
+    setTzMismatch({
+      tz,
+      tzName: option ? option.name : tz,
+      mismatchCount: mismatched.length,
+      zoneOffsetLabel,
+      currentOffsetLabel,
+      sampleCurrentTime,
+      sampleAdjustedTime,
+    });
+  }
+
+  /**
+   * Set the zone on every selected photo, refreshing each photo's offset to the
+   * zone's value at its capture instant. "adjust" re-expresses the wall clock in
+   * the new zone so the moment of capture is preserved; "keep" leaves the wall
+   * clock alone, letting the moment shift by the offset difference.
+   */
+  function applyTimezone(tz: string, mode: "adjust" | "keep") {
+    const updates: Array<{ id: string; changes: Partial<Metadata> }> = [];
+    for (const photo of selectedPhotos) {
+      const { captureDate: cd, captureTime: ct, utcOffset: off } = photo.currentMetadata;
+      const changes: Partial<Metadata> = { timezone: tz };
+      const next = zoneOffsetForPhoto(photo, tz);
+      if (next) {
+        changes.utcOffset = next;
+        if (
+          mode === "adjust" &&
+          cd &&
+          ct &&
+          off &&
+          offsetToMinutes(off) !== offsetToMinutes(next)
+        ) {
+          const shifted = wallClockInZone(cd, ct, off, tz);
+          if (shifted) {
+            changes.captureDate = shifted.date;
+            changes.captureTime = shifted.time;
+          }
+        }
+      }
+      updates.push({ id: photo.id, changes });
+    }
+
+    dispatch({ type: "SET_PENDING_BATCH", updates });
+    // Wall-clock adjustments differ per photo; persist in groups of identical
+    // payloads so the common no-shift case stays a single backend call.
+    const groups = new Map<string, { ids: string[]; changes: Partial<Metadata> }>();
+    for (const u of updates) {
+      const key = JSON.stringify(u.changes);
+      const group = groups.get(key);
+      if (group) group.ids.push(u.id);
+      else groups.set(key, { ids: [u.id], changes: u.changes });
+    }
+    for (const group of groups.values()) persistPending(group.ids, group.changes);
   }
 
   function handleIncrement(direction: 1 | -1) {
@@ -246,6 +383,25 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
       ? zoneLabelFor(timezone, tzOption ? tzOption.name : timezone)
       : "";
   const tzPlaceholder = hasMixedTimezones ? "Multiple Values" : "Not set";
+
+  // The offset shown is the selected zone's (resolved at the capture dates)
+  // once a timezone is set; otherwise it falls back to the camera-recorded
+  // value, labelled as such so an unresolved timezone stays visible as open.
+  const recordedOffset = deriveStrictFieldValue(selectedPhotos, (m) => m.utcOffset);
+  let offsetLabel = "—";
+  let offsetSource: string | null = null;
+  if (hasMixedTimezones) {
+    offsetLabel = "Multiple Values";
+  } else if (timezone) {
+    const resolved = zoneOffsets.get(timezone);
+    offsetLabel = resolved ? resolved.offset : captureDates.length > 0 ? "Varies" : "—";
+    offsetSource = "from selected timezone";
+  } else if (recordedOffset === "multiple") {
+    offsetLabel = "Multiple Values";
+  } else if (recordedOffset) {
+    offsetLabel = formatUtcOffset(recordedOffset) ?? recordedOffset;
+    offsetSource = "from camera";
+  }
 
   return (
     <div className={styles.section}>
@@ -327,6 +483,13 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
                 )}
               </div>
             </div>
+            <div className={styles.row}>
+              <span className={styles.label}>Offset</span>
+              <div className={styles.offsetValue}>
+                <span>{offsetLabel}</span>
+                {offsetSource && <span className={styles.offsetSource}>{offsetSource}</span>}
+              </div>
+            </div>
             <div className={styles.incrementRow}>
               <button
                 className={`btn btn-glass ${styles.incBtn}`}
@@ -371,11 +534,75 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
           }
           confirmLabel="Overwrite"
           onConfirm={() => {
-            dispatchChanges(pendingConfirm.changes);
+            pendingConfirm.proceed();
             setPendingConfirm(null);
           }}
           onCancel={() => setPendingConfirm(null)}
         />
+      )}
+
+      {tzMismatch && (
+        <ConfirmDialog
+          title="Timezone Changes UTC Offset"
+          message={
+            <>
+              {tzMismatch.zoneOffsetLabel && tzMismatch.currentOffsetLabel ? (
+                <>
+                  <strong>{tzMismatch.tzName}</strong> is{" "}
+                  <strong>{tzMismatch.zoneOffsetLabel}</strong> at the time of capture, but{" "}
+                  {tzMismatch.mismatchCount === 1 ? (
+                    <>this photo records <strong>{tzMismatch.currentOffsetLabel}</strong></>
+                  ) : (
+                    <>
+                      <strong>{tzMismatch.mismatchCount}</strong> photos record{" "}
+                      <strong>{tzMismatch.currentOffsetLabel}</strong>
+                    </>
+                  )}
+                  .
+                </>
+              ) : (
+                <>
+                  <strong>{tzMismatch.tzName}</strong> has a different UTC offset than{" "}
+                  <strong>{tzMismatch.mismatchCount}</strong>{" "}
+                  {tzMismatch.mismatchCount === 1 ? "photo" : "photos"} currently record.
+                </>
+              )}{" "}
+              Do you want to adjust the capture{" "}
+              {tzMismatch.mismatchCount === 1 ? "time" : "times"} by this offset?
+            </>
+          }
+          onConfirm={() => {
+            applyTimezone(tzMismatch.tz, tzMismatchMode);
+            setTzMismatch(null);
+          }}
+          onCancel={() => setTzMismatch(null)}
+        >
+          <div className={styles.tzModeGroup}>
+            <label className={styles.tzModeOption}>
+              <input
+                type="radio"
+                name="tzMismatchMode"
+                checked={tzMismatchMode === "adjust"}
+                onChange={() => setTzMismatchMode("adjust")}
+              />
+              <span>
+                Adjust capture {tzMismatch.mismatchCount === 1 ? "time" : "times"}
+                {tzMismatch.sampleCurrentTime && tzMismatch.sampleAdjustedTime && (
+                  <> (from {tzMismatch.sampleCurrentTime} to {tzMismatch.sampleAdjustedTime})</>
+                )}
+              </span>
+            </label>
+            <label className={styles.tzModeOption}>
+              <input
+                type="radio"
+                name="tzMismatchMode"
+                checked={tzMismatchMode === "keep"}
+                onChange={() => setTzMismatchMode("keep")}
+              />
+              <span>Keep capture {tzMismatch.mismatchCount === 1 ? "time" : "times"}</span>
+            </label>
+          </div>
+        </ConfirmDialog>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useReducer, useEffect, useRef } from "react";
 import { tauriCommands } from "../lib/tauri";
+import { reportError, setErrorHandler } from "../lib/errors";
 
 export interface UIState {
   workingTimezone: string;  // IANA name, display-only
@@ -75,20 +76,30 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(uiReducer, initialState);
   const prevRef = useRef(state);
 
+  // Surface backend command failures in the ErrorModal. Registered here
+  // because the reporting module can't reach React state on its own.
+  useEffect(() => {
+    setErrorHandler((message) => dispatch({ type: "SET_ERROR", error: message }));
+    return () => setErrorHandler(null);
+  }, []);
+
   useEffect(() => {
     const prev = prevRef.current;
     if (prev.workingTimezone !== state.workingTimezone) {
-      tauriCommands.setSetting("ui.workingTimezone", state.workingTimezone).catch(console.error);
+      tauriCommands.setSetting("ui.workingTimezone", state.workingTimezone)
+        .catch((err) => reportError("Failed to save the working timezone preference", err));
     }
     if (prev.gridColumns !== state.gridColumns) {
-      tauriCommands.setSetting("ui.gridColumns", String(state.gridColumns)).catch(console.error);
+      tauriCommands.setSetting("ui.gridColumns", String(state.gridColumns))
+        .catch((err) => reportError("Failed to save the grid layout preference", err));
     }
     prevRef.current = state;
   }, [state.workingTimezone, state.gridColumns]);
 
   useEffect(() => {
     const id = setTimeout(() => {
-      tauriCommands.setSetting("ui.mapPanelHeight", String(state.mapPanelHeight)).catch(console.error);
+      tauriCommands.setSetting("ui.mapPanelHeight", String(state.mapPanelHeight))
+        .catch((err) => reportError("Failed to save the map panel size preference", err));
     }, 500);
     return () => clearTimeout(id);
   }, [state.mapPanelHeight]);

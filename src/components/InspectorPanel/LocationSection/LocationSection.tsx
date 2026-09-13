@@ -4,7 +4,8 @@ import { useSession } from "../../../state/SessionContext";
 import { useUI } from "../../../state/UIContext";
 import { deriveFieldValue } from "../../../lib/inspectorUtils";
 import { tauriCommands } from "../../../lib/tauri";
-import { matchToTrack, countMatches, applyGpxAutoTag } from "../../../lib/gpxMatching";
+import { reportError } from "../../../lib/errors";
+import { matchToTracks, countMatches, applyGpxAutoTag, tracksFrom } from "../../../lib/gpxMatching";
 import { toUtcSeconds } from "../../../lib/datetime";
 import { ConfirmDialog } from "../../common/ConfirmDialog/ConfirmDialog";
 import type { Photo } from "../../../state/SessionContext";
@@ -47,7 +48,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
   const [gpxLocateDialog, setGpxLocateDialog] = useState<{
     matchCount: number;
     totalCount: number;
-    allPoints: TrackPoint[];
+    tracks: TrackPoint[][];
   } | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,19 +61,19 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
   const gpsLng = deriveFieldValue(selectedPhotos, (m) => m.gpsLng);
   const timezone = deriveFieldValue(selectedPhotos, (m) => m.timezone);
 
-  const allTrackPoints = session.gpxFiles.flatMap((g) => g.trackPoints).sort((a, b) => a.timestamp - b.timestamp);
+  const gpxTracks = tracksFrom(session.gpxFiles);
   const timezones = new Set(
     selectedPhotos
       .map((p) => p.currentMetadata.timezone)
       .filter((tz): tz is string => tz != null)
   );
   const anyPhotoOverlapsGpx =
-    allTrackPoints.length > 0 &&
+    gpxTracks.some((t) => t.length > 0) &&
     selectedPhotos.some((photo) => {
       const { captureDate, captureTime, timezone } = photo.currentMetadata;
       if (!captureDate || !captureTime || !timezone) return false;
       const utcSecs = toUtcSeconds(captureDate, captureTime, timezone);
-      return utcSecs !== null && matchToTrack(allTrackPoints, utcSecs) !== null;
+      return utcSecs !== null && matchToTracks(gpxTracks, utcSecs) !== null;
     });
 
   const gpxButtonEnabled =
@@ -96,7 +97,8 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
       field,
       value: value == null ? null : String(value),
     }));
-    tauriCommands.setPendingChanges(selectedIds, fields).catch(console.error);
+    tauriCommands.setPendingChanges(selectedIds, fields)
+      .catch((err) => reportError("Failed to save location edits", err));
     tauriCommands.resolveTimezone(lat, lng).then(setResolvedTz).catch(console.error);
   }
   dispatchCoordsRef.current = dispatchCoords;
@@ -440,7 +442,8 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                     const changes = { timezone: resolvedTz as string };
                     dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
                     const fields = [{ field: "timezone", value: resolvedTz as string }];
-                    tauriCommands.setPendingChanges(selectedIds, fields).catch(console.error);
+                    tauriCommands.setPendingChanges(selectedIds, fields)
+                      .catch((err) => reportError("Failed to save timezone edits", err));
                   }}
                 >
                   Use {resolvedTz}
@@ -460,7 +463,8 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                     const changes = { timezone: resolvedTz as string };
                     dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
                     const fields = [{ field: "timezone", value: resolvedTz as string }];
-                    tauriCommands.setPendingChanges(selectedIds, fields).catch(console.error);
+                    tauriCommands.setPendingChanges(selectedIds, fields)
+                      .catch((err) => reportError("Failed to save timezone edits", err));
                   }}
                 >
                   Use {resolvedTz}
@@ -480,7 +484,8 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                     const changes = { timezone: bulkResolvedTz as string };
                     dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
                     const fields = [{ field: "timezone", value: bulkResolvedTz as string }];
-                    tauriCommands.setPendingChanges(selectedIds, fields).catch(console.error);
+                    tauriCommands.setPendingChanges(selectedIds, fields)
+                      .catch((err) => reportError("Failed to save timezone edits", err));
                   }}
                 >
                   Use {bulkResolvedTz}
@@ -499,8 +504,8 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                       : undefined
                   }
                   onClick={() => {
-                    const { matching, total } = countMatches(selectedPhotos, allTrackPoints);
-                    setGpxLocateDialog({ matchCount: matching, totalCount: total, allPoints: allTrackPoints });
+                    const { matching, total } = countMatches(selectedPhotos, gpxTracks);
+                    setGpxLocateDialog({ matchCount: matching, totalCount: total, tracks: gpxTracks });
                   }}
                 >
                   Locate Photos on GPX
@@ -515,14 +520,15 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                 confirmLabel="Yes"
                 cancelLabel="No"
                 onConfirm={() => {
-                  applyGpxAutoTag(selectedPhotos, gpxLocateDialog.allPoints, (action) => {
+                  applyGpxAutoTag(selectedPhotos, gpxLocateDialog.tracks, (action) => {
                     dispatch(action);
                     for (const { id, changes } of action.updates) {
                       const fields = Object.entries(changes).map(([field, value]) => ({
                         field,
                         value: value == null ? null : String(value),
                       }));
-                      tauriCommands.setPendingChanges([id], fields).catch(console.error);
+                      tauriCommands.setPendingChanges([id], fields)
+                        .catch((err) => reportError("Failed to save location edits", err));
                     }
                   });
                   setGpxLocateDialog(null);

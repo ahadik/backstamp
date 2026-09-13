@@ -7,8 +7,12 @@ interface ConfirmDialogProps {
   message: string | ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** Optional content between the message and the actions (e.g. a radio group). */
+  children?: ReactNode;
   destructive?: boolean;
   infoOnly?: boolean;
+  /** Work in progress: show a spinner instead of actions and block dismissal. */
+  busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -18,18 +22,25 @@ export function ConfirmDialog({
   message,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
+  children,
   destructive = false,
   infoOnly = false,
+  busy = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
   return (
-    <Modal isOpen onClose={onCancel}>
+    <Modal isOpen onClose={onCancel} closeOnBackdrop={!busy} closeOnEscape={!busy}>
       <div className={styles.dialog}>
         <h3 className={styles.title}>{title}</h3>
         <p className={styles.message}>{message}</p>
+        {children}
         <div className={styles.actions}>
-          {infoOnly ? (
+          {busy ? (
+            <div className={styles.busyRow}>
+              <span className={styles.spinner} />
+            </div>
+          ) : infoOnly ? (
             <button className="btn" onClick={onCancel}>
               {cancelLabel === "Cancel" ? "OK" : cancelLabel}
             </button>

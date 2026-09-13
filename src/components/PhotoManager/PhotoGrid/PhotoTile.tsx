@@ -1,5 +1,6 @@
 import { useSession } from "../../../state/SessionContext";
 import { tauriCommands } from "../../../lib/tauri";
+import { reportError } from "../../../lib/errors";
 import type { Photo } from "../../../state/SessionContext";
 import type { DropZone } from "../../../hooks/useDragDrop";
 import { GapDropZone } from "./GapDropZone";
@@ -56,7 +57,8 @@ export function PhotoTile({
                 onClick={(e) => {
                   e.stopPropagation();
                   dispatch({ type: "REMOVE_PHOTOS", ids: [photo.id] });
-                  tauriCommands.removePhotos([photo.id]).catch(console.error);
+                  tauriCommands.removePhotos([photo.id])
+                    .catch((err) => reportError("Failed to remove the photo", err));
                 }}
                 title="Remove from session"
               >
