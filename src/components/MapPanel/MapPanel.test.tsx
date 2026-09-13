@@ -6,17 +6,25 @@ import type { UIState } from "../../state/UIContext";
 
 const mockMapInstance = {
   on: vi.fn(),
+  off: vi.fn(),
   once: vi.fn(),
   remove: vi.fn(),
   isStyleLoaded: vi.fn(() => false),
   getSource: vi.fn((_id: string): unknown => null),
   getStyle: vi.fn(() => ({ sources: {} })),
   getLayer: vi.fn((_id: string): unknown => undefined),
+  getContainer: vi.fn(() => document.createElement("div")),
+  getCanvas: vi.fn(() => document.createElement("canvas")),
+  project: vi.fn(() => ({ x: 0, y: 0 })),
+  unproject: vi.fn(() => ({ lng: 0, lat: 0 })),
+  queryRenderedFeatures: vi.fn(() => []),
   addSource: vi.fn(),
   addLayer: vi.fn(),
   removeLayer: vi.fn(),
   removeSource: vi.fn(),
   flyTo: vi.fn(),
+  fitBounds: vi.fn(),
+  resize: vi.fn(),
 };
 
 // Invoke and clear every deferred sync queued via map.once("idle", ...)
@@ -194,6 +202,46 @@ describe("MapPanel", () => {
 
       expect(mockMapInstance.removeLayer).toHaveBeenCalledWith("gpx-line-g1");
       expect(mockMapInstance.removeSource).toHaveBeenCalledWith("gpx-g1");
+    });
+  });
+
+  describe("gpx scrubber (Issue #4)", () => {
+    it("attaches hover and click handlers when the map is created", () => {
+      const { onOpenSettings } = setupMocks({}, { mapboxToken: "pk.test" });
+      render(<MapPanel onOpenSettings={onOpenSettings} />);
+      const events = mockMapInstance.on.mock.calls.map(([event]) => event);
+      expect(events).toContain("mousemove");
+      expect(events).toContain("mouseout");
+      expect(events).toContain("click");
+    });
+
+    it("detaches scrub handlers on unmount", () => {
+      const { onOpenSettings } = setupMocks({}, { mapboxToken: "pk.test" });
+      const { unmount } = render(<MapPanel onOpenSettings={onOpenSettings} />);
+      unmount();
+      const events = mockMapInstance.off.mock.calls.map(([event]) => event);
+      expect(events).toContain("mousemove");
+      expect(events).toContain("click");
+    });
+
+    it("adds the scrub indicator source and layer on style.load", () => {
+      const { onOpenSettings } = setupMocks({}, { mapboxToken: "pk.test" });
+      mockMapInstance.getSource.mockImplementation((id: string) =>
+        id === "photos" ? { setData: vi.fn() } : null
+      );
+      render(<MapPanel onOpenSettings={onOpenSettings} />);
+      const styleLoad = mockMapInstance.on.mock.calls.find(
+        ([event]) => event === "style.load"
+      )?.[1] as (() => void) | undefined;
+      expect(styleLoad).toBeDefined();
+      styleLoad!();
+      expect(mockMapInstance.addSource).toHaveBeenCalledWith(
+        "gpx-scrub",
+        expect.objectContaining({ type: "geojson" })
+      );
+      expect(mockMapInstance.addLayer).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "gpx-scrub-point", type: "circle" })
+      );
     });
   });
 

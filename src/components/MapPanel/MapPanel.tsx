@@ -3,9 +3,15 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { useRef, useEffect, useCallback, useState } from "react";
 import { useSession } from "../../state/SessionContext";
 import { useUI } from "../../state/UIContext";
-import type { Photo, GpxFile } from "../../state/SessionContext";
+import type { Photo, GpxFile, Metadata } from "../../state/SessionContext";
 import styles from "./MapPanel.module.css";
 import { palette, colors } from "../../lib/colors";
+import { planScrubApply, scrubConfirmMessage } from "../../lib/trackScrub";
+import type { ScrubSnap, ScrubPlan } from "../../lib/trackScrub";
+import { attachGpxScrub, setupScrubLayer, type ScrubDeps } from "./gpxScrub";
+import { ConfirmDialog } from "../common/ConfirmDialog/ConfirmDialog";
+import { tauriCommands } from "../../lib/tauri";
+import { reportError } from "../../lib/errors";
 
 // Contiguous US bounds: west, south, east, north
 const US_BOUNDS: [number, number, number, number] = [-125, 24, -66, 50];
@@ -195,6 +201,27 @@ function syncGpxLayers(map: mapboxgl.Map, gpxFiles: GpxFile[], trackedIds: Set<s
   }
 }
 
+// Scrub edits differ per photo (timezones vary); persist in groups of
+// identical payloads so the common case stays a single backend call.
+function persistScrubUpdates(updates: Array<{ id: string; changes: Partial<Metadata> }>) {
+  const groups = new Map<string, { ids: string[]; changes: Partial<Metadata> }>();
+  for (const u of updates) {
+    const key = JSON.stringify(u.changes);
+    const group = groups.get(key);
+    if (group) group.ids.push(u.id);
+    else groups.set(key, { ids: [u.id], changes: u.changes });
+  }
+  for (const group of groups.values()) {
+    const fields = Object.entries(group.changes).map(([field, value]) => ({
+      field,
+      value: value == null ? null : String(value),
+    }));
+    tauriCommands
+      .setPendingChanges(group.ids, fields)
+      .catch((err) => reportError("Failed to save track point edits", err));
+  }
+}
+
 interface MapPanelProps {
   onOpenSettings: () => void;
 }
@@ -206,14 +233,18 @@ function isSecretMapboxToken(token: string | null): boolean {
 export function MapPanel({ onOpenSettings }: MapPanelProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
-  const { state: session } = useSession();
+  const { state: session, dispatch: sessionDispatch } = useSession();
   const { state: ui, dispatch: uiDispatch } = useUI();
   const [mapError, setMapError] = useState<string | null>(null);
   const [resizing, setResizing] = useState(false);
+  const [scrubConfirm, setScrubConfirm] = useState<ScrubPlan | null>(null);
   const isResizingRef = useRef(false);
   const failedTokenRef = useRef<string | null>(null);
   const gpxLayerIds = useRef(new Set<string>());
   const hadDataRef = useRef(false);
+  // Scrub clicks change selected photos' coordinates, which would trigger the
+  // re-fit effect and yank the camera mid-hover; a short window suppresses it.
+  const suppressFitUntilRef = useRef(0);
 
   const tokenIsSecret = isSecretMapboxToken(ui.mapboxToken);
 
@@ -239,6 +270,30 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   const gpxFilesRef = useRef<GpxFile[]>(session.gpxFiles);
   gpxFilesRef.current = session.gpxFiles;
 
+  const applyScrub = (updates: ScrubPlan["updates"]) => {
+    suppressFitUntilRef.current = Date.now() + 1000;
+    sessionDispatch({ type: "SET_PENDING_BATCH", updates });
+    persistScrubUpdates(updates);
+  };
+
+  const handleScrubPick = (snap: ScrubSnap) => {
+    const selected = session.photos.filter((p) => session.selectedIds.has(p.id));
+    if (selected.length === 0) return;
+    const gpx = session.gpxFiles.find((g) => g.id === snap.gpxId);
+    const plan = planScrubApply(selected, snap, gpx?.timezone ?? null);
+    if (plan.confirm) setScrubConfirm(plan);
+    else applyScrub(plan.updates);
+  };
+
+  // Handlers attach once at map creation and read these through the ref, so
+  // they always see the current selection and GPX files.
+  const scrubDepsRef = useRef<ScrubDeps>({ enabled: false, gpxFiles: [], onPick: () => {} });
+  scrubDepsRef.current = {
+    enabled: hasSelection,
+    gpxFiles: session.gpxFiles,
+    onPick: handleScrubPick,
+  };
+
   useEffect(() => {
     if (!ui.mapboxToken || tokenIsSecret) return;
     // If there's a stale error from a previous (bad) token, clear it so the map
@@ -261,12 +316,18 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
       setMapError(err instanceof Error ? err.message : String(err));
       return;
     }
+    if (import.meta.env.DEV) {
+      // Handle for driving the map from automation during development.
+      (window as unknown as Record<string, unknown>).__backstampMap = map.current;
+    }
     // Resize canvas whenever the container changes size, but not during drag
     // (the map re-renders once on mouseup instead of on every pixel of drag)
     const ro = new ResizeObserver(() => {
       if (!isResizingRef.current) map.current?.resize();
     });
     ro.observe(mapContainer.current);
+
+    const detachScrub = attachGpxScrub(map.current, scrubDepsRef);
 
     // style.load fires on initial style load AND after every setStyle, so it's
     // the right place to (re-)attach custom sources and layers — switching themes
@@ -276,6 +337,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
       map.current!.resize();
       setupHillshade(map.current!);
       setupSources(map.current!);
+      setupScrubLayer(map.current!);
       (map.current!.getSource("photos") as mapboxgl.GeoJSONSource).setData(
         buildPhotoGeoJSON(allPhotosRef.current)
       );
@@ -296,6 +358,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     return () => {
       mq.removeEventListener("change", onSchemeChange);
       ro.disconnect();
+      detachScrub();
       map.current?.remove();
       map.current = null;
       gpxLayerIds.current.clear();
@@ -308,6 +371,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   useEffect(() => {
     if (!map.current?.isStyleLoaded()) return;
     if (!hasSelection) return;
+    if (Date.now() < suppressFitUntilRef.current) return;
     const hasCoords = focusPhotos.some(
       (p) => p.currentMetadata.gpsLat != null && p.currentMetadata.gpsLng != null
     );
@@ -413,6 +477,18 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
       <div ref={mapContainer} className={styles.map} />
       {resizing && <div className={styles.resizeOverlay} />}
       <div className={styles.resizeZone} onMouseDown={handleDragStart} />
+      {scrubConfirm?.confirm && (
+        <ConfirmDialog
+          title="Set from GPX Track"
+          message={scrubConfirmMessage(scrubConfirm.confirm)}
+          confirmLabel="Set"
+          onConfirm={() => {
+            applyScrub(scrubConfirm.updates);
+            setScrubConfirm(null);
+          }}
+          onCancel={() => setScrubConfirm(null)}
+        />
+      )}
     </div>
   );
 }

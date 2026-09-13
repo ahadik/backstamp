@@ -36,6 +36,25 @@
   z-index: 1;
 }
 
+/* Time readout that follows the scrub indicator along a GPX track.
+   Positioned via transform from the map container's top-left. */
+.scrubTooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  pointer-events: none;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-glass-border);
+  background: var(--color-glass-bg);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  color: var(--color-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .tokenPrompt {
   position: absolute;
   inset: 0;

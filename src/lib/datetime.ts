@@ -91,6 +91,24 @@ export function wallClockInZone(
   return { date: dt.toFormat("yyyy-MM-dd"), time: dt.toFormat("HH:mm:ss") };
 }
 
+/**
+ * Wall-clock date/time and frozen offset for a UTC instant viewed in `zone` —
+ * the inverse of toUtcSeconds, used when the instant (not the wall clock) is
+ * the source of truth, e.g. a GPX track point.
+ */
+export function wallClockFromUtcSeconds(
+  utcSecs: number,
+  zone: string
+): { date: string; time: string; utcOffset: string } | null {
+  const dt = DateTime.fromSeconds(utcSecs, { zone });
+  if (!dt.isValid) return null;
+  return {
+    date: dt.toFormat("yyyy-MM-dd"),
+    time: dt.toFormat("HH:mm:ss"),
+    utcOffset: dt.toFormat("ZZ"),
+  };
+}
+
 /** Milliseconds for a stored date + time + frozen offset, as written to EXIF. */
 export function instantFromStoredOffset(
   date: string | null,
