@@ -17,9 +17,12 @@ import type { Photo, Metadata } from "../state/SessionContext";
  * bracketing timestamps.
  */
 
-/** A position snapped onto a GPX track, with its interpolated instant. */
+/**
+ * A pick position on the map: snapped onto a GPX track (gpxId set, with its
+ * interpolated instant) or a free drop anywhere else (gpxId null, no time).
+ */
 export interface ScrubSnap {
-  gpxId: string;
+  gpxId: string | null;
   lat: number;
   lng: number;
   /** Interpolated UTC epoch seconds, or null when the track carries no usable times. */
@@ -145,6 +148,8 @@ export interface ScrubConfirm {
   /** Photos whose existing time or location the click would replace. */
   overwriteCount: number;
   setsTime: boolean;
+  /** True for a track snap, false for a free drop elsewhere on the map. */
+  fromTrack: boolean;
 }
 
 export interface ScrubPlan {
@@ -174,19 +179,20 @@ export function planScrubApply(
     updates: buildScrubChanges(photos, snap, gpxTimezone),
     confirm:
       photos.length > 1 || overwriteCount > 0
-        ? { photoCount: photos.length, overwriteCount, setsTime }
+        ? { photoCount: photos.length, overwriteCount, setsTime, fromTrack: snap.gpxId != null }
         : null,
   };
 }
 
 export function scrubConfirmMessage(c: ScrubConfirm): string {
   const what = c.setsTime ? "time and location" : "location";
+  const target = c.fromTrack ? "this track point" : "this point";
   if (c.photoCount === 1) {
     return `This photo already has a ${
       c.setsTime ? "time or location" : "location"
-    } set. Replace it with this track point?`;
+    } set. Replace it with ${target}?`;
   }
-  const base = `Set the ${what} of ${c.photoCount} photos to this track point?`;
+  const base = `Set the ${what} of ${c.photoCount} photos to ${target}?`;
   if (c.overwriteCount === 0) return base;
   const has =
     c.overwriteCount === 1

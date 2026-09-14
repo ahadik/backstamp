@@ -93,6 +93,27 @@ export function CorpusComboBox({
     setSearch("");
   }
 
+  /**
+   * Enter commits what the search resolves to: an exact match, else the first
+   * match, else a new entry. Blurring then closes the list.
+   */
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (open && search.trim() !== "") {
+      const exact = filtered.find((entry) => normalize(entry.value) === searchKey);
+      if (exact) handleSelect(exact.value);
+      else if (filtered.length > 0) handleSelect(filtered[0].value);
+      else if (showAddOption) handleAdd();
+    }
+    e.currentTarget.blur();
+  }
+
+  function handleBlur() {
+    setOpen(false);
+    setSearch("");
+  }
+
   function handleRemoveClick(e: React.MouseEvent, v: string) {
     e.stopPropagation();
     setRemoveConfirm(v);
@@ -116,11 +137,18 @@ export function CorpusComboBox({
           value={open ? search : displayValue}
           placeholder={inputPlaceholder}
           onFocus={handleOpen}
+          onBlur={handleBlur}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={handleKeyDown}
           readOnly={!open}
           disabled={disabled}
         />
-        <span className={styles.caret} onClick={handleOpen} aria-hidden>
+        <span
+          className={styles.caret}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={handleOpen}
+          aria-hidden
+        >
           ▾
         </span>
       </div>

@@ -113,6 +113,46 @@ describe("sessionReducer", () => {
     });
   });
 
+  describe("REFRESH_PHOTOS", () => {
+    const base: SessionState = {
+      ...initialState,
+      photos: [
+        makePhoto("a", { pendingChanges: { lens: "edited" }, currentMetadata: { ...nullMetadata, lens: "edited" } }),
+        makePhoto("b"),
+      ],
+      selectedIds: new Set(["a", "gone"]),
+      canRollback: true,
+      metadataHistory: [[{ id: "a", currentMetadata: nullMetadata, pendingChanges: null }]],
+      gpxFiles: [makeGpxFile("g1")],
+    };
+    const reloaded = [
+      makePhoto("a", { originalMetadata: { ...nullMetadata, lens: "disk" }, currentMetadata: { ...nullMetadata, lens: "disk" } }),
+      makePhoto("b"),
+    ];
+
+    it("replaces photos with the reloaded rows verbatim", () => {
+      const next = sessionReducer(base, { type: "REFRESH_PHOTOS", photos: reloaded, canRollback: false });
+      expect(next.photos).toEqual(reloaded);
+      expect(next.photos[0].pendingChanges).toBeNull();
+    });
+
+    it("keeps the selection for photos that still exist and drops the rest", () => {
+      const next = sessionReducer(base, { type: "REFRESH_PHOTOS", photos: reloaded, canRollback: false });
+      expect(next.selectedIds).toEqual(new Set(["a"]));
+    });
+
+    it("clears edit history and adopts canRollback from the backend", () => {
+      const next = sessionReducer(base, { type: "REFRESH_PHOTOS", photos: reloaded, canRollback: false });
+      expect(next.metadataHistory).toEqual([]);
+      expect(next.canRollback).toBe(false);
+    });
+
+    it("leaves GPX files untouched", () => {
+      const next = sessionReducer(base, { type: "REFRESH_PHOTOS", photos: reloaded, canRollback: false });
+      expect(next.gpxFiles).toBe(base.gpxFiles);
+    });
+  });
+
   describe("CLEAR_SESSION", () => {
     it("resets to initial state", () => {
       const state: SessionState = {
@@ -504,7 +544,77 @@ describe("sessionReducer", () => {
       expect(next.gpxFiles).toHaveLength(1);
       expect(next.gpxFiles[0].id).toBe("g2");
     });
+
+    it("drops the removed file from the GPX selection", () => {
+      const state: SessionState = {
+        ...initialState,
+        gpxFiles: [makeGpxFile("g1"), makeGpxFile("g2")],
+        selectedGpxIds: new Set(["g1", "g2"]),
+      };
+      const next = sessionReducer(state, { type: "REMOVE_GPX", id: "g1" });
+      expect([...next.selectedGpxIds]).toEqual(["g2"]);
+    });
   });
+
+  describe("SELECT_GPX", () => {
+    const threeTracks: SessionState = {
+      ...initialState,
+      gpxFiles: [makeGpxFile("g1"), makeGpxFile("g2"), makeGpxFile("g3")],
+    };
+
+    it("selects a single track by default and clears the photo selection", () => {
+      const state = { ...threeTracks, selectedIds: new Set(["p1"]) };
+      const next = sessionReducer(state, { type: "SELECT_GPX", id: "g2" });
+      expect([...next.selectedGpxIds]).toEqual(["g2"]);
+      expect(next.selectedIds.size).toBe(0);
+    });
+
+    it("replaces the selection on a plain click", () => {
+      const state = { ...threeTracks, selectedGpxIds: new Set(["g1", "g3"]) };
+      const next = sessionReducer(state, { type: "SELECT_GPX", id: "g2", mode: "single" });
+      expect([...next.selectedGpxIds]).toEqual(["g2"]);
+    });
+
+    it("deselects when the lone selected track is clicked again", () => {
+      const state = { ...threeTracks, selectedGpxIds: new Set(["g2"]) };
+      const next = sessionReducer(state, { type: "SELECT_GPX", id: "g2" });
+      expect(next.selectedGpxIds.size).toBe(0);
+    });
+
+    it("toggles membership in cmd mode", () => {
+      const state = { ...threeTracks, selectedGpxIds: new Set(["g1"]) };
+      const added = sessionReducer(state, { type: "SELECT_GPX", id: "g3", mode: "cmd" });
+      expect([...added.selectedGpxIds].sort()).toEqual(["g1", "g3"]);
+      const removed = sessionReducer(added, { type: "SELECT_GPX", id: "g1", mode: "cmd" });
+      expect([...removed.selectedGpxIds]).toEqual(["g3"]);
+    });
+
+    it("extends over the list order in shift mode", () => {
+      const state = { ...threeTracks, selectedGpxIds: new Set(["g1"]) };
+      const next = sessionReducer(state, { type: "SELECT_GPX", id: "g3", mode: "shift" });
+      expect([...next.selectedGpxIds].sort()).toEqual(["g1", "g2", "g3"]);
+    });
+
+    it("shift-selects just the clicked track when nothing was selected", () => {
+      const next = sessionReducer(threeTracks, { type: "SELECT_GPX", id: "g2", mode: "shift" });
+      expect([...next.selectedGpxIds]).toEqual(["g2"]);
+    });
+  });
+
+  describe("photo selection vs GPX selection", () => {
+    it("selecting a photo clears the GPX selection", () => {
+      const state: SessionState = {
+        ...initialState,
+        photos: [makePhoto("p1")],
+        gpxFiles: [makeGpxFile("g1")],
+        selectedGpxIds: new Set(["g1"]),
+      };
+      const next = sessionReducer(state, { type: "SELECT_SINGLE", id: "p1" });
+      expect(next.selectedGpxIds.size).toBe(0);
+      expect([...next.selectedIds]).toEqual(["p1"]);
+    });
+  });
+
 
   describe("UPDATE_GPX_THUMBNAIL", () => {
     it("updates thumbnailPath for the matching GPX file", () => {
@@ -520,5 +630,139 @@ describe("sessionReducer", () => {
       expect(next.gpxFiles[0].thumbnailPath).toBe("/thumbs/gpx_g1.jpg");
       expect(next.gpxFiles[1].thumbnailPath).toBeNull();
     });
+  });
+});
+
+// ── Offset derivation ─────────────────────────────────────────────────────────
+//
+// The stored offset follows date + time + zone for every edit, whichever
+// control produced it — the inspector, a drag-and-drop, a track snap, a Vibe
+// Tag proposal — so the reducer derives it rather than trusting each writer.
+
+describe("sessionReducer offset derivation", () => {
+  function withMeta(id: string, meta: Partial<Metadata>): Photo {
+    const m = { ...nullMetadata, ...meta };
+    return makePhoto(id, { originalMetadata: m, currentMetadata: m });
+  }
+
+  function stateWith(...photos: Photo[]): SessionState {
+    return { ...initialState, photos };
+  }
+
+  it("derives the offset when a date lands on a photo that already has a zone", () => {
+    const state = stateWith(withMeta("a", { timezone: "America/Denver" }));
+    const next = sessionReducer(state, {
+      type: "SET_PENDING", ids: ["a"], changes: { captureDate: "2026-07-03", captureTime: "00:00:00" },
+    });
+    expect(next.photos[0].currentMetadata.utcOffset).toBe("-06:00");
+    expect(next.photos[0].pendingChanges).toEqual({
+      captureDate: "2026-07-03", captureTime: "00:00:00", utcOffset: "-06:00",
+    });
+  });
+
+  it("derives per photo in a batch, honouring each photo's own zone and date", () => {
+    const state = stateWith(
+      withMeta("a", { captureDate: "2026-01-15", timezone: "America/Denver" }),
+      withMeta("b", { captureDate: "2026-07-03", timezone: "Asia/Tokyo" }),
+    );
+    const next = sessionReducer(state, {
+      type: "SET_PENDING_BATCH",
+      updates: [
+        { id: "a", changes: { captureTime: "12:00:00" } },
+        { id: "b", changes: { captureTime: "12:00:00" } },
+      ],
+    });
+    expect(next.photos[0].currentMetadata.utcOffset).toBe("-07:00");
+    expect(next.photos[1].currentMetadata.utcOffset).toBe("+09:00");
+  });
+
+  it("re-derives when the time crosses a DST transition", () => {
+    const state = stateWith(withMeta("a", {
+      captureDate: "2026-11-01", captureTime: "00:30:00", timezone: "America/Denver", utcOffset: "-06:00",
+    }));
+    const next = sessionReducer(state, {
+      type: "SET_PENDING", ids: ["a"], changes: { captureTime: "15:00:00" },
+    });
+    expect(next.photos[0].currentMetadata.utcOffset).toBe("-07:00");
+  });
+
+  it("leaves the offset null when a zone is set on a photo with no date", () => {
+    const state = stateWith(withMeta("a", {}));
+    const next = sessionReducer(state, {
+      type: "SET_PENDING", ids: ["a"], changes: { timezone: "America/Denver" },
+    });
+    expect(next.photos[0].currentMetadata.utcOffset).toBeNull();
+    expect(next.photos[0].pendingChanges).toEqual({ timezone: "America/Denver", utcOffset: null });
+  });
+
+  it("clears the offset when the date is cleared on a zoned photo", () => {
+    const state = stateWith(withMeta("a", {
+      captureDate: "2026-07-03", timezone: "America/Denver", utcOffset: "-06:00",
+    }));
+    const next = sessionReducer(state, {
+      type: "SET_PENDING", ids: ["a"], changes: { captureDate: null },
+    });
+    expect(next.photos[0].currentMetadata.utcOffset).toBeNull();
+  });
+
+  it("clears the offset when the zone is cleared", () => {
+    const state = stateWith(withMeta("a", {
+      captureDate: "2026-07-03", timezone: "America/Denver", utcOffset: "-06:00",
+    }));
+    const next = sessionReducer(state, {
+      type: "SET_PENDING", ids: ["a"], changes: { timezone: null },
+    });
+    expect(next.photos[0].currentMetadata.utcOffset).toBeNull();
+  });
+
+  it("leaves a camera-recorded offset alone when no zone is involved", () => {
+    const state = stateWith(withMeta("a", {
+      captureDate: "2026-07-03", captureTime: "10:00:00", utcOffset: "+09:00",
+    }));
+    const next = sessionReducer(state, {
+      type: "SET_PENDING", ids: ["a"], changes: { captureTime: "11:00:00" },
+    });
+    expect(next.photos[0].currentMetadata.utcOffset).toBe("+09:00");
+    expect(next.photos[0].pendingChanges).toEqual({ captureTime: "11:00:00" });
+  });
+
+  it("does not touch the offset for edits outside the timestamp group", () => {
+    const state = stateWith(withMeta("a", {
+      captureDate: "2026-07-03", timezone: "America/Denver", utcOffset: "-06:00",
+    }));
+    const next = sessionReducer(state, {
+      type: "SET_PENDING", ids: ["a"], changes: { gpsLat: 1, gpsLng: 2 },
+    });
+    expect(next.photos[0].pendingChanges).toEqual({ gpsLat: 1, gpsLng: 2 });
+    expect(next.photos[0].currentMetadata.utcOffset).toBe("-06:00");
+  });
+
+  it("re-derives a missing offset for restored photos with pending timestamp edits", () => {
+    // A session saved before the offset was derived centrally can carry a
+    // pending date alongside a zone with no offset; restore repairs it.
+    const original = { ...nullMetadata, timezone: "America/Denver" };
+    const photo = makePhoto("a", {
+      originalMetadata: original,
+      currentMetadata: { ...original, captureDate: "2026-07-03", captureTime: "09:00:00" },
+      pendingChanges: { captureDate: "2026-07-03", captureTime: "09:00:00" },
+    });
+    const next = sessionReducer(initialState, {
+      type: "RESTORE_SESSION", photos: [photo], gpxFiles: [], canRollback: false,
+    });
+    expect(next.photos[0].currentMetadata.utcOffset).toBe("-06:00");
+    expect(next.photos[0].pendingChanges?.utcOffset).toBe("-06:00");
+  });
+
+  it("restores photos without timestamp edits verbatim", () => {
+    const m = { ...nullMetadata, captureDate: "2026-07-03", utcOffset: "+09:00" };
+    const photo = makePhoto("a", {
+      originalMetadata: m,
+      currentMetadata: { ...m, gpsLat: 1, gpsLng: 2 },
+      pendingChanges: { gpsLat: 1, gpsLng: 2 },
+    });
+    const next = sessionReducer(initialState, {
+      type: "RESTORE_SESSION", photos: [photo], gpxFiles: [], canRollback: false,
+    });
+    expect(next.photos[0]).toBe(photo);
   });
 });

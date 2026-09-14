@@ -2,8 +2,26 @@ import { useEffect, useRef } from "react";
 import { Modal } from "../common/Modal/Modal";
 import styles from "./ImportModal.module.css";
 
+/** Copy for each long-running job the modal reports on. */
+const VARIANT_COPY = {
+  import: {
+    title: "Importing Photos",
+    cancelling: "Cancelling Import…",
+    cancelled: "Import Cancelled",
+    cancelledCounter: () => "Imported photos removed",
+  },
+  refresh: {
+    title: "Refreshing Metadata",
+    cancelling: "Cancelling Refresh…",
+    cancelled: "Refresh Cancelled",
+    cancelledCounter: (done: number, total: number) => `${done} of ${total} refreshed`,
+  },
+} as const;
+
 interface Props {
   isOpen: boolean;
+  /** Which job is running; picks the heading and cancel wording. */
+  variant?: keyof typeof VARIANT_COPY;
   done: number;
   total: number;
   skipped?: number;
@@ -19,6 +37,7 @@ interface Props {
 
 export function ImportModal({
   isOpen,
+  variant = "import",
   done,
   total,
   skipped = 0,
@@ -33,11 +52,8 @@ export function ImportModal({
   const complete = isComplete ?? (total > 0 && done >= total);
   const logRef = useRef<HTMLPreElement>(null);
 
-  const title = isCancelled
-    ? "Import Cancelled"
-    : isCancelling
-      ? "Cancelling Import…"
-      : "Importing Photos";
+  const copy = VARIANT_COPY[variant];
+  const title = isCancelled ? copy.cancelled : isCancelling ? copy.cancelling : copy.title;
 
   useEffect(() => {
     if (complete && errors.length === 0) {
@@ -62,7 +78,7 @@ export function ImportModal({
         </div>
 
         <p className={styles.counter}>
-          {isCancelled ? "Imported photos removed" : `${done} of ${total}`}
+          {isCancelled ? copy.cancelledCounter(done, total) : `${done} of ${total}`}
           {complete && !isCancelled && skipped > 0 && ` · ${skipped} duplicate${skipped !== 1 ? "s" : ""} skipped`}
           {errors.length > 0 && ` · ${errors.length} error${errors.length !== 1 ? "s" : ""}`}
         </p>

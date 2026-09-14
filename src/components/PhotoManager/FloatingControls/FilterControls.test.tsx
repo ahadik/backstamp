@@ -37,7 +37,7 @@ const emptySessionState: SessionState = {
   photos: [],
   selectedIds: new Set(),
   gpxFiles: [],
-  selectedGpxId: null,
+  selectedGpxIds: new Set(),
   applyInProgress: false,
   canRollback: false,
   metadataHistory: [],
@@ -77,6 +77,11 @@ const photos = [
   makePhoto("c"),
 ];
 
+/** Activates the filter icon so the Time/Camera tray slides out. */
+function expandFilters() {
+  fireEvent.click(screen.getByRole("button", { name: "Filter photos" }));
+}
+
 describe("FilterControls", () => {
   it("renders nothing when there are no photos", () => {
     setupMocks();
@@ -84,16 +89,50 @@ describe("FilterControls", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows Time and Camera dropdown buttons when photos exist", () => {
+  it("starts collapsed: icon inactive and the tray inert", () => {
     setupMocks({ photos });
     render(<FilterControls />);
-    expect(screen.getByText(/Time/)).toBeInTheDocument();
-    expect(screen.getByText(/Camera/)).toBeInTheDocument();
+    const icon = screen.getByRole("button", { name: "Filter photos" });
+    expect(icon).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText(/Time/).closest("[inert]")).not.toBeNull();
+  });
+
+  it("activating the icon reveals the Time and Camera dropdowns", () => {
+    setupMocks({ photos });
+    render(<FilterControls />);
+    expandFilters();
+    const icon = screen.getByRole("button", { name: "Deactivate filters" });
+    expect(icon).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/Time/).closest("[inert]")).toBeNull();
+    expect(screen.getByText(/Camera/).closest("[inert]")).toBeNull();
+  });
+
+  it("deactivating the icon collapses the tray and clears all filters", () => {
+    const { uiDispatch } = setupMocks(
+      { photos },
+      { photoFilters: { dateAfter: "2024-03-15", dateBefore: null, cameras: null } },
+    );
+    render(<FilterControls />);
+    expandFilters();
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate filters" }));
+    expect(uiDispatch).toHaveBeenCalledWith({ type: "RESET_PHOTO_FILTERS" });
+    expect(
+      screen.getByRole("button", { name: "Filter photos" })
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText(/Time/).closest("[inert]")).not.toBeNull();
+  });
+
+  it("does not clear filters when merely activating the icon", () => {
+    const { uiDispatch } = setupMocks({ photos });
+    render(<FilterControls />);
+    expandFilters();
+    expect(uiDispatch).not.toHaveBeenCalled();
   });
 
   it("opens the camera panel listing values from the full photo set", () => {
     setupMocks({ photos });
     render(<FilterControls />);
+    expandFilters();
     fireEvent.click(screen.getByText(/Camera/));
     expect(screen.getByText("Canon EOS R5")).toBeInTheDocument();
     expect(screen.getByText("Nikon F3")).toBeInTheDocument();
@@ -103,6 +142,7 @@ describe("FilterControls", () => {
   it("dispatches a camera filter when a value is checked", () => {
     const { uiDispatch } = setupMocks({ photos });
     render(<FilterControls />);
+    expandFilters();
     fireEvent.click(screen.getByText(/Camera/));
     fireEvent.click(screen.getByText("Canon EOS R5"));
     expect(uiDispatch).toHaveBeenCalledWith({
@@ -118,6 +158,7 @@ describe("FilterControls", () => {
       { photoFilters: { dateAfter: null, dateBefore: null, cameras: [key] } },
     );
     render(<FilterControls />);
+    expandFilters();
     fireEvent.click(screen.getByText(/Camera/));
     fireEvent.click(screen.getByText("Canon EOS R5"));
     expect(uiDispatch).toHaveBeenCalledWith({
@@ -129,6 +170,7 @@ describe("FilterControls", () => {
   it("defaults the time panel to the first and last photo dates", () => {
     setupMocks({ photos });
     render(<FilterControls />);
+    expandFilters();
     fireEvent.click(screen.getByText(/Time/));
     expect(screen.getByLabelText("On or after")).toHaveValue("2024-03-14");
     expect(screen.getByLabelText("On or before")).toHaveValue("2024-03-16");
@@ -140,6 +182,7 @@ describe("FilterControls", () => {
       { photoFilters: { dateAfter: "2024-03-15", dateBefore: null, cameras: null } },
     );
     render(<FilterControls />);
+    expandFilters();
     fireEvent.click(screen.getByText(/Time/));
     expect(screen.getByLabelText("On or after")).toHaveValue("2024-03-15");
     expect(screen.getByLabelText("On or before")).toHaveValue("2024-03-16");
@@ -148,6 +191,7 @@ describe("FilterControls", () => {
   it("dispatches date filters from the time panel", () => {
     const { uiDispatch } = setupMocks({ photos });
     render(<FilterControls />);
+    expandFilters();
     fireEvent.click(screen.getByText(/Time/));
     const afterInput = screen.getByLabelText("On or after");
     fireEvent.change(afterInput, { target: { value: "2024-03-15" } });
@@ -163,26 +207,12 @@ describe("FilterControls", () => {
       { photoFilters: { dateAfter: "2024-03-15", dateBefore: null, cameras: null } },
     );
     render(<FilterControls />);
+    expandFilters();
     fireEvent.click(screen.getByText(/Time/));
     fireEvent.click(screen.getByText("Reset"));
     expect(uiDispatch).toHaveBeenCalledWith({
       type: "SET_PHOTO_FILTERS",
       filters: { dateAfter: null, dateBefore: null },
     });
-  });
-
-  it("shows the global clear button only when a filter is active, and resets all", () => {
-    setupMocks({ photos });
-    const { unmount } = render(<FilterControls />);
-    expect(screen.queryByText("Clear Filters")).not.toBeInTheDocument();
-    unmount();
-
-    const { uiDispatch } = setupMocks(
-      { photos },
-      { photoFilters: { dateAfter: "2024-03-15", dateBefore: null, cameras: null } },
-    );
-    render(<FilterControls />);
-    fireEvent.click(screen.getByText("Clear Filters"));
-    expect(uiDispatch).toHaveBeenCalledWith({ type: "RESET_PHOTO_FILTERS" });
   });
 });

@@ -19,6 +19,19 @@ describe("ImportModal", () => {
       expect(screen.getByText("Importing Photos")).toBeInTheDocument();
     });
 
+    it("uses refresh wording for the refresh variant", () => {
+      render(<ImportModal isOpen variant="refresh" done={0} total={5} errors={[]} onDismiss={vi.fn()} />);
+      expect(screen.getByText("Refreshing Metadata")).toBeInTheDocument();
+    });
+
+    it("reports how many photos were refreshed when a refresh is cancelled", () => {
+      render(
+        <ImportModal isOpen variant="refresh" done={2} total={5} isComplete isCancelled errors={["x"]} onDismiss={vi.fn()} />,
+      );
+      expect(screen.getByText("Refresh Cancelled")).toBeInTheDocument();
+      expect(screen.getByText(/2 of 5 refreshed/)).toBeInTheDocument();
+    });
+
     it("shows done / total count", () => {
       render(<ImportModal isOpen done={2} total={5} errors={[]} onDismiss={vi.fn()} />);
       expect(screen.getByText("2 of 5")).toBeInTheDocument();

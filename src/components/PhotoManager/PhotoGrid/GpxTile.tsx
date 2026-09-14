@@ -6,7 +6,8 @@ import styles from "./GpxTile.module.css";
 interface Props {
   gpxFile: GpxFile;
   isSelected: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, e: React.MouseEvent) => void;
+
   onRemove: (id: string) => void;
 }
 
@@ -58,7 +59,8 @@ export function GpxTile({ gpxFile, isSelected, onSelect, onRemove }: Props) {
       className={`${styles.tile}${isSelected ? ` ${styles.selected}` : ""}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={() => onSelect(gpxFile.id)}
+      onClick={(e) => onSelect(gpxFile.id, e)}
+
     >
       {gpxFile.thumbnailPath ? (
         <img

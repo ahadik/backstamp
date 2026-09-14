@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { vi, beforeEach } from "vitest";
-import { MapPanel, buildPhotoGeoJSON } from "./MapPanel";
+import { MapPanel, buildPhotoGeoJSON, allWithinView, centerOfPhotos } from "./MapPanel";
+import type { Photo } from "../../state/SessionContext";
 import type { SessionState } from "../../state/SessionContext";
 import type { UIState } from "../../state/UIContext";
 
@@ -37,10 +38,24 @@ function flushIdleCallbacks() {
 }
 
 vi.mock("mapbox-gl", () => {
+  class MockLngLatBounds {
+    private lngs: number[] = [];
+    private lats: number[] = [];
+    extend([lng, lat]: [number, number]) {
+      this.lngs.push(lng);
+      this.lats.push(lat);
+      return this;
+    }
+    getCenter() {
+      const mid = (v: number[]) => (Math.min(...v) + Math.max(...v)) / 2;
+      return { lng: mid(this.lngs), lat: mid(this.lats) };
+    }
+  }
   return {
     default: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       Map: function (this: any) { return mockMapInstance; },
+      LngLatBounds: MockLngLatBounds,
       accessToken: "",
     },
   };
@@ -76,7 +91,7 @@ const nullMeta = {
 const emptySession: SessionState = {
   photos: [],
   selectedIds: new Set(),
-  gpxFiles: [], selectedGpxId: null,
+  gpxFiles: [], selectedGpxIds: new Set(),
   applyInProgress: false,
   canRollback: false,
   metadataHistory: [],
@@ -228,7 +243,7 @@ describe("MapPanel", () => {
     it("adds the scrub indicator source and layer on style.load", () => {
       const { onOpenSettings } = setupMocks({}, { mapboxToken: "pk.test" });
       mockMapInstance.getSource.mockImplementation((id: string) =>
-        id === "photos" ? { setData: vi.fn() } : null
+        id === "photos" || id === "photos-selected" ? { setData: vi.fn() } : null
       );
       render(<MapPanel onOpenSettings={onOpenSettings} />);
       const styleLoad = mockMapInstance.on.mock.calls.find(
@@ -242,6 +257,37 @@ describe("MapPanel", () => {
       );
       expect(mockMapInstance.addLayer).toHaveBeenCalledWith(
         expect.objectContaining({ id: "gpx-scrub-point", type: "circle" })
+      );
+    });
+  });
+
+  describe("selected pin highlight", () => {
+    it("feeds selected photos to the photos-selected source, and clears on deselect", () => {
+      const photo = locatedPhoto("p1", 37.75, -122.42);
+      const selectedSetData = vi.fn();
+      mockMapInstance.getSource.mockImplementation((id: string) =>
+        id === "photos" || id === "photos-selected" ? { setData: id === "photos-selected" ? selectedSetData : vi.fn() } : null
+      );
+      const { onOpenSettings } = setupMocks(
+        { photos: [photo], selectedIds: new Set(["p1"]) },
+        { mapboxToken: "pk.test" }
+      );
+      const { rerender } = render(<MapPanel onOpenSettings={onOpenSettings} />);
+      flushIdleCallbacks();
+      expect(selectedSetData).toHaveBeenCalledWith(
+        expect.objectContaining({
+          features: [
+            expect.objectContaining({ properties: { id: "p1" } }),
+          ],
+        })
+      );
+
+      selectedSetData.mockClear();
+      setupMocks({ photos: [photo], selectedIds: new Set() }, { mapboxToken: "pk.test" });
+      rerender(<MapPanel onOpenSettings={onOpenSettings} />);
+      flushIdleCallbacks();
+      expect(selectedSetData).toHaveBeenCalledWith(
+        expect.objectContaining({ features: [] })
       );
     });
   });
@@ -260,6 +306,56 @@ describe("MapPanel", () => {
         height: 230,
       });
     });
+  });
+});
+
+function locatedPhoto(id: string, lat: number | null, lng: number | null): Photo {
+  return {
+    id,
+    filePath: `/${id}.jpg`,
+    fileStatus: "ok",
+    thumbnail: { small: "", large: "" },
+    originalMetadata: nullMeta,
+    currentMetadata: { ...nullMeta, gpsLat: lat, gpsLng: lng },
+    pendingChanges: null,
+  };
+}
+
+describe("allWithinView (pan vs zoom on selection)", () => {
+  // Simple rectangular viewport: lng in [-10, 10], lat in [-5, 5]
+  const viewport = {
+    contains: ([lng, lat]: [number, number]) =>
+      lng >= -10 && lng <= 10 && lat >= -5 && lat <= 5,
+  };
+
+  it("is true when every located photo is inside the viewport", () => {
+    expect(allWithinView([locatedPhoto("a", 1, 2), locatedPhoto("b", -3, 4)], viewport)).toBe(true);
+  });
+
+  it("is false when any located photo is outside", () => {
+    expect(allWithinView([locatedPhoto("a", 1, 2), locatedPhoto("b", 40, 100)], viewport)).toBe(false);
+  });
+
+  it("ignores photos without coordinates", () => {
+    expect(allWithinView([locatedPhoto("a", 1, 2), locatedPhoto("b", null, null)], viewport)).toBe(true);
+  });
+
+  it("is false when no photo has coordinates, or bounds are unavailable", () => {
+    expect(allWithinView([locatedPhoto("a", null, null)], viewport)).toBe(false);
+    expect(allWithinView([locatedPhoto("a", 1, 2)], null)).toBe(false);
+  });
+});
+
+describe("centerOfPhotos", () => {
+  it("returns the center of the located photos' bounding box", () => {
+    const center = centerOfPhotos([locatedPhoto("a", 10, 20), locatedPhoto("b", 30, 40)]);
+    expect(center).toEqual({ lng: 30, lat: 20 });
+  });
+
+  it("ignores unlocated photos and returns null when none have coords", () => {
+    expect(centerOfPhotos([locatedPhoto("a", 10, 20), locatedPhoto("b", null, null)]))
+      .toEqual({ lng: 20, lat: 10 });
+    expect(centerOfPhotos([locatedPhoto("a", null, null)])).toBeNull();
   });
 });
 

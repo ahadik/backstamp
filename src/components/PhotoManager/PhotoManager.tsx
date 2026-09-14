@@ -563,11 +563,11 @@ export function PhotoManager({ onOpenSettings }: PhotoManagerProps) {
                   }
                 }
               );
-              sessionDispatch({ type: "SELECT_GPX", id: gpxFiles[0].id });
+              sessionDispatch({ type: "SELECT_GPX", id: gpxFiles[0].id, mode: "single" });
               dequeue();
             }}
             onCancel={() => {
-              sessionDispatch({ type: "SELECT_GPX", id: gpxFiles[0].id });
+              sessionDispatch({ type: "SELECT_GPX", id: gpxFiles[0].id, mode: "single" });
               dequeue();
             }}
           />

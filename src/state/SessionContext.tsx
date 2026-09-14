@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useReducer } from "react";
+import { withDerivedOffset } from "../lib/datetime";
 
 export interface Metadata {
   captureDate: string | null;   // "YYYY-MM-DD"
@@ -43,7 +44,7 @@ export interface SessionState {
   photos: Photo[];
   selectedIds: Set<string>;
   gpxFiles: GpxFile[];
-  selectedGpxId: string | null;
+  selectedGpxIds: Set<string>;
   applyInProgress: boolean;
   canRollback: boolean;
   metadataHistory: MetadataSnapshot[];
@@ -58,7 +59,7 @@ type SessionAction =
   | { type: "SELECT_RANGE"; fromId: string; toId: string; orderedIds: string[] }
   | { type: "SELECT_ALL"; ids?: string[] }
   | { type: "DESELECT_ALL" }
-  | { type: "SELECT_GPX"; id: string }
+  | { type: "SELECT_GPX"; id: string; mode?: "single" | "cmd" | "shift" }
   | { type: "SET_PENDING"; ids: string[]; changes: Partial<Metadata> }
   | { type: "SET_PENDING_BATCH"; updates: Array<{ id: string; changes: Partial<Metadata> }> }
   | { type: "CLEAR_PENDING"; ids: string[] }
@@ -73,6 +74,7 @@ type SessionAction =
   | { type: "UPDATE_GPX_THUMBNAIL"; id: string; thumbnailPath: string }
   | { type: "REORDER_PHOTOS"; orderedIds: string[] }
   | { type: "RESTORE_SESSION"; photos: Photo[]; gpxFiles: GpxFile[]; canRollback: boolean }
+  | { type: "REFRESH_PHOTOS"; photos: Photo[]; canRollback: boolean }
   | { type: "CLEAR_SESSION" }
   | { type: "UNDO_LAST_EDIT" };
 
@@ -94,11 +96,44 @@ export const initialState: SessionState = {
   photos: [],
   selectedIds: new Set(),
   gpxFiles: [],
-  selectedGpxId: null,
+  selectedGpxIds: new Set(),
   applyInProgress: false,
   canRollback: false,
   metadataHistory: [],
 };
+
+/**
+ * Merge an edit into a photo. The stored offset is derived here, at the single
+ * point every edit passes through, so a date set by the inspector, a drop, a
+ * track snap, or a Vibe Tag proposal all leave it consistent with the zone.
+ */
+function applyEdit(photo: Photo, edit: Partial<Metadata>): Photo {
+  const changes = withDerivedOffset(photo.currentMetadata, edit);
+  return {
+    ...photo,
+    pendingChanges: { ...(photo.pendingChanges ?? {}), ...changes },
+    currentMetadata: { ...photo.currentMetadata, ...changes },
+  };
+}
+
+/**
+ * Photos arriving from the backend carry whatever offset was persisted, which
+ * predates the central derivation for edits saved without one. Re-derive for
+ * any photo whose pending edits touch the offset's inputs; untouched photos
+ * keep their camera-recorded value.
+ */
+function normalizeRestoredOffsets(photos: Photo[]): Photo[] {
+  return photos.map((p) => {
+    if (!p.pendingChanges) return p;
+    const changes = withDerivedOffset(p.currentMetadata, p.pendingChanges);
+    if (changes === p.pendingChanges) return p;
+    return {
+      ...p,
+      pendingChanges: changes,
+      currentMetadata: { ...p.currentMetadata, utcOffset: changes.utcOffset ?? null },
+    };
+  });
+}
 
 function diffMetadata(original: Metadata, current: Metadata): Partial<Metadata> | null {
   const changes: Partial<Metadata> = {};
@@ -136,17 +171,17 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           for (let i = lo; i <= hi; i++) ids.add(photoIds[i]);
         }
       }
-      return { ...state, selectedIds: ids, selectedGpxId: null };
+      return { ...state, selectedIds: ids, selectedGpxIds: new Set() };
     }
 
     case "SELECT_SINGLE":
-      return { ...state, selectedIds: new Set([action.id]), selectedGpxId: null };
+      return { ...state, selectedIds: new Set([action.id]), selectedGpxIds: new Set() };
 
     case "TOGGLE_SELECT": {
       const ids = new Set(state.selectedIds);
       if (ids.has(action.id)) ids.delete(action.id);
       else ids.add(action.id);
-      return { ...state, selectedIds: ids, selectedGpxId: null };
+      return { ...state, selectedIds: ids, selectedGpxIds: new Set() };
     }
 
     case "SELECT_RANGE": {
@@ -157,7 +192,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       const [lo, hi] = [Math.min(fromIdx, toIdx), Math.max(fromIdx, toIdx)];
       const ids = new Set(state.selectedIds);
       for (let i = lo; i <= hi; i++) ids.add(orderedIds[i]);
-      return { ...state, selectedIds: ids, selectedGpxId: null };
+      return { ...state, selectedIds: ids, selectedGpxIds: new Set() };
     }
 
     case "SELECT_ALL":
@@ -166,18 +201,39 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       return {
         ...state,
         selectedIds: new Set(action.ids ?? state.photos.map((p) => p.id)),
-        selectedGpxId: null,
+        selectedGpxIds: new Set(),
       };
 
     case "DESELECT_ALL":
       return { ...state, selectedIds: new Set() };
 
-    case "SELECT_GPX":
-      return {
-        ...state,
-        selectedGpxId: state.selectedGpxId === action.id ? null : action.id,
-        selectedIds: new Set(),
-      };
+    case "SELECT_GPX": {
+      // Mirrors photo selection: plain click picks one track (and clicking the
+      // lone selected track deselects it), ⌘ toggles, ⇧ extends over the GPX
+      // list order. Selecting tracks always clears the photo selection.
+      const { id, mode = "single" } = action;
+      const ids = new Set(state.selectedGpxIds);
+      if (mode === "single") {
+        const wasOnlySelection = ids.size === 1 && ids.has(id);
+        ids.clear();
+        if (!wasOnlySelection) ids.add(id);
+      } else if (mode === "cmd") {
+        if (ids.has(id)) ids.delete(id);
+        else ids.add(id);
+      } else if (mode === "shift") {
+        const order = state.gpxFiles.map((g) => g.id);
+        const clickedIdx = order.indexOf(id);
+        const lastIdx = order.findLastIndex((gid) => ids.has(gid));
+        if (clickedIdx === -1 || lastIdx === -1) {
+          ids.add(id);
+        } else {
+          const [lo, hi] = [Math.min(lastIdx, clickedIdx), Math.max(lastIdx, clickedIdx)];
+          for (let i = lo; i <= hi; i++) ids.add(order[i]);
+        }
+      }
+      return { ...state, selectedGpxIds: ids, selectedIds: new Set() };
+    }
+
 
     case "SET_PENDING": {
       const snapshot: MetadataSnapshot = state.photos
@@ -187,12 +243,9 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           currentMetadata: { ...p.currentMetadata },
           pendingChanges: p.pendingChanges ? { ...p.pendingChanges } : null,
         }));
-      const updated = state.photos.map((p) => {
-        if (!action.ids.includes(p.id)) return p;
-        const pending = { ...(p.pendingChanges ?? {}), ...action.changes };
-        const current = { ...p.currentMetadata, ...action.changes };
-        return { ...p, pendingChanges: pending, currentMetadata: current };
-      });
+      const updated = state.photos.map((p) =>
+        action.ids.includes(p.id) ? applyEdit(p, action.changes) : p
+      );
       const history = [...state.metadataHistory, snapshot];
       if (history.length > 50) history.shift();
       return { ...state, photos: updated, metadataHistory: history };
@@ -210,10 +263,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       const changesMap = new Map(action.updates.map((u) => [u.id, u.changes]));
       const updated = state.photos.map((p) => {
         const changes = changesMap.get(p.id);
-        if (!changes) return p;
-        const pending = { ...(p.pendingChanges ?? {}), ...changes };
-        const current = { ...p.currentMetadata, ...changes };
-        return { ...p, pendingChanges: pending, currentMetadata: current };
+        return changes ? applyEdit(p, changes) : p;
       });
       const history = [...state.metadataHistory, snapshot];
       if (history.length > 50) history.shift();
@@ -279,12 +329,16 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       return { ...state, gpxFiles: [...state.gpxFiles, action.gpxFile] };
     }
 
-    case "REMOVE_GPX":
+    case "REMOVE_GPX": {
+      const selectedGpxIds = new Set(state.selectedGpxIds);
+      selectedGpxIds.delete(action.id);
       return {
         ...state,
         gpxFiles: state.gpxFiles.filter((g) => g.id !== action.id),
-        selectedGpxId: state.selectedGpxId === action.id ? null : state.selectedGpxId,
+        selectedGpxIds,
       };
+    }
+
 
     case "UPDATE_GPX_THUMBNAIL":
       return {
@@ -306,12 +360,28 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case "RESTORE_SESSION":
       return {
         ...state,
-        photos: action.photos,
+        photos: normalizeRestoredOffsets(action.photos),
         gpxFiles: action.gpxFiles,
         canRollback: action.canRollback,
         selectedIds: new Set(),
+        selectedGpxIds: new Set(),
         metadataHistory: [],
       };
+
+
+    case "REFRESH_PHOTOS": {
+      // The backend re-read every photo from disk and rebuilt the baseline, so
+      // the reloaded rows replace ours verbatim. Edit history described values
+      // that no longer exist; the selection survives for photos that still do.
+      const ids = new Set(action.photos.map((p) => p.id));
+      return {
+        ...state,
+        photos: action.photos,
+        selectedIds: new Set([...state.selectedIds].filter((id) => ids.has(id))),
+        canRollback: action.canRollback,
+        metadataHistory: [],
+      };
+    }
 
     case "CLEAR_SESSION":
       return { ...initialState };

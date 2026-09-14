@@ -12,6 +12,7 @@
     "fs:default",
     "fs:read-files",
     "fs:write-files",
-    "fs:allow-app-write"
+    "fs:allow-app-write",
+    "opener:default"
   ]
 }

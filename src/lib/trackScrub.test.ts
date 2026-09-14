@@ -174,7 +174,12 @@ describe("planScrubApply", () => {
 
   it("confirms for one photo with an existing time", () => {
     const plan = planScrubApply([photo("p1", { captureDate: "2024-01-01" })], snap, null);
-    expect(plan.confirm).toEqual({ photoCount: 1, overwriteCount: 1, setsTime: true });
+    expect(plan.confirm).toEqual({
+      photoCount: 1,
+      overwriteCount: 1,
+      setsTime: true,
+      fromTrack: true,
+    });
   });
 
   it("confirms for one photo with an existing location", () => {
@@ -184,7 +189,12 @@ describe("planScrubApply", () => {
 
   it("always confirms for more than one photo", () => {
     const plan = planScrubApply([photo("p1"), photo("p2")], snap, null);
-    expect(plan.confirm).toEqual({ photoCount: 2, overwriteCount: 0, setsTime: true });
+    expect(plan.confirm).toEqual({
+      photoCount: 2,
+      overwriteCount: 0,
+      setsTime: true,
+      fromTrack: true,
+    });
   });
 
   it("ignores existing time when the snap sets location only", () => {
@@ -192,31 +202,56 @@ describe("planScrubApply", () => {
     const plan = planScrubApply([photo("p1", { captureDate: "2024-01-01" })], locationOnly, null);
     expect(plan.confirm).toBeNull();
   });
+
+  it("plans a free drop as location-only, off-track", () => {
+    const freeDrop: ScrubSnap = { gpxId: null, lat: 1, lng: 2, timestampUtcSecs: null };
+    const plan = planScrubApply([photo("p1"), photo("p2")], freeDrop, null);
+    expect(plan.confirm).toEqual({
+      photoCount: 2,
+      overwriteCount: 0,
+      setsTime: false,
+      fromTrack: false,
+    });
+    expect(plan.updates[0].changes).toEqual({ gpsLat: 1, gpsLng: 2 });
+  });
 });
 
 describe("scrubConfirmMessage", () => {
   it("single photo overwrite", () => {
-    expect(scrubConfirmMessage({ photoCount: 1, overwriteCount: 1, setsTime: true })).toBe(
-      "This photo already has a time or location set. Replace it with this track point?"
-    );
+    expect(
+      scrubConfirmMessage({ photoCount: 1, overwriteCount: 1, setsTime: true, fromTrack: true })
+    ).toBe("This photo already has a time or location set. Replace it with this track point?");
   });
 
   it("multiple photos, no overwrites", () => {
-    expect(scrubConfirmMessage({ photoCount: 3, overwriteCount: 0, setsTime: true })).toBe(
-      "Set the time and location of 3 photos to this track point?"
-    );
+    expect(
+      scrubConfirmMessage({ photoCount: 3, overwriteCount: 0, setsTime: true, fromTrack: true })
+    ).toBe("Set the time and location of 3 photos to this track point?");
   });
 
   it("multiple photos with overwrites", () => {
-    expect(scrubConfirmMessage({ photoCount: 3, overwriteCount: 2, setsTime: true })).toBe(
+    expect(
+      scrubConfirmMessage({ photoCount: 3, overwriteCount: 2, setsTime: true, fromTrack: true })
+    ).toBe(
       "Set the time and location of 3 photos to this track point? 2 of them already have existing values that will be replaced."
     );
   });
 
-  it("location-only wording", () => {
-    expect(scrubConfirmMessage({ photoCount: 2, overwriteCount: 1, setsTime: false })).toBe(
+  it("location-only wording on a track", () => {
+    expect(
+      scrubConfirmMessage({ photoCount: 2, overwriteCount: 1, setsTime: false, fromTrack: true })
+    ).toBe(
       "Set the location of 2 photos to this track point? 1 of them already has existing values that will be replaced."
     );
+  });
+
+  it("free-drop wording", () => {
+    expect(
+      scrubConfirmMessage({ photoCount: 2, overwriteCount: 0, setsTime: false, fromTrack: false })
+    ).toBe("Set the location of 2 photos to this point?");
+    expect(
+      scrubConfirmMessage({ photoCount: 1, overwriteCount: 1, setsTime: false, fromTrack: false })
+    ).toBe("This photo already has a location set. Replace it with this point?");
   });
 });
 

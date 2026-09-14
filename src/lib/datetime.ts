@@ -307,3 +307,36 @@ export function distinctCaptureDates(
   }
   return [...seen.values()];
 }
+
+/** The fields the stored offset is derived from, plus the offset itself. */
+interface OffsetFields {
+  captureDate: string | null;
+  captureTime: string | null;
+  timezone: string | null;
+  utcOffset: string | null;
+}
+
+/**
+ * Re-derive the stored offset for an edit, so it tracks date + time + zone no
+ * matter which control produced the edit. Applied centrally by the session
+ * reducer; nothing else needs to remember to set `utcOffset`.
+ *
+ * - An edit that touches none of the inputs is returned untouched.
+ * - When a zone is in effect afterward, the offset is resolved at the
+ *   resulting instant — null if there is no date yet to resolve against.
+ * - Clearing the zone clears the offset, since nothing remains to derive from.
+ * - With no zone before or after, a camera-recorded offset is left alone.
+ */
+export function withDerivedOffset<T extends object>(current: OffsetFields, changes: T): T {
+  const touchesInput =
+    "captureDate" in changes || "captureTime" in changes || "timezone" in changes;
+  if (!touchesInput) return changes;
+  const next: OffsetFields = { ...current, ...(changes as Partial<OffsetFields>) };
+  if (!next.timezone) {
+    return "timezone" in changes ? { ...changes, utcOffset: null } : changes;
+  }
+  return {
+    ...changes,
+    utcOffset: utcOffsetFor(next.captureDate, next.captureTime, next.timezone),
+  };
+}

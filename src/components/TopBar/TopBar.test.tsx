@@ -84,7 +84,7 @@ function setup(sessionOverrides: Partial<SessionState> = {}, phase: ApplyPhase =
     photos: [],
     selectedIds: new Set(),
     gpxFiles: [],
-    selectedGpxId: null,
+    selectedGpxIds: new Set(),
     applyInProgress: false,
     canRollback: false,
     metadataHistory: [],
@@ -249,3 +249,4 @@ describe("TopBar — Clear Session button", () => {
     expect(vi.mocked(tauriCommands.clearSession)).not.toHaveBeenCalled();
   });
 });
+

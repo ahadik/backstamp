@@ -1,7 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { tauriCommands } from "../../../lib/tauri";
+import type { SessionLoadResult } from "../../../lib/tauri";
+import type { Photo } from "../../../state/SessionContext";
+import { ConfirmDialog } from "../../common/ConfirmDialog/ConfirmDialog";
+import { ImportModal } from "../../ImportModal/ImportModal";
 import { reportError } from "../../../lib/errors";
 import { useUI } from "../../../state/UIContext";
 import { useSession } from "../../../state/SessionContext";
@@ -16,6 +22,41 @@ const SUPPORTED_EXTENSIONS = [
   "dng", "cr3", "cr2", "nef", "arw", "raf", "orf", "rw2", "pef",
 ];
 
+interface RefreshState {
+  isOpen: boolean;
+  done: number;
+  total: number;
+  isComplete: boolean;
+  isCancelling: boolean;
+  isCancelled: boolean;
+  errors: string[];
+}
+
+const IDLE_REFRESH_STATE: RefreshState = {
+  isOpen: false,
+  done: 0,
+  total: 0,
+  isComplete: false,
+  isCancelling: false,
+  isCancelled: false,
+  errors: [],
+};
+
+function mapLoadedPhoto(p: SessionLoadResult["photos"][number]): Photo {
+  return {
+    id: p.id,
+    filePath: p.filePath,
+    fileStatus: p.fileStatus,
+    thumbnail: {
+      small: convertFileSrc(p.thumbnailSmall),
+      large: convertFileSrc(p.thumbnailLarge),
+    },
+    originalMetadata: p.originalMetadata,
+    currentMetadata: p.currentMetadata,
+    pendingChanges: p.pendingChanges ?? null,
+  };
+}
+
 interface FloatingControlsProps {
   /** Routes paths (files or folders) through the shared import pipeline. */
   onImportPaths: (paths: string[]) => void;
@@ -24,7 +65,68 @@ interface FloatingControlsProps {
 export function FloatingControls({ onImportPaths }: FloatingControlsProps) {
   const { state: ui, dispatch } = useUI();
   const { state, dispatch: sessionDispatch } = useSession();
-  const { selectedIds } = state;
+  const { selectedIds, photos, applyInProgress } = state;
+  const [showRefreshConfirm, setShowRefreshConfirm] = useState(false);
+  const [refreshState, setRefreshState] = useState<RefreshState>(IDLE_REFRESH_STATE);
+
+  // The backend refresh thread reports through events; the session is reloaded
+  // once it finishes so the grid shows the rebuilt baseline.
+  useEffect(() => {
+    const unlisteners = [
+      listen<{ total: number }>("refresh:start", (e) => {
+        setRefreshState({ ...IDLE_REFRESH_STATE, isOpen: true, total: e.payload.total });
+      }),
+      listen<{ done: number; total: number; error: string | null }>("refresh:progress", (e) => {
+        const { done, total, error } = e.payload;
+        setRefreshState((prev) => ({
+          ...prev,
+          done,
+          total,
+          errors: error ? [...prev.errors, error] : prev.errors,
+        }));
+      }),
+      listen<{ total: number; refreshed: number; cancelled: boolean }>("refresh:complete", async (e) => {
+        try {
+          const session = await tauriCommands.loadSession();
+          sessionDispatch({
+            type: "REFRESH_PHOTOS",
+            photos: session.photos.map(mapLoadedPhoto),
+            canRollback: session.canRollback,
+          });
+        } catch (err) {
+          reportError("Failed to reload photos after refreshing metadata", err);
+        }
+        setRefreshState((prev) => ({
+          ...prev,
+          isComplete: true,
+          isCancelling: false,
+          isCancelled: e.payload.cancelled,
+        }));
+      }),
+    ];
+    return () => {
+      unlisteners.forEach((p) => p.then((fn) => fn()));
+    };
+  }, [sessionDispatch]);
+
+  const handleDismissRefresh = useCallback(() => {
+    setRefreshState(IDLE_REFRESH_STATE);
+  }, []);
+
+  const handleCancelRefresh = useCallback(() => {
+    setRefreshState((prev) => ({ ...prev, isCancelling: true }));
+    tauriCommands.refreshCancel().catch((err) => {
+      setRefreshState((prev) => ({ ...prev, isCancelling: false }));
+      reportError("Failed to cancel the metadata refresh", err);
+    });
+  }, []);
+
+  function handleRefresh() {
+    setShowRefreshConfirm(false);
+    tauriCommands
+      .refreshPhotos()
+      .catch((err) => reportError("Failed to refresh metadata from disk", err));
+  }
 
   // No photo in play here, so offsets resolve against today.
   const workingZoneOffsets = useMemo(
@@ -93,6 +195,13 @@ export function FloatingControls({ onImportPaths }: FloatingControlsProps) {
         >
           Remove Selected
         </button>
+        <button
+          className="btn btn-glass"
+          onClick={() => setShowRefreshConfirm(true)}
+          disabled={photos.length === 0 || applyInProgress || refreshState.isOpen}
+        >
+          Refresh from Disk
+        </button>
       </div>
       <div className={styles.rightGroup}>
         <FilterControls />
@@ -114,6 +223,30 @@ export function FloatingControls({ onImportPaths }: FloatingControlsProps) {
         </select>
         <GridSizeControl />
       </div>
+
+      {showRefreshConfirm && (
+        <ConfirmDialog
+          title="Refresh Metadata from Disk?"
+          message={`Re-read the metadata of all ${photos.length} photo${photos.length !== 1 ? "s" : ""} from their files and use it as the new import baseline. Pending edits that have not been applied are discarded and Roll Back history is cleared. Photos are not re-imported and nothing is written to disk.`}
+          confirmLabel="Refresh"
+          destructive
+          onConfirm={handleRefresh}
+          onCancel={() => setShowRefreshConfirm(false)}
+        />
+      )}
+
+      <ImportModal
+        variant="refresh"
+        isOpen={refreshState.isOpen}
+        done={refreshState.done}
+        total={refreshState.total}
+        isComplete={refreshState.isComplete}
+        isCancelling={refreshState.isCancelling}
+        isCancelled={refreshState.isCancelled}
+        errors={refreshState.errors}
+        onCancel={handleCancelRefresh}
+        onDismiss={handleDismissRefresh}
+      />
     </div>
   );
 }

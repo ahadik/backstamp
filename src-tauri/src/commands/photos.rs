@@ -16,6 +16,10 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
     "rw2", "pef",
 ];
 
+/// RAW formats whose metadata may live in an XMP sidecar next to the file.
+/// Mirrors the frontend's RAW_EXTENSIONS, which decides sidecar pairing at import.
+const RAW_EXTENSIONS: &[&str] = &["dng", "cr3", "cr2", "nef", "arw", "raf", "orf", "rw2", "pef"];
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Metadata {
@@ -68,6 +72,35 @@ struct ImportCompletePayload {
     /// those photos are listed in `removed_ids` so the frontend can drop them.
     cancelled: bool,
     removed_ids: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RefreshStartPayload {
+    total: usize,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RefreshProgressPayload {
+    done: usize,
+    total: usize,
+    error: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RefreshCompletePayload {
+    total: usize,
+    refreshed: usize,
+    cancelled: bool,
+}
+
+fn is_raw(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| RAW_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
 }
 
 fn is_supported(path: &Path) -> bool {
@@ -400,6 +433,19 @@ fn insert_photo(
         return Ok(());
     }
 
+    insert_metadata_rows(&conn, id, metadata, keywords)
+}
+
+/// Write a photo's import baseline: one `metadata_original` row and one
+/// non-pending `metadata_current` row per populated field, plus its keywords.
+/// Absent fields get no row at all, which is what `reset_photos_in_db` relies
+/// on to tell "absent at import" from "present but empty".
+fn insert_metadata_rows(
+    conn: &rusqlite::Connection,
+    id: &str,
+    metadata: &Metadata,
+    keywords: &[String],
+) -> Result<(), String> {
     let fields: Vec<(&str, Option<String>)> = vec![
         ("capture_date", metadata.capture_date.clone()),
         ("capture_time", metadata.capture_time.clone()),
@@ -438,6 +484,38 @@ fn insert_photo(
     }
 
     Ok(())
+}
+
+/// Replace a photo's session metadata with freshly read on-disk values, as if
+/// it had just been imported: the baseline and current values both become the
+/// disk values, every pending edit is dropped, and fields no longer present on
+/// disk lose their rows. Atomic per photo.
+pub(crate) fn replace_photo_metadata(
+    conn: &rusqlite::Connection,
+    id: &str,
+    metadata: &Metadata,
+    keywords: &[String],
+) -> Result<(), String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("refresh transaction: {}", e))?;
+    for table in ["photo_keywords", "metadata_current", "metadata_original"] {
+        tx.execute(
+            &format!("DELETE FROM {} WHERE photo_id = ?1", table),
+            params![id],
+        )
+        .map_err(|e| format!("refresh clear {}: {}", table, e))?;
+    }
+    insert_metadata_rows(&tx, id, metadata, keywords)?;
+    tx.commit().map_err(|e| format!("refresh commit: {}", e))
+}
+
+/// Forget every recorded Apply. Used when the session baseline is re-read from
+/// disk: the recorded before/after values describe files as they were at the
+/// old baseline, so rolling them back could clobber changes made elsewhere.
+pub(crate) fn clear_apply_history(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute_batch("DELETE FROM apply_history; DELETE FROM apply_ops;")
+        .map_err(|e| format!("clear apply history: {}", e))
 }
 
 /// XMP extensions to check, in order of preference.
@@ -630,6 +708,125 @@ pub async fn import_photos(
 pub async fn import_cancel(state: State<'_, AppState>) -> Result<(), String> {
     state.import_cancel_flag.store(true, Ordering::Relaxed);
     Ok(())
+}
+
+/// Re-read metadata from disk for every photo in the session and adopt it as
+/// the new import baseline, without re-importing (ids, order, and thumbnails
+/// are kept). Pending edits are discarded and Apply history is cleared. Runs
+/// on a background thread and reports through `refresh:start`,
+/// `refresh:progress`, and `refresh:complete` events.
+#[tauri::command]
+pub async fn refresh_photos(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = Arc::clone(&state.db);
+    let exiftool = Arc::clone(&state.exiftool);
+    let cancel_flag = Arc::clone(&state.refresh_cancel_flag);
+    cancel_flag.store(false, Ordering::Relaxed);
+
+    let photos: Vec<(String, String)> = {
+        let conn = db.lock().map_err(|e| format!("db lock: {}", e))?;
+        let mut stmt = conn
+            .prepare("SELECT id, file_path FROM photos ORDER BY sort_order ASC, added_at ASC")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows
+    };
+
+    std::thread::spawn(move || {
+        let total = photos.len();
+        println!("[refresh] {} photos to refresh", total);
+        let _ = app_handle.emit("refresh:start", RefreshStartPayload { total });
+
+        let mut refreshed = 0usize;
+        let mut cancelled = false;
+
+        for (i, (id, path_str)) in photos.iter().enumerate() {
+            if cancel_flag.load(Ordering::Relaxed) {
+                cancelled = true;
+                println!("[refresh] cancelled after {} of {}", i, total);
+                break;
+            }
+            let done = i + 1;
+            let error = match refresh_one_photo(id, Path::new(path_str), &db, &exiftool) {
+                Ok(()) => {
+                    refreshed += 1;
+                    println!("[refresh] ({}/{}) done: {}", done, total, path_str);
+                    None
+                }
+                Err(e) => {
+                    println!("[refresh] ({}/{}) error: {} — {}", done, total, path_str, e);
+                    Some(format!("{}: {}", path_str, e))
+                }
+            };
+            let _ = app_handle.emit(
+                "refresh:progress",
+                RefreshProgressPayload { done, total, error },
+            );
+        }
+
+        // Any refreshed photo has moved the baseline out from under the
+        // recorded Apply history, so the history is unsafe to roll back.
+        if refreshed > 0 {
+            match db.lock() {
+                Ok(conn) => {
+                    if let Err(e) = clear_apply_history(&conn) {
+                        println!("[refresh] {}", e);
+                    }
+                }
+                Err(e) => println!("[refresh] db lock failed clearing history: {}", e),
+            }
+        }
+
+        println!("[refresh] complete ({} refreshed, cancelled: {})", refreshed, cancelled);
+        let _ = app_handle.emit(
+            "refresh:complete",
+            RefreshCompletePayload { total, refreshed, cancelled },
+        );
+    });
+
+    Ok(())
+}
+
+/// Ask a running refresh to stop after the in-flight photo. Photos already
+/// refreshed keep their new baseline.
+#[tauri::command]
+pub async fn refresh_cancel(state: State<'_, AppState>) -> Result<(), String> {
+    state.refresh_cancel_flag.store(true, Ordering::Relaxed);
+    Ok(())
+}
+
+fn refresh_one_photo(
+    id: &str,
+    file_path: &Path,
+    db: &Arc<Mutex<rusqlite::Connection>>,
+    exiftool: &Arc<Mutex<crate::exiftool::ExiftoolProcess>>,
+) -> Result<(), String> {
+    if !file_path.exists() {
+        return Err("file not found".to_string());
+    }
+    // Import merges a sidecar for RAW files when the user opts in to a disk
+    // search; refresh does the same lookup so a sidecar edited elsewhere is
+    // picked up.
+    let sidecar = if is_raw(file_path) { find_sidecar_for(file_path) } else { None };
+
+    let metadata_json = {
+        let mut et = exiftool.lock().map_err(|e| format!("exiftool lock: {}", e))?;
+        match &sidecar {
+            Some(xmp) => et.read_metadata_with_sidecar(file_path, xmp)?,
+            None => et.read_metadata(file_path)?,
+        }
+    };
+
+    let metadata = parse_metadata(&metadata_json);
+    let keywords = extract_keywords(&metadata_json);
+    let conn = db.lock().map_err(|e| format!("db lock: {}", e))?;
+    replace_photo_metadata(&conn, id, &metadata, &keywords)
 }
 
 fn process_one_file(
@@ -1153,5 +1350,147 @@ mod tests {
         insert_photo(&db, "id-1", "/photos/a.jpg", None, &empty_meta(), &[]).unwrap();
         let result = insert_photo(&db, "id-2", "/photos/b.jpg", None, &empty_meta(), &[]);
         assert!(result.is_ok());
+    }
+    // ── refresh from disk ────────────────────────────────────────────────────
+
+    fn meta_rows(conn: &rusqlite::Connection, table: &str, id: &str) -> Vec<(String, Option<String>)> {
+        let mut stmt = conn
+            .prepare(&format!("SELECT field, value FROM {} WHERE photo_id = ?1 ORDER BY field", table))
+            .unwrap();
+        stmt.query_map(params![id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    /// Refresh adopts the disk values as both baseline and current, drops the
+    /// pending edit, removes fields that are gone from disk, and replaces
+    /// keywords — all without touching the photo row itself.
+    #[test]
+    fn replace_photo_metadata_resets_baseline_and_drops_pending() {
+        let db = make_db();
+        let conn = db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO photos (id, file_path, file_hash, added_at, sort_order) VALUES ('p', '/photos/p.jpg', 'h', 1, 7)",
+            [],
+        )
+        .unwrap();
+        // Import baseline: date + lens; a pending edit on the date; GPS added
+        // as a pending edit that was never on disk.
+        for (field, value) in [("capture_date", "2024-01-01"), ("lens", "old lens")] {
+            conn.execute(
+                "INSERT INTO metadata_original (photo_id, field, value) VALUES ('p', ?1, ?2)",
+                params![field, value],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO metadata_current (photo_id, field, value, is_pending) VALUES ('p', 'capture_date', '2020-05-05', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO metadata_current (photo_id, field, value, is_pending) VALUES ('p', 'lens', 'old lens', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO metadata_current (photo_id, field, value, is_pending) VALUES ('p', 'gps_lat', '1.5', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO photo_keywords (photo_id, keyword) VALUES ('p', 'stale')", []).unwrap();
+
+        // Disk now says: a different date, no lens, a camera make.
+        let fresh = Metadata {
+            capture_date: Some("2024-06-15".to_string()),
+            camera_make: Some("Leica".to_string()),
+            ..empty_meta()
+        };
+        replace_photo_metadata(&conn, "p", &fresh, &["fresh".to_string()]).unwrap();
+
+        let expected = vec![
+            ("camera_make".to_string(), Some("Leica".to_string())),
+            ("capture_date".to_string(), Some("2024-06-15".to_string())),
+        ];
+        assert_eq!(meta_rows(&conn, "metadata_original", "p"), expected);
+        assert_eq!(meta_rows(&conn, "metadata_current", "p"), expected);
+
+        let pending: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM metadata_current WHERE photo_id = 'p' AND is_pending = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, 0, "refresh leaves nothing pending");
+
+        let keywords: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT keyword FROM photo_keywords WHERE photo_id = 'p'").unwrap();
+            stmt.query_map([], |r| r.get(0)).unwrap().filter_map(|r| r.ok()).collect()
+        };
+        assert_eq!(keywords, vec!["fresh".to_string()]);
+
+        // Identity, ordering, and dedup hash are untouched: this is not a re-import.
+        let (hash, sort_order): (Option<String>, i64) = conn
+            .query_row("SELECT file_hash, sort_order FROM photos WHERE id = 'p'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(hash.as_deref(), Some("h"));
+        assert_eq!(sort_order, 7);
+    }
+
+    #[test]
+    fn replace_photo_metadata_leaves_other_photos_alone() {
+        let db = make_db();
+        let conn = db.lock().unwrap();
+        for id in ["a", "b"] {
+            conn.execute(
+                "INSERT INTO photos (id, file_path, added_at) VALUES (?1, ?2, 1)",
+                params![id, format!("/photos/{}.jpg", id)],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO metadata_current (photo_id, field, value, is_pending) VALUES (?1, 'lens', 'x', 1)",
+                params![id],
+            )
+            .unwrap();
+        }
+
+        replace_photo_metadata(&conn, "a", &empty_meta(), &[]).unwrap();
+
+        assert_eq!(meta_rows(&conn, "metadata_current", "a"), vec![]);
+        assert_eq!(
+            meta_rows(&conn, "metadata_current", "b"),
+            vec![("lens".to_string(), Some("x".to_string()))]
+        );
+    }
+
+    #[test]
+    fn clear_apply_history_removes_ops_and_entries() {
+        let db = make_db();
+        let conn = db.lock().unwrap();
+        conn.execute("INSERT INTO photos (id, file_path, added_at) VALUES ('p', '/p.jpg', 1)", []).unwrap();
+        conn.execute("INSERT INTO apply_ops (id, applied_at, file_count) VALUES ('op', 1, 1)", []).unwrap();
+        conn.execute(
+            "INSERT INTO apply_history (apply_id, photo_id, field, value_before, value_after) VALUES ('op', 'p', 'lens', 'a', 'b')",
+            [],
+        )
+        .unwrap();
+
+        clear_apply_history(&conn).unwrap();
+
+        let ops: i64 = conn.query_row("SELECT COUNT(*) FROM apply_ops", [], |r| r.get(0)).unwrap();
+        let hist: i64 = conn.query_row("SELECT COUNT(*) FROM apply_history", [], |r| r.get(0)).unwrap();
+        assert_eq!((ops, hist), (0, 0));
+    }
+
+    #[test]
+    fn is_raw_matches_raw_extensions_case_insensitively() {
+        assert!(is_raw(Path::new("/a/b.CR3")));
+        assert!(is_raw(Path::new("/a/b.dng")));
+        assert!(!is_raw(Path::new("/a/b.jpg")));
+        assert!(!is_raw(Path::new("/a/b")));
     }
 }

@@ -1,11 +1,55 @@
 .filterControls {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
 
-.dropdownWrapper {
-  position: relative;
+/* Collapsed, the tray is a zero-width clip box; expanding animates max-width.
+   Content is right-anchored, so the buttons emerge from the icon's side moving
+   left, and on collapse they vanish left to right back behind the icon. */
+.tray {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-width 0.3s ease, opacity 0.25s ease;
+}
+
+.tray > * {
+  flex-shrink: 0;
+}
+
+.trayExpanded {
+  max-width: 220px;
+  opacity: 1;
+}
+
+.iconButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--color-glass-bg);
+  border: 1px solid var(--color-glass-border);
+  border-radius: 100px;
+  color: var(--color-text);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.iconButton:hover {
+  border-color: var(--color-accent);
+}
+
+.iconButtonActive {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 .activeButton {
@@ -13,10 +57,8 @@
   color: var(--color-accent);
 }
 
-.clearAll {
-  white-space: nowrap;
-}
-
+/* Panels anchor to the control group's right edge (not the individual buttons)
+   so the tray's overflow clipping never cuts them off. */
 .panel {
   position: absolute;
   top: calc(100% + 4px);
