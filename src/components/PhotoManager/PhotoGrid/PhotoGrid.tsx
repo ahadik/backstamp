@@ -16,6 +16,7 @@ import {
 } from "../../../hooks/useMetadataInheritance";
 import { tauriCommands } from "../../../lib/tauri";
 import { reportError } from "../../../lib/errors";
+import { commitInspectorEdits } from "../../../lib/inspectorUtils";
 import { DropSettingsDialog, type PendingDrop } from "../../common/DropSettingsDialog/DropSettingsDialog";
 import { DayBlockHeader } from "./DayBlockHeader";
 import { GpxTile } from "./GpxTile";
@@ -185,7 +186,10 @@ export function PhotoGrid() {
   );
 
   const handleSelectSingle = useCallback(
-    (id: string) => dispatch({ type: "SELECT_SINGLE", id }),
+    (id: string) => {
+      commitInspectorEdits();
+      dispatch({ type: "SELECT_SINGLE", id });
+    },
     [dispatch]
   );
 
@@ -203,6 +207,8 @@ export function PhotoGrid() {
       dragCompletedRef.current = false;
       return;
     }
+    // Save any half-typed inspector edit against the outgoing selection first.
+    commitInspectorEdits();
     if (e.shiftKey && lastClickedId) {
       dispatch({ type: "SELECT_RANGE", fromId: lastClickedId, toId: photoId, orderedIds });
     } else if (e.metaKey || e.ctrlKey) {
@@ -217,11 +223,13 @@ export function PhotoGrid() {
     return !!document.getElementById("inspector-panel")?.contains(document.activeElement);
   }
 
+  const hasGpxSelection = session.selectedGpxIds.size > 0;
   useEffect(() => {
-    if (session.selectedGpxId && gpxSectionRef.current) {
+    if (hasGpxSelection && gpxSectionRef.current) {
       gpxSectionRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
-  }, [session.selectedGpxId]);
+  }, [hasGpxSelection]);
+
 
   // ⌘A selects what's on screen, so an active filter never selects hidden photos.
   const orderedIdsRef = useRef(orderedIds);
@@ -229,6 +237,9 @@ export function PhotoGrid() {
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      // Inside an inspector field ⌘A means "select all text", like Escape
+      // there means "close this control" rather than "deselect photos".
+      if (inspectorHasFocus()) return;
       if ((e.metaKey || e.ctrlKey) && e.key === "a") {
         e.preventDefault();
         dispatch({ type: "SELECT_ALL", ids: orderedIdsRef.current });
@@ -339,8 +350,16 @@ export function PhotoGrid() {
                   <GpxTile
                     key={gpx.id}
                     gpxFile={gpx}
-                    isSelected={session.selectedGpxId === gpx.id}
-                    onSelect={(id) => dispatch({ type: "SELECT_GPX", id })}
+                    isSelected={session.selectedGpxIds.has(gpx.id)}
+                    onSelect={(id, e) => {
+                      commitInspectorEdits();
+                      dispatch({
+                        type: "SELECT_GPX",
+                        id,
+                        mode: e.shiftKey ? "shift" : e.metaKey || e.ctrlKey ? "cmd" : "single",
+                      });
+                    }}
+
                     onRemove={(id) => {
                       tauriCommands.removeGpx(id)
                         .catch((err) => reportError("Failed to remove the GPX file", err));

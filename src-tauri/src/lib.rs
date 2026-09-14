@@ -20,6 +20,7 @@ pub struct AppState {
     pub thumbnails_dir: PathBuf,
     pub apply_cancel_flag: Arc<AtomicBool>,
     pub import_cancel_flag: Arc<AtomicBool>,
+    pub refresh_cancel_flag: Arc<AtomicBool>,
     pub context_menu_path: Arc<Mutex<Option<String>>>,
 }
 
@@ -48,6 +49,7 @@ fn init_app_state(app: &tauri::App) -> Result<AppState, String> {
         thumbnails_dir,
         apply_cancel_flag: Arc::new(AtomicBool::new(false)),
         import_cancel_flag: Arc::new(AtomicBool::new(false)),
+        refresh_cancel_flag: Arc::new(AtomicBool::new(false)),
         context_menu_path: Arc::new(Mutex::new(None)),
     })
 }
@@ -60,6 +62,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let state = match init_app_state(app) {
                 Ok(state) => state,
@@ -108,6 +111,8 @@ pub fn run() {
             session_commands::clear_session,
             photos::import_photos,
             photos::import_cancel,
+            photos::refresh_photos,
+            photos::refresh_cancel,
             photos::expand_import_paths,
             photos::find_xmp_sidecars,
             photos::remove_photos,

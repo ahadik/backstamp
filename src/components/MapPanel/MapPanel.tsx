@@ -4,15 +4,16 @@ import { useRef, useEffect, useCallback, useState } from "react";
 import { useSession } from "../../state/SessionContext";
 import { useUI } from "../../state/UIContext";
 import { filterPhotos } from "../../state/selectors";
-import type { Photo, GpxFile, Metadata } from "../../state/SessionContext";
+import type { Photo, GpxFile } from "../../state/SessionContext";
 import styles from "./MapPanel.module.css";
 import { palette, colors } from "../../lib/colors";
 import { planScrubApply, scrubConfirmMessage } from "../../lib/trackScrub";
 import type { ScrubSnap, ScrubPlan } from "../../lib/trackScrub";
-import { attachGpxScrub, setupScrubLayer, type ScrubDeps } from "./gpxScrub";
+import { attachGpxScrub, setupScrubLayer, syncGpxLayers, type ScrubDeps } from "./gpxScrub";
 import { ConfirmDialog } from "../common/ConfirmDialog/ConfirmDialog";
-import { tauriCommands } from "../../lib/tauri";
-import { reportError } from "../../lib/errors";
+import { persistPendingUpdates } from "../../lib/pendingEdits";
+import { getMapStyleUrl } from "./mapTheme";
+
 
 // Contiguous US bounds: west, south, east, north
 const US_BOUNDS: [number, number, number, number] = [-125, 24, -66, 50];
@@ -23,19 +24,6 @@ const GLOBE_VIEW: { center: [number, number]; zoom: number } = {
   zoom: 1,
 };
 
-// Mapbox's light/dark styles are monotone by design; pick to match the OS theme.
-function getMapStyleUrl(): string {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "mapbox://styles/mapbox/dark-v11"
-    : "mapbox://styles/mapbox/light-v11";
-}
-
-// GPX traces use brand-primary; shade flips so the line stays legible on each base map.
-function getGpxLineColor(): string {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? palette.brandPrimary[1]
-    : palette.brandPrimary[4];
-}
 
 function fitToPhotos(map: mapboxgl.Map, photos: Photo[]) {
   const withCoords = photos.filter(
@@ -76,13 +64,48 @@ export function buildPhotoGeoJSON(photos: Photo[]): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features };
 }
 
-function fitToGpxTrack(map: mapboxgl.Map, gpx: GpxFile) {
-  const pts = gpx.trackPoints ?? [];
-  if (pts.length === 0) return;
-  const bounds = new mapboxgl.LngLatBounds();
-  for (const p of pts) bounds.extend([p.lng, p.lat]);
-  map.fitBounds(bounds, { padding: 60, maxZoom: 14 });
+/** True when every located photo already sits inside the given viewport bounds. */
+export function allWithinView(
+  photos: Photo[],
+  bounds: { contains: (ll: [number, number]) => boolean } | null
+): boolean {
+  if (!bounds) return false;
+  const located = photos.filter(
+    (p) => p.currentMetadata.gpsLat != null && p.currentMetadata.gpsLng != null
+  );
+  return (
+    located.length > 0 &&
+    located.every((p) =>
+      bounds.contains([p.currentMetadata.gpsLng!, p.currentMetadata.gpsLat!])
+    )
+  );
 }
+
+/** Center of the located photos' bounding box, or null when none have coords. */
+export function centerOfPhotos(photos: Photo[]): mapboxgl.LngLat | null {
+  const bounds = new mapboxgl.LngLatBounds();
+  let any = false;
+  for (const p of photos) {
+    if (p.currentMetadata.gpsLat != null && p.currentMetadata.gpsLng != null) {
+      bounds.extend([p.currentMetadata.gpsLng, p.currentMetadata.gpsLat]);
+      any = true;
+    }
+  }
+  return any ? bounds.getCenter() : null;
+}
+
+function fitToGpxTracks(map: mapboxgl.Map, gpxFiles: GpxFile[]) {
+  const bounds = new mapboxgl.LngLatBounds();
+  let any = false;
+  for (const gpx of gpxFiles) {
+    for (const p of gpx.trackPoints ?? []) {
+      bounds.extend([p.lng, p.lat]);
+      any = true;
+    }
+  }
+  if (any) map.fitBounds(bounds, { padding: 60, maxZoom: 14 });
+}
+
 
 // Grayscale terrain relief so mountains and coastlines read on the flat
 // monotone base styles. Colors come from the neutral ramp per theme.
@@ -160,67 +183,27 @@ function setupSources(map: mapboxgl.Map) {
       "circle-stroke-color": palette.white,
     },
   });
-}
 
-function syncGpxLayers(map: mapboxgl.Map, gpxFiles: GpxFile[], trackedIds: Set<string>) {
-  const currentIds = new Set(gpxFiles.map((g) => g.id));
-  for (const id of [...trackedIds]) {
-    if (!currentIds.has(id)) {
-      if (map.getLayer(`gpx-line-${id}`)) map.removeLayer(`gpx-line-${id}`);
-      if (map.getSource(`gpx-${id}`)) map.removeSource(`gpx-${id}`);
-      trackedIds.delete(id);
-    }
-  }
-  for (const gpx of gpxFiles) {
-    const sourceId = `gpx-${gpx.id}`;
-    const coords = (gpx.trackPoints ?? []).map((p) => [p.lng, p.lat]);
-    const geojson: GeoJSON.Feature = {
-      type: "Feature",
-      geometry: { type: "LineString", coordinates: coords },
-      properties: {},
-    };
-    if (map.getSource(sourceId)) {
-      (map.getSource(sourceId) as mapboxgl.GeoJSONSource).setData(geojson);
-    } else {
-      map.addSource(sourceId, { type: "geojson", data: geojson });
-      const beforeId = map.getLayer("clusters") ? "clusters" : undefined;
-      map.addLayer(
-        {
-          id: `gpx-line-${gpx.id}`,
-          type: "line",
-          source: sourceId,
-          paint: {
-            "line-color": getGpxLineColor(),
-            "line-width": 2,
-            "line-opacity": 0.8,
-          },
-        },
-        beforeId,
-      );
-      trackedIds.add(gpx.id);
-    }
-  }
-}
+  // Selected photos get their own unclustered source so their pins stay
+  // individually visible on top of clusters. Info-blue matches the grid's
+  // selection highlight; shade flips per theme so it reads on both base maps.
+  map.addSource("photos-selected", {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
 
-// Scrub edits differ per photo (timezones vary); persist in groups of
-// identical payloads so the common case stays a single backend call.
-function persistScrubUpdates(updates: Array<{ id: string; changes: Partial<Metadata> }>) {
-  const groups = new Map<string, { ids: string[]; changes: Partial<Metadata> }>();
-  for (const u of updates) {
-    const key = JSON.stringify(u.changes);
-    const group = groups.get(key);
-    if (group) group.ids.push(u.id);
-    else groups.set(key, { ids: [u.id], changes: u.changes });
-  }
-  for (const group of groups.values()) {
-    const fields = Object.entries(group.changes).map(([field, value]) => ({
-      field,
-      value: value == null ? null : String(value),
-    }));
-    tauriCommands
-      .setPendingChanges(group.ids, fields)
-      .catch((err) => reportError("Failed to save track point edits", err));
-  }
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  map.addLayer({
+    id: "selected-point",
+    type: "circle",
+    source: "photos-selected",
+    paint: {
+      "circle-color": dark ? palette.info[3] : palette.info[4],
+      "circle-radius": 8,
+      "circle-stroke-width": 2,
+      "circle-stroke-color": palette.white,
+    },
+  });
 }
 
 interface MapPanelProps {
@@ -268,6 +251,9 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   // Refs so the async "load" handler sees current data without stale closures
   const focusPhotosRef = useRef<Photo[]>(focusPhotos);
   focusPhotosRef.current = focusPhotos;
+  // Pins to highlight: the selected photos, or nothing without a selection.
+  const selectedForMapRef = useRef<Photo[]>([]);
+  selectedForMapRef.current = hasSelection ? focusPhotos : [];
   const visiblePhotosRef = useRef<Photo[]>(visiblePhotos);
   visiblePhotosRef.current = visiblePhotos;
   const gpxFilesRef = useRef<GpxFile[]>(session.gpxFiles);
@@ -276,7 +262,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
   const applyScrub = (updates: ScrubPlan["updates"]) => {
     suppressFitUntilRef.current = Date.now() + 1000;
     sessionDispatch({ type: "SET_PENDING_BATCH", updates });
-    persistScrubUpdates(updates);
+    persistPendingUpdates(updates, "Failed to save map edits");
   };
 
   const handleScrubPick = (snap: ScrubSnap) => {
@@ -344,6 +330,9 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
       (map.current!.getSource("photos") as mapboxgl.GeoJSONSource).setData(
         buildPhotoGeoJSON(visiblePhotosRef.current)
       );
+      (map.current!.getSource("photos-selected") as mapboxgl.GeoJSONSource).setData(
+        buildPhotoGeoJSON(selectedForMapRef.current)
+      );
       // setStyle removed the old gpx layers; reset the tracking set so syncGpxLayers re-adds them.
       gpxLayerIds.current.clear();
       syncGpxLayers(map.current!, gpxFilesRef.current, gpxLayerIds.current);
@@ -379,7 +368,14 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
       (p) => p.currentMetadata.gpsLat != null && p.currentMetadata.gpsLng != null
     );
     if (!hasCoords) return;
-    fitToPhotos(map.current, focusPhotos);
+    // When every selected pin is already on screen, keep the zoom and just
+    // pan to center the selection; only zoom out when something is off-screen.
+    if (allWithinView(focusPhotos, map.current.getBounds())) {
+      const center = centerOfPhotos(focusPhotos);
+      if (center) map.current.easeTo({ center });
+    } else {
+      fitToPhotos(map.current, focusPhotos);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitKey]);
 
@@ -399,6 +395,18 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     else m.once("idle", sync);
   }, [session.photos, ui.photoFilters, ui.workingTimezone]);
 
+  // Highlight layer tracks the selection itself, not just photo data.
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    const sync = () => {
+      const source = m.getSource("photos-selected") as mapboxgl.GeoJSONSource | undefined;
+      if (source) source.setData(buildPhotoGeoJSON(selectedForMapRef.current));
+    };
+    if (m.isStyleLoaded()) sync();
+    else m.once("idle", sync);
+  }, [session.photos, session.selectedIds]);
+
   useEffect(() => {
     const m = map.current;
     if (!m) return;
@@ -407,12 +415,17 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
     else m.once("idle", sync);
   }, [session.gpxFiles]);
 
+  // Sets are rebuilt on every selection change; key on contents so an
+  // unchanged track selection doesn't re-fit the camera.
+  const selectedGpxKey = [...session.selectedGpxIds].sort().join(",");
   useEffect(() => {
     if (!map.current?.isStyleLoaded()) return;
-    if (!session.selectedGpxId) return;
-    const gpx = session.gpxFiles.find((g) => g.id === session.selectedGpxId);
-    if (gpx) fitToGpxTrack(map.current, gpx);
-  }, [session.selectedGpxId, session.gpxFiles]);
+    if (session.selectedGpxIds.size === 0) return;
+    const selected = session.gpxFiles.filter((g) => session.selectedGpxIds.has(g.id));
+    fitToGpxTracks(map.current, selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGpxKey, session.gpxFiles]);
+
 
   // Reset to the globe view when the session is cleared (data → empty transition).
   useEffect(() => {
@@ -482,7 +495,7 @@ export function MapPanel({ onOpenSettings }: MapPanelProps) {
       <div className={styles.resizeZone} onMouseDown={handleDragStart} />
       {scrubConfirm?.confirm && (
         <ConfirmDialog
-          title="Set from GPX Track"
+          title={scrubConfirm.confirm.fromTrack ? "Set from GPX Track" : "Set Location"}
           message={scrubConfirmMessage(scrubConfirm.confirm)}
           confirmLabel="Set"
           onConfirm={() => {

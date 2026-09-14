@@ -1,37 +1,13 @@
 import type { Metadata, Photo } from "../state/SessionContext";
 
 /**
- * Returns the shared field value if all selected photos agree, 'multiple' if two or more
- * distinct non-null values exist, or null if all values are null (or the selection is empty).
+ * Returns the shared field value if every selected photo agrees, or 'multiple'
+ * if the values differ. A mix of set and unset values also reads as 'multiple':
+ * an unset value is a state of its own, not mere absence, so a selection where
+ * some photos have a value and others don't must not display that value as if
+ * it were shared. Returns null if all values are null or the selection is empty.
  */
 export function deriveFieldValue<T>(
-  photos: Photo[],
-  getter: (m: Metadata) => T | null
-): T | "multiple" | null {
-  if (photos.length === 0) return null;
-
-  const values = photos.map((p) => getter(p.currentMetadata));
-  const nonNull = values.filter((v) => v !== null) as T[];
-
-  if (nonNull.length === 0) return null;
-
-  const first = nonNull[0];
-  const allSame = nonNull.every((v) => {
-    if (typeof v === "object" && v !== null) {
-      return JSON.stringify(v) === JSON.stringify(first);
-    }
-    return v === first;
-  });
-
-  return allSame ? first : "multiple";
-}
-
-/**
- * Like deriveFieldValue, but strict: a mix of set and unset values also reads
- * as "multiple". Used for fields where an unset value is a meaningful state of
- * its own (timezone, UTC offset) rather than mere absence.
- */
-export function deriveStrictFieldValue<T>(
   photos: Photo[],
   getter: (m: Metadata) => T | null
 ): T | "multiple" | null {
@@ -54,4 +30,18 @@ export function buildPendingChange(
   value: Metadata[keyof Metadata]
 ): Partial<Metadata> {
   return { [field]: value } as Partial<Metadata>;
+}
+
+/**
+ * Commit whatever the user is mid-typing in the inspector by blurring the
+ * focused control; every inspector input saves on blur. Call this before a
+ * selection change so the edit lands on the photos it was typed for. Needed
+ * because photo tiles prevent the default mousedown (for drag tracking), which
+ * would otherwise have blurred the input for us.
+ */
+export function commitInspectorEdits(): void {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return;
+  if (!document.getElementById("inspector-panel")?.contains(active)) return;
+  active.blur();
 }

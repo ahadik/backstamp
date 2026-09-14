@@ -23,7 +23,7 @@ beforeEach(() => {
   vi.mocked(tauriCommands.removePhotos).mockClear();
   vi.mocked(useSession).mockReturnValue({
     state: {
-      photos: [], selectedIds: new Set(), gpxFiles: [], selectedGpxId: null,
+      photos: [], selectedIds: new Set(), gpxFiles: [], selectedGpxIds: new Set(),
       applyInProgress: false, canRollback: false, metadataHistory: [],
     },
     dispatch: mockDispatch,

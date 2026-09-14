@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useSession } from "../../../state/SessionContext";
-import { deriveFieldValue, deriveStrictFieldValue } from "../../../lib/inspectorUtils";
+import { deriveFieldValue } from "../../../lib/inspectorUtils";
 import { WORKING_TIMEZONES } from "../../../lib/timezones";
 import {
   distinctCaptureDates,
@@ -94,6 +94,8 @@ interface PendingConfirm {
 interface TzMismatch {
   tz: string;
   tzName: string;
+  /** The selection the zone was chosen for; it may change while the dialog is open. */
+  photos: Photo[];
   mismatchCount: number;
   /** "UTC−7" — the chosen zone's offset, when uniform across mismatched photos. */
   zoneOffsetLabel: string | null;
@@ -112,7 +114,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
   // Strict: a photo without a timezone is in a different state than one with,
   // so mixed set/unset selections read as multiple rather than adopting the
   // set value. Same for the recorded offset below.
-  const timezone = deriveStrictFieldValue(selectedPhotos, (m) => m.timezone);
+  const timezone = deriveFieldValue(selectedPhotos, (m) => m.timezone);
 
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const [tzMismatch, setTzMismatch] = useState<TzMismatch | null>(null);
@@ -174,6 +176,23 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, []);
 
+  /**
+   * Per-photo edits that differ only in a few fields persist in groups of
+   * identical payloads, keeping the common case a single backend call.
+   */
+  function persistGrouped(updates: Array<{ id: string; changes: Partial<Metadata> }>) {
+    const groups = new Map<string, { ids: string[]; changes: Partial<Metadata> }>();
+    for (const u of updates) {
+      const key = JSON.stringify(u.changes);
+      const group = groups.get(key);
+      if (group) group.ids.push(u.id);
+      else groups.set(key, { ids: [u.id], changes: u.changes });
+    }
+    for (const group of groups.values()) persistPending(group.ids, group.changes);
+  }
+
+  // The stored offset is not set here: the session reducer derives it from the
+  // resulting date, time, and zone for every edit, whatever control made it.
   function dispatchChanges(changes: Partial<Metadata>) {
     dispatch({ type: "SET_PENDING", ids: selectedIds, changes });
     persistPending(selectedIds, changes);
@@ -194,6 +213,14 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
 
   function handleDateFocus() {
     try { dateRef.current?.showPicker(); } catch (_) {}
+  }
+
+  /** Enter commits: every field saves on blur, so blurring is the commit. */
+  function blurOnEnter(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.currentTarget.blur();
+    }
   }
 
   function handleDateChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -232,6 +259,19 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
     }
   }
 
+  function handleTimezoneKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const first = filteredTimezones[0];
+    if (tzOpen && first) handleTimezoneSelect(first.value);
+    e.currentTarget.blur();
+  }
+
+  function handleTimezoneBlur() {
+    setTzOpen(false);
+    setTzSearch("");
+  }
+
   function handleTimezoneSelect(tz: string) {
     setTzOpen(false);
     setTzSearch("");
@@ -263,7 +303,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
     });
 
     if (mismatched.length === 0) {
-      applyTimezone(tz, "keep");
+      applyTimezone(selectedPhotos, tz, "keep");
       return;
     }
 
@@ -294,6 +334,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
     setTzMismatch({
       tz,
       tzName: option ? option.name : tz,
+      photos: selectedPhotos,
       mismatchCount: mismatched.length,
       zoneOffsetLabel,
       currentOffsetLabel,
@@ -308,42 +349,33 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
    * the new zone so the moment of capture is preserved; "keep" leaves the wall
    * clock alone, letting the moment shift by the offset difference.
    */
-  function applyTimezone(tz: string, mode: "adjust" | "keep") {
+  function applyTimezone(photos: Photo[], tz: string, mode: "adjust" | "keep") {
     const updates: Array<{ id: string; changes: Partial<Metadata> }> = [];
-    for (const photo of selectedPhotos) {
+    for (const photo of photos) {
       const { captureDate: cd, captureTime: ct, utcOffset: off } = photo.currentMetadata;
-      const changes: Partial<Metadata> = { timezone: tz };
+      // A photo with no date has no instant to resolve the zone at, so its
+      // offset is null until a date arrives and the reducer derives it.
       const next = zoneOffsetForPhoto(photo, tz);
-      if (next) {
-        changes.utcOffset = next;
-        if (
-          mode === "adjust" &&
-          cd &&
-          ct &&
-          off &&
-          offsetToMinutes(off) !== offsetToMinutes(next)
-        ) {
-          const shifted = wallClockInZone(cd, ct, off, tz);
-          if (shifted) {
-            changes.captureDate = shifted.date;
-            changes.captureTime = shifted.time;
-          }
+      const changes: Partial<Metadata> = { timezone: tz, utcOffset: next };
+      if (
+        mode === "adjust" &&
+        next &&
+        cd &&
+        ct &&
+        off &&
+        offsetToMinutes(off) !== offsetToMinutes(next)
+      ) {
+        const shifted = wallClockInZone(cd, ct, off, tz);
+        if (shifted) {
+          changes.captureDate = shifted.date;
+          changes.captureTime = shifted.time;
         }
       }
       updates.push({ id: photo.id, changes });
     }
 
     dispatch({ type: "SET_PENDING_BATCH", updates });
-    // Wall-clock adjustments differ per photo; persist in groups of identical
-    // payloads so the common no-shift case stays a single backend call.
-    const groups = new Map<string, { ids: string[]; changes: Partial<Metadata> }>();
-    for (const u of updates) {
-      const key = JSON.stringify(u.changes);
-      const group = groups.get(key);
-      if (group) group.ids.push(u.id);
-      else groups.set(key, { ids: [u.id], changes: u.changes });
-    }
-    for (const group of groups.values()) persistPending(group.ids, group.changes);
+    persistGrouped(updates);
   }
 
   function handleIncrement(direction: 1 | -1) {
@@ -387,7 +419,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
   // The offset shown is the selected zone's (resolved at the capture dates)
   // once a timezone is set; otherwise it falls back to the camera-recorded
   // value, labelled as such so an unresolved timezone stays visible as open.
-  const recordedOffset = deriveStrictFieldValue(selectedPhotos, (m) => m.utcOffset);
+  const recordedOffset = deriveFieldValue(selectedPhotos, (m) => m.utcOffset);
   let offsetLabel = "—";
   let offsetSource: string | null = null;
   if (hasMixedTimezones) {
@@ -423,6 +455,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
                   onFocus={handleDateFocus}
                   onChange={handleDateChange}
                   onBlur={handleDateBlur}
+                  onKeyDown={blurOnEnter}
                 />
                 {!dateValue && captureDate !== "multiple" && (
                   <span className={styles.dateOverlay}>--/--/----</span>
@@ -439,6 +472,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
                 onFocus={handleTimeFocus}
                 onChange={handleTimeChange}
                 onBlur={handleTimeBlur}
+                onKeyDown={blurOnEnter}
               />
             </div>
             <div className={`${styles.row} ${styles.tzRow}`}>
@@ -451,6 +485,8 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
                   placeholder={tzPlaceholder}
                   onFocus={() => { setTzOpen(true); setTzSearch(""); }}
                   onChange={(e) => setTzSearch(e.target.value)}
+                  onKeyDown={handleTimezoneKeyDown}
+                  onBlur={handleTimezoneBlur}
                   readOnly={!tzOpen}
                   autoComplete="off"
                 />
@@ -508,6 +544,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
                 onChange={(e) =>
                   setIncrementHours(Math.max(1, parseInt(e.target.value) || 1))
                 }
+                onKeyDown={blurOnEnter}
               />
               <span className={styles.incLabel}>hrs</span>
               <button
@@ -572,7 +609,7 @@ export function DateTimeSection({ selectedPhotos }: DateTimeSectionProps) {
             </>
           }
           onConfirm={() => {
-            applyTimezone(tzMismatch.tz, tzMismatchMode);
+            applyTimezone(tzMismatch.photos, tzMismatch.tz, tzMismatchMode);
             setTzMismatch(null);
           }}
           onCancel={() => setTzMismatch(null)}

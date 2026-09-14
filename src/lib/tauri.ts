@@ -89,6 +89,11 @@ export const tauriCommands = {
 
   importCancel: () => invoke<void>("import_cancel"),
 
+  /** Re-read every photo's metadata from disk as the new session baseline. */
+  refreshPhotos: () => invoke<void>("refresh_photos"),
+
+  refreshCancel: () => invoke<void>("refresh_cancel"),
+
   expandImportPaths: (paths: string[]) =>
     invoke<string[]>("expand_import_paths", { paths }),
 

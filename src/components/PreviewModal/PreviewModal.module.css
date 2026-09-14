@@ -1,0 +1,166 @@
+.frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 92vw;
+}
+
+/* Sized from the image's aspect ratio (set as --aspect) so the small
+   thumbnail fills the final box while the large one is still arriving. */
+.stage {
+  position: relative;
+  aspect-ratio: var(--aspect, 1.5);
+  width: min(92vw, calc(84vh * var(--aspect, 1.5)));
+  background: var(--palette-surface-neutral-7);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.55);
+}
+
+/* Until the ratio is known the box would be the wrong shape; keep the space
+   reserved but paint nothing, so the caption never jumps. */
+.stagePending {
+  visibility: hidden;
+}
+
+.stageMissing {
+  width: min(92vw, 480px);
+  aspect-ratio: 3 / 2;
+}
+
+.mapStage {
+  width: 92vw;
+  aspect-ratio: auto;
+  height: 84vh;
+  background: var(--color-surface);
+}
+
+.image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.large {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.large.ready {
+  opacity: 1;
+}
+
+.missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  color: var(--palette-surface-neutral-2);
+  text-align: center;
+  padding: var(--space-4);
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+}
+
+.mapLoading {
+  position: absolute;
+  inset: 0;
+  background: var(--color-surface);
+  pointer-events: none;
+  animation: fadeOut 200ms ease 300ms forwards;
+}
+
+@keyframes fadeOut {
+  to { opacity: 0; }
+}
+
+.caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  max-width: 100%;
+  padding: 0 var(--space-2);
+  font-size: 12px;
+  color: color-mix(in srgb, var(--palette-white) 85%, transparent);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60vw;
+}
+
+.counter {
+  color: color-mix(in srgb, var(--palette-white) 60%, transparent);
+  white-space: nowrap;
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.nav {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--palette-white) 18%, transparent);
+  background: color-mix(in srgb, var(--palette-surface-neutral-7) 65%, transparent);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  color: var(--palette-white);
+  font-size: 28px;
+  line-height: 1;
+  padding: 0 0 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast), opacity var(--transition-fast);
+}
+
+.nav:not(:disabled):hover {
+  background: color-mix(in srgb, var(--palette-surface-neutral-7) 85%, transparent);
+}
+
+.nav:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.navPrev {
+  left: var(--space-4);
+}
+
+.navNext {
+  right: var(--space-4);
+}

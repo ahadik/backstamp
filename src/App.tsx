@@ -10,6 +10,8 @@ import { ApplyModal } from "./components/ApplyModal/ApplyModal";
 import { SettingsModal } from "./components/SettingsModal/SettingsModal";
 import { ErrorModal } from "./components/common/ErrorModal/ErrorModal";
 import { DevLogModal } from "./components/common/DevLogModal/DevLogModal";
+import { PreviewModal } from "./components/PreviewModal/PreviewModal";
+
 import { useSession } from "./state/SessionContext";
 import { useUI } from "./state/UIContext";
 import { tauriCommands } from "./lib/tauri";
@@ -17,6 +19,8 @@ import { reportError } from "./lib/errors";
 import type { ApplyPhase, ApplyError } from "./components/ApplyModal/ApplyModal";
 import type { Metadata, Photo, GpxFile } from "./state/SessionContext";
 import type { TrackPoint } from "./lib/tauri";
+import { useTimezoneReconciler } from "./hooks/useTimezoneReconciler";
+import { useExternalLinks } from "./hooks/useExternalLinks";
 
 function mapLoadedPhoto(p: {
   id: string;
@@ -66,6 +70,8 @@ function App() {
   const [applyPhase, setApplyPhase] = useState<ApplyPhase>({ type: "idle" });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(true);
+  useTimezoneReconciler();
+  useExternalLinks();
 
   useEffect(() => {
     async function hydrateSession() {
@@ -189,7 +195,9 @@ function App() {
         <InspectorPanel onOpenSettings={openSettings} />
       </div>
       <MapPanel onOpenSettings={openSettings} />
+      <PreviewModal />
       <ApplyModal
+
         phase={applyPhase}
         onCancel={async () => {
           setApplyPhase((prev) =>

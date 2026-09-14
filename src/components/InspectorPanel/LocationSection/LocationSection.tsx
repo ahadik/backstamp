@@ -7,8 +7,17 @@ import { tauriCommands } from "../../../lib/tauri";
 import { reportError } from "../../../lib/errors";
 import { matchToTracks, countMatches, applyGpxAutoTag, tracksFrom } from "../../../lib/gpxMatching";
 import { toUtcSeconds } from "../../../lib/datetime";
+import { planScrubApply, scrubConfirmMessage } from "../../../lib/trackScrub";
+import type { ScrubSnap, ScrubPlan } from "../../../lib/trackScrub";
+import { persistPendingUpdates } from "../../../lib/pendingEdits";
+import {
+  attachGpxScrub,
+  setupScrubLayer,
+  syncGpxLayers,
+  type ScrubDeps,
+} from "../../MapPanel/gpxScrub";
 import { ConfirmDialog } from "../../common/ConfirmDialog/ConfirmDialog";
-import type { Photo } from "../../../state/SessionContext";
+import type { Photo, GpxFile } from "../../../state/SessionContext";
 import type { TrackPoint } from "../../../lib/tauri";
 import { colors } from "../../../lib/colors";
 import styles from "./LocationSection.module.css";
@@ -49,6 +58,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
     matchCount: number;
     tracks: TrackPoint[][];
   } | null>(null);
+  const [scrubConfirm, setScrubConfirm] = useState<{ plan: ScrubPlan; snap: ScrubSnap } | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -102,6 +112,33 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
   }
   dispatchCoordsRef.current = dispatchCoords;
 
+  const applyScrub = (plan: ScrubPlan, snap: ScrubSnap) => {
+    dispatch({ type: "SET_PENDING_BATCH", updates: plan.updates });
+    persistPendingUpdates(plan.updates, "Failed to save location edits");
+    tauriCommands.resolveTimezone(snap.lat, snap.lng).then(setResolvedTz).catch(console.error);
+  };
+
+  // Map clicks — free drops and GPX track snaps — share the picker flow with
+  // the main map: silent for one clean photo, confirmed otherwise.
+  const handleScrubPick = (snap: ScrubSnap) => {
+    if (selectedPhotos.length === 0) return;
+    const gpx = session.gpxFiles.find((g) => g.id === snap.gpxId);
+    const plan = planScrubApply(selectedPhotos, snap, gpx?.timezone ?? null);
+    if (plan.confirm) setScrubConfirm({ plan, snap });
+    else applyScrub(plan, snap);
+  };
+
+  // Handlers attach once at map creation and read these through the ref.
+  const scrubDepsRef = useRef<ScrubDeps>({ enabled: false, gpxFiles: [], onPick: () => {} });
+  scrubDepsRef.current = {
+    enabled: selectedPhotos.length > 0,
+    gpxFiles: session.gpxFiles,
+    onPick: handleScrubPick,
+  };
+  const gpxLayerIdsRef = useRef(new Set<string>());
+  const gpxFilesRef = useRef<GpxFile[]>(session.gpxFiles);
+  gpxFilesRef.current = session.gpxFiles;
+
   // Reset search state when selection changes; resolve timezone if coords already present
   useEffect(() => {
     setSearchQuery("");
@@ -152,21 +189,40 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
       return;
     }
     mapRef.current = map;
+    if (import.meta.env.DEV) {
+      // Handle for driving the map from automation during development.
+      (window as unknown as Record<string, unknown>).__backstampInspectorMap = map;
+    }
 
-    // Clicking anywhere places/moves the single pin and snaps all selected photos
-    map.on("click", (e) => {
-      const { lat, lng } = e.lngLat;
-      dispatchCoordsRef.current(lat, lng);
+    // Clicking places the point via the shared picker: a drop indicator
+    // follows the cursor and snaps onto GPX tracks (handled in handleScrubPick).
+    const detachScrub = attachGpxScrub(map, scrubDepsRef);
+
+    map.on("style.load", () => {
+      setupScrubLayer(map);
+      gpxLayerIdsRef.current.clear();
+      syncGpxLayers(map, gpxFilesRef.current, gpxLayerIdsRef.current);
     });
 
     return () => {
+      detachScrub();
       map.remove();
       mapRef.current = null;
       markerRef.current = null;
       multiMarkersRef.current.clear();
+      gpxLayerIdsRef.current.clear();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapboxToken, showMap]);
+
+  // Keep GPX track lines in sync when files are added or removed mid-session.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const sync = () => syncGpxLayers(map, gpxFilesRef.current, gpxLayerIdsRef.current);
+    if (map.isStyleLoaded()) sync();
+    else map.once("idle", sync);
+  }, [session.gpxFiles]);
 
   // Sync markers whenever coords or selection changes
   useEffect(() => {
@@ -299,9 +355,10 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
   }
 
   function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter" && suggestions.length > 0) {
-      handleSuggestionSelect(suggestions[0]);
-    }
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (suggestions.length > 0) handleSuggestionSelect(suggestions[0]);
+    e.currentTarget.blur();
   }
 
   async function handleSuggestionSelect(feature: GeocodingFeature) {
@@ -396,6 +453,7 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                 onChange={handleSearchChange}
                 onKeyDown={handleSearchKeyDown}
                 onFocus={() => suggestions.length > 0 && setSuggestionsOpen(true)}
+                onBlur={() => setSuggestionsOpen(false)}
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
@@ -510,6 +568,19 @@ export function LocationSection({ selectedPhotos, onOpenSettings }: LocationSect
                   Locate Photos on GPX
                 </button>
               </div>
+            )}
+
+            {scrubConfirm?.plan.confirm && (
+              <ConfirmDialog
+                title={scrubConfirm.plan.confirm.fromTrack ? "Set from GPX Track" : "Set Location"}
+                message={scrubConfirmMessage(scrubConfirm.plan.confirm)}
+                confirmLabel="Set"
+                onConfirm={() => {
+                  applyScrub(scrubConfirm.plan, scrubConfirm.snap);
+                  setScrubConfirm(null);
+                }}
+                onCancel={() => setScrubConfirm(null)}
+              />
             )}
 
             {gpxLocateDialog && (

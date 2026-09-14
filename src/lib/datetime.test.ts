@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  withDerivedOffset,
   utcOffsetFor,
   toUtcSeconds,
   shiftWallClock,
@@ -388,5 +389,37 @@ describe("wallClockFromUtcSeconds", () => {
 
   it("returns null for an unknown zone", () => {
     expect(wallClockFromUtcSeconds(1705348800, "Not/AZone")).toBeNull();
+  });
+});
+
+describe("withDerivedOffset", () => {
+  const blank = { captureDate: null, captureTime: null, timezone: null, utcOffset: null };
+
+  it("returns the same object when no offset input is touched", () => {
+    const changes = { gpsLat: 1 };
+    expect(withDerivedOffset(blank, changes)).toBe(changes);
+  });
+
+  it("resolves the offset at the resulting instant", () => {
+    expect(
+      withDerivedOffset({ ...blank, timezone: "America/Denver" }, { captureDate: "2026-07-03" })
+    ).toEqual({ captureDate: "2026-07-03", utcOffset: "-06:00" });
+  });
+
+  it("yields a null offset when a zone is set without a date", () => {
+    expect(withDerivedOffset(blank, { timezone: "America/Denver" })).toEqual({
+      timezone: "America/Denver", utcOffset: null,
+    });
+  });
+
+  it("clears the offset when the zone is cleared", () => {
+    const current = { ...blank, captureDate: "2026-07-03", timezone: "America/Denver", utcOffset: "-06:00" };
+    expect(withDerivedOffset(current, { timezone: null })).toEqual({ timezone: null, utcOffset: null });
+  });
+
+  it("does not add an offset when there is no zone before or after", () => {
+    const current = { ...blank, captureDate: "2026-07-03", utcOffset: "+09:00" };
+    const changes = { captureTime: "11:00:00" };
+    expect(withDerivedOffset(current, changes)).toBe(changes);
   });
 });

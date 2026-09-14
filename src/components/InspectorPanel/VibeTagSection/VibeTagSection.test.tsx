@@ -49,7 +49,7 @@ const baseSession: SessionState = {
   photos: [],
   selectedIds: new Set(["p1"]),
   gpxFiles: [],
-  selectedGpxId: null,
+  selectedGpxIds: new Set(),
   applyInProgress: false,
   canRollback: false,
   metadataHistory: [],

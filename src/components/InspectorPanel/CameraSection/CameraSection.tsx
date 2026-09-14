@@ -26,6 +26,8 @@ interface CameraSectionProps {
 interface MultiValueConfirm {
   changes: Partial<Metadata>;
   count: number;
+  /** The selection the edit was made for; it may change while the dialog is open. */
+  ids: string[];
 }
 
 export function sortedEntries(entries: CorpusEntry[]): CorpusEntry[] {
@@ -75,15 +77,15 @@ export function CameraSection({ selectedPhotos }: CameraSectionProps) {
   ) {
     if (currentValue === "multiple") {
       const count = new Set(selectedPhotos.map((p) => getField(p.currentMetadata))).size;
-      setMultiConfirm({ changes, count });
+      setMultiConfirm({ changes, count, ids: selectedIds });
     } else {
-      applyChanges(changes);
+      applyChanges(changes, selectedIds);
     }
   }
 
-  function applyChanges(changes: Partial<Metadata>) {
-    sessionDispatch({ type: "SET_PENDING", ids: selectedIds, changes });
-    persistPending(selectedIds, changes);
+  function applyChanges(changes: Partial<Metadata>, ids: string[]) {
+    sessionDispatch({ type: "SET_PENDING", ids, changes });
+    persistPending(ids, changes);
   }
 
   function handleMakeSelect(value: string) {
@@ -286,7 +288,7 @@ export function CameraSection({ selectedPhotos }: CameraSectionProps) {
           }
           confirmLabel="Overwrite"
           onConfirm={() => {
-            applyChanges(multiConfirm.changes);
+            applyChanges(multiConfirm.changes, multiConfirm.ids);
             setMultiConfirm(null);
           }}
           onCancel={() => setMultiConfirm(null)}

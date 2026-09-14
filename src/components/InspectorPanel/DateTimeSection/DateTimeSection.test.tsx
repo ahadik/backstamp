@@ -5,6 +5,7 @@ import {
   parseTimeInput,
   formatTimeDisplay,
 } from "./DateTimeSection";
+import { commitInspectorEdits } from "../../../lib/inspectorUtils";
 import type { Photo, Metadata, SessionState } from "../../../state/SessionContext";
 
 vi.mock("../../../state/SessionContext", () => ({
@@ -21,7 +22,7 @@ const baseMetadata: Metadata = {
 };
 
 const emptySessionState: SessionState = {
-  photos: [], selectedIds: new Set(), gpxFiles: [], selectedGpxId: null,
+  photos: [], selectedIds: new Set(), gpxFiles: [], selectedGpxIds: new Set(),
   applyInProgress: false, canRollback: false, metadataHistory: [],
 };
 
@@ -251,6 +252,38 @@ describe("DateTimeSection", () => {
       });
     });
 
+    it("Enter commits the typed time and drops focus", () => {
+      render(<DateTimeSection selectedPhotos={[makePhoto()]} />);
+      const input = timeInput();
+      input.focus();
+      fireEvent.change(input, { target: { value: "9:30am" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(mockDispatch).toHaveBeenCalledWith({
+        type: "SET_PENDING",
+        ids: ["p1"],
+        changes: { captureTime: "09:30:00" },
+      });
+      expect(document.activeElement).not.toBe(input);
+    });
+
+    it("commitInspectorEdits saves a half-typed time for the outgoing selection", () => {
+      render(
+        <div id="inspector-panel">
+          <DateTimeSection selectedPhotos={[makePhoto()]} />
+        </div>
+      );
+      const input = timeInput();
+      input.focus();
+      fireEvent.change(input, { target: { value: "4pm" } });
+      commitInspectorEdits();
+      expect(mockDispatch).toHaveBeenCalledWith({
+        type: "SET_PENDING",
+        ids: ["p1"],
+        changes: { captureTime: "16:00:00" },
+      });
+      expect(document.activeElement).not.toBe(input);
+    });
+
     it("dispatches captureTime: null on blur with an empty string", () => {
       render(<DateTimeSection selectedPhotos={[makePhoto({ captureTime: "09:30:00" })]} />);
       const input = screen.getByDisplayValue("9:30 AM") as HTMLInputElement;
@@ -354,6 +387,61 @@ describe("DateTimeSection timezone field", () => {
 });
 
 // ── Offset row ────────────────────────────────────────────────────────────────
+
+describe("DateTimeSection timezone keyboard", () => {
+  function tzInput(): HTMLInputElement {
+    return document.querySelector('input[class*="tzInput"]') as HTMLInputElement;
+  }
+
+  it("Enter picks the first matching zone and drops focus", () => {
+    render(<DateTimeSection selectedPhotos={[makePhoto({ captureDate: "2024-07-01" })]} />);
+    const input = tzInput();
+    input.focus();
+    fireEvent.change(input, { target: { value: "anchorage" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: "SET_PENDING_BATCH",
+      updates: [{ id: "p1", changes: { timezone: "America/Anchorage", utcOffset: "-08:00" } }],
+    });
+    expect(document.activeElement).not.toBe(input);
+    expect(screen.queryByText("No timezones match")).not.toBeInTheDocument();
+  });
+
+  it("Enter with no match closes the list without changing the zone", () => {
+    render(<DateTimeSection selectedPhotos={[makePhoto({ timezone: "America/Anchorage" })]} />);
+    const input = tzInput();
+    input.focus();
+    fireEvent.change(input, { target: { value: "zzzz" } });
+    expect(screen.getByText("No timezones match")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(mockDispatch).not.toHaveBeenCalled();
+    expect(screen.queryByText("No timezones match")).not.toBeInTheDocument();
+  });
+
+  it("blurring closes the list and restores the display value", () => {
+    render(<DateTimeSection selectedPhotos={[makePhoto({ timezone: "America/Anchorage" })]} />);
+    const input = tzInput();
+    input.focus();
+    fireEvent.change(input, { target: { value: "lon" } });
+    fireEvent.blur(input);
+    expect(mockDispatch).not.toHaveBeenCalled();
+    expect(input.value).toContain("Alaska");
+  });
+
+  it("applies a reconciled zone to the photos the dialog opened for, not the current selection", () => {
+    const alaska = () => makePhoto({ captureDate: "2026-08-03", captureTime: "10:02:00", utcOffset: "-08:00" });
+    const { rerender } = render(<DateTimeSection selectedPhotos={[alaska()]} />);
+    fireEvent.focus(tzInput());
+    fireEvent.mouseDown(screen.getByText("US Pacific · PDT UTC−7"));
+    expect(screen.getByText("Timezone Changes UTC Offset")).toBeInTheDocument();
+    // Selection moves on while the dialog is up.
+    const other = { ...alaska(), id: "p2" };
+    rerender(<DateTimeSection selectedPhotos={[other]} />);
+    fireEvent.click(screen.getByText("Confirm"));
+    const batch = mockDispatch.mock.calls.find((c) => c[0].type === "SET_PENDING_BATCH")?.[0];
+    expect(batch.updates.map((u: { id: string }) => u.id)).toEqual(["p1"]);
+  });
+});
 
 describe("DateTimeSection offset row", () => {
   function photoWith(id: string, metadata: Partial<Metadata>): Photo {
@@ -574,6 +662,19 @@ describe("DateTimeSection timezone offset reconciliation", () => {
         { id: "p1", changes: { timezone: "America/Denver", utcOffset: "-07:00" } },
         { id: "p2", changes: { timezone: "America/Denver", utcOffset: "-06:00" } },
       ],
+    });
+  });
+});
+
+describe("DateTimeSection timezone on an undated photo", () => {
+  it("records a null offset when a zone is chosen for a photo with no date", () => {
+    render(<DateTimeSection selectedPhotos={[makePhoto()]} />);
+    const tzInput = document.querySelector('input[class*="tzInput"]') as HTMLInputElement;
+    fireEvent.focus(tzInput);
+    fireEvent.mouseDown(screen.getByText("US Mountain"));
+    expect(mockDispatch).toHaveBeenCalledWith({
+      type: "SET_PENDING_BATCH",
+      updates: [{ id: "p1", changes: { timezone: "America/Denver", utcOffset: null } }],
     });
   });
 });

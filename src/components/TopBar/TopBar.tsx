@@ -16,6 +16,7 @@ interface TopBarProps {
   setApplyPhase: (phase: ApplyPhase) => void;
 }
 
+
 function mapLoadedPhoto(p: {
   id: string;
   filePath: string;

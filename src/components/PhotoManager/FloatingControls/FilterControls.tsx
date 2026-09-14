@@ -3,7 +3,6 @@ import { useUI } from "../../../state/UIContext";
 import { useSession } from "../../../state/SessionContext";
 import {
   cameraOptionsFrom,
-  hasActiveFilters,
   photoDateRange,
 } from "../../../state/selectors";
 import styles from "./FilterControls.module.css";
@@ -11,13 +10,16 @@ import styles from "./FilterControls.module.css";
 type PanelId = "time" | "camera";
 
 /**
- * Metadata filter controls for the top bar: a Time panel (after/before dates)
- * and a Camera panel (values present in the session). Filters apply as values
+ * Metadata filter controls for the top bar. Collapsed, only a funnel icon
+ * shows; activating it slides the Time and Camera dropdowns out to the left.
+ * Deactivating the icon slides them away and clears all filters, so the
+ * collapsed state always means "nothing filtered". Filters apply as values
  * change — panels close on outside click, no apply step.
  */
 export function FilterControls() {
   const { state: ui, dispatch: uiDispatch } = useUI();
   const { state: session } = useSession();
+  const [expanded, setExpanded] = useState(false);
   const [openPanel, setOpenPanel] = useState<PanelId | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -66,107 +68,119 @@ export function FilterControls() {
     setOpenPanel((open) => (open === panel ? null : panel));
   }
 
+  function toggleExpanded() {
+    setOpenPanel(null);
+    if (expanded) uiDispatch({ type: "RESET_PHOTO_FILTERS" });
+    setExpanded((v) => !v);
+  }
+
   return (
     <div className={styles.filterControls} ref={rootRef}>
-      <div className={styles.dropdownWrapper}>
+      <div
+        className={`${styles.tray} ${expanded ? styles.trayExpanded : ""}`}
+        inert={!expanded}
+      >
         <button
           className={`btn btn-glass ${timeActive ? styles.activeButton : ""}`}
           onClick={() => togglePanel("time")}
         >
           Time ▾
         </button>
-        {openPanel === "time" && (
-          <div className={styles.panel}>
-            {/* Unset bounds display the session's first/last photo dates, so the
-                panel opens showing the full range rather than empty inputs. */}
-            <label className={styles.dateField}>
-              <span className={styles.fieldLabel}>On or after</span>
-              <input
-                type="date"
-                className={styles.dateInput}
-                value={filters.dateAfter ?? dateRange?.min ?? ""}
-                min={dateRange?.min}
-                max={filters.dateBefore ?? dateRange?.max}
-                onChange={(e) => setDate("dateAfter", e.target.value)}
-              />
-            </label>
-            <label className={styles.dateField}>
-              <span className={styles.fieldLabel}>On or before</span>
-              <input
-                type="date"
-                className={styles.dateInput}
-                value={filters.dateBefore ?? dateRange?.max ?? ""}
-                min={filters.dateAfter ?? dateRange?.min}
-                max={dateRange?.max}
-                onChange={(e) => setDate("dateBefore", e.target.value)}
-              />
-            </label>
-            <div className={styles.panelFooter}>
-              <button
-                className="btn btn-ghost"
-                disabled={!timeActive}
-                onClick={() =>
-                  uiDispatch({
-                    type: "SET_PHOTO_FILTERS",
-                    filters: { dateAfter: null, dateBefore: null },
-                  })
-                }
-              >
-                Reset
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className={styles.dropdownWrapper}>
         <button
           className={`btn btn-glass ${cameraActive ? styles.activeButton : ""}`}
           onClick={() => togglePanel("camera")}
         >
           Camera ▾
         </button>
-        {openPanel === "camera" && (
-          <div className={styles.panel}>
-            <div className={styles.optionList}>
-              {cameraOptions.map((option) => (
-                <label key={option.key} className={styles.optionRow}>
-                  <input
-                    type="checkbox"
-                    checked={selectedCameras.has(option.key)}
-                    onChange={() => toggleCamera(option.key)}
-                  />
-                  <span className={styles.optionLabel}>{option.label}</span>
-                  <span className={styles.optionCount}>{option.count}</span>
-                </label>
-              ))}
-            </div>
-            <div className={styles.panelFooter}>
-              <button
-                className="btn btn-ghost"
-                disabled={!cameraActive}
-                onClick={() =>
-                  uiDispatch({ type: "SET_PHOTO_FILTERS", filters: { cameras: null } })
-                }
-              >
-                Reset
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
-      {hasActiveFilters(filters) && (
-        <button
-          className={`btn btn-ghost ${styles.clearAll}`}
-          title="Reset all filters"
-          onClick={() => {
-            setOpenPanel(null);
-            uiDispatch({ type: "RESET_PHOTO_FILTERS" });
-          }}
-        >
-          Clear Filters
-        </button>
+      <button
+        className={`${styles.iconButton} ${expanded ? styles.iconButtonActive : ""}`}
+        title={expanded ? "Deactivate filters" : "Filter photos"}
+        aria-label={expanded ? "Deactivate filters" : "Filter photos"}
+        aria-expanded={expanded}
+        onClick={toggleExpanded}
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M1.5 2.5h13l-5 6v4.5l-3 1.5V8.5l-5-6z"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+
+      {expanded && openPanel === "time" && (
+        <div className={styles.panel}>
+          {/* Unset bounds display the session's first/last photo dates, so the
+              panel opens showing the full range rather than empty inputs. */}
+          <label className={styles.dateField}>
+            <span className={styles.fieldLabel}>On or after</span>
+            <input
+              type="date"
+              className={styles.dateInput}
+              value={filters.dateAfter ?? dateRange?.min ?? ""}
+              min={dateRange?.min}
+              max={filters.dateBefore ?? dateRange?.max}
+              onChange={(e) => setDate("dateAfter", e.target.value)}
+            />
+          </label>
+          <label className={styles.dateField}>
+            <span className={styles.fieldLabel}>On or before</span>
+            <input
+              type="date"
+              className={styles.dateInput}
+              value={filters.dateBefore ?? dateRange?.max ?? ""}
+              min={filters.dateAfter ?? dateRange?.min}
+              max={dateRange?.max}
+              onChange={(e) => setDate("dateBefore", e.target.value)}
+            />
+          </label>
+          <div className={styles.panelFooter}>
+            <button
+              className="btn btn-ghost"
+              disabled={!timeActive}
+              onClick={() =>
+                uiDispatch({
+                  type: "SET_PHOTO_FILTERS",
+                  filters: { dateAfter: null, dateBefore: null },
+                })
+              }
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
+
+      {expanded && openPanel === "camera" && (
+        <div className={styles.panel}>
+          <div className={styles.optionList}>
+            {cameraOptions.map((option) => (
+              <label key={option.key} className={styles.optionRow}>
+                <input
+                  type="checkbox"
+                  checked={selectedCameras.has(option.key)}
+                  onChange={() => toggleCamera(option.key)}
+                />
+                <span className={styles.optionLabel}>{option.label}</span>
+                <span className={styles.optionCount}>{option.count}</span>
+              </label>
+            ))}
+          </div>
+          <div className={styles.panelFooter}>
+            <button
+              className="btn btn-ghost"
+              disabled={!cameraActive}
+              onClick={() =>
+                uiDispatch({ type: "SET_PHOTO_FILTERS", filters: { cameras: null } })
+              }
+            >
+              Reset
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
